@@ -51,8 +51,8 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Todo Life on the Pond
-  epic-2: backlog
-  2-1-backend-todo-crud-api: backlog
+  epic-2: in-progress
+  2-1-backend-todo-crud-api: review
   2-2-lily-pad-creation-the-drop: backlog
   2-3-completion-egg-hatch-to-complete: backlog
   2-4-delete-aphid-interruptible-eating: backlog
