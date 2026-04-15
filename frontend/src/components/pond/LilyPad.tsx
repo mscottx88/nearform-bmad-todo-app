@@ -1,8 +1,13 @@
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
+import { useUpdateTodo } from '../../api/todoApi';
+import { useCreateCreature, useDeleteCreature } from '../../api/creatureApi';
+import { CompletionEgg } from '../creatures/CompletionEgg';
+import { Firefly } from '../creatures/creatures/Firefly';
+import { WaterStrider } from '../creatures/creatures/WaterStrider';
 
 type DropPhase = 'forming' | 'dropping' | 'settling' | 'pulsing' | 'resting';
 
@@ -13,6 +18,8 @@ const DROP_DURATION = 0.3;
 const SETTLE_DURATION = 0.4;
 const PULSE_DURATION = 1.2; // 3 pulses over ~1.2 seconds
 const PAD_RADIUS = 1.0;
+const COMPLETED_Y = -0.1;
+const COMPLETION_LERP = 0.05;
 const RIM_HEIGHT = 0.07;
 const SEGMENTS = 48;
 const NOTCH_ANGLE = 0.08;
@@ -115,6 +122,12 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   const isRecent = Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS;
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
+  const padMeshRef = useRef<THREE.Mesh>(null);
+  const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
+  const updateTodo = useUpdateTodo();
+  const createCreature = useCreateCreature();
+  const deleteCreature = useDeleteCreature();
+  const [creatureType, setCreatureType] = useState<string | null>(null);
   const phaseRef = useRef<DropPhase>(isRecent ? 'forming' : 'resting');
   const phaseTimer = useRef(0);
   const driftSeed = useRef(Math.random() * Math.PI * 2);
@@ -127,6 +140,26 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   const posZ = todo.positionY ?? 0;
   const color = todo.color || '#00eeff';
   const colorVec = useMemo(() => new THREE.Color(color), [color]);
+
+  // Update target Y when completion state changes
+  targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
+
+  const handleEggToggle = useCallback(() => {
+    const newCompleted = !todo.completed;
+    updateTodo.mutate({ id: todo.id, completed: newCompleted });
+    if (newCompleted) {
+      const type = Math.random() < 0.5 ? 'firefly' : 'water_strider';
+      setCreatureType(type);
+      createCreature.mutate({
+        todoId: todo.id,
+        creatureType: type,
+        rarity: 'common',
+      });
+    } else {
+      setCreatureType(null);
+      deleteCreature.mutate(todo.id);
+    }
+  }, [todo.id, todo.completed, updateTodo, createCreature, deleteCreature]);
 
   const padShape = useMemo(
     () => buildPadShape(PAD_RADIUS, SEGMENTS, driftSeed.current),
@@ -205,10 +238,30 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
       }
       const t = state.clock.elapsedTime - restStartTime.current;
       const seed = driftSeed.current;
-      const ramp = Math.min(t / 3, 1); // drift builds over 3 seconds
+      const ramp = Math.min(t / 3, 1);
       group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
       group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
-      group.position.y = DROP_Y_REST + Math.sin(t * 0.5 + seed) * 0.02 * ramp;
+      // Smooth transition between active/completed Y + gentle bob
+      const restY = THREE.MathUtils.lerp(
+        group.position.y - Math.sin(t * 0.5 + seed) * 0.01 * ramp,
+        targetY.current,
+        COMPLETION_LERP,
+      );
+      group.position.y = restY + Math.sin(t * 0.5 + seed) * 0.01 * ramp;
+
+      // Desaturate pad shader when completed
+      if (padMeshRef.current) {
+        const mat = padMeshRef.current.material as THREE.ShaderMaterial;
+        if (mat.uniforms?.uColor) {
+          const intensity = todo.completed ? 0.4 : 1.0;
+          const targetColor = new THREE.Vector3(
+            colorVec.r * intensity,
+            colorVec.g * intensity,
+            colorVec.b * intensity,
+          );
+          mat.uniforms.uColor.value.lerp(targetColor, COMPLETION_LERP);
+        }
+      }
       return;
     }
 
@@ -273,7 +326,7 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   return (
     <group ref={groupRef}>
       {/* Pad surface with procedural vein texture */}
-      <mesh geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10}>
+      <mesh ref={padMeshRef} geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10}>
         <shaderMaterial
           uniforms={padUniforms}
           vertexShader={padVertexShader}
@@ -325,6 +378,20 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
           {todo.text}
         </div>
       </Html>
+      {/* Completion egg — near the notch */}
+      <CompletionEgg
+        color={color}
+        completed={todo.completed}
+        onToggle={handleEggToggle}
+        padRadius={PAD_RADIUS}
+      />
+      {/* Hatched creature near the notch */}
+      {todo.completed && creatureType === 'firefly' && (
+        <Firefly position={[PAD_RADIUS * 0.4, 0.2, 0.1]} color={color} />
+      )}
+      {todo.completed && creatureType === 'water_strider' && (
+        <WaterStrider position={[PAD_RADIUS * 0.4, 0, 0.2]} color={color} />
+      )}
     </group>
   );
 }

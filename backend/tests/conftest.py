@@ -2,19 +2,27 @@ import pytest
 from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
-from src.database import SessionLocal, engine, get_db
+from src.database import SessionLocal, get_db
 from src.main import app
+from src.models.creature import Creature
+from src.models.group import GroupMembership
+from src.models.todo import Todo
+
+
+@pytest.fixture(autouse=True)
+def _clean_db() -> None:  # type: ignore[misc]
+    """Delete all test data before each test."""
+    with SessionLocal() as session:
+        session.query(Creature).delete()
+        session.query(GroupMembership).delete()
+        session.query(Todo).delete()
+        session.commit()
 
 
 @pytest.fixture
 def db_session() -> Session:  # type: ignore[misc]
-    connection = engine.connect()
-    transaction = connection.begin()
-    session = SessionLocal(bind=connection)
-    yield session
-    session.close()
-    transaction.rollback()
-    connection.close()
+    with SessionLocal() as session:
+        yield session
 
 
 @pytest.fixture

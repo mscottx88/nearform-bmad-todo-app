@@ -11,6 +11,27 @@ vi.mock('@react-three/drei', () => ({
   Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('../../api/todoApi', () => ({
+  useUpdateTodo: () => ({ mutate: vi.fn() }),
+}));
+
+vi.mock('../../api/creatureApi', () => ({
+  useCreateCreature: () => ({ mutate: vi.fn() }),
+  useDeleteCreature: () => ({ mutate: vi.fn() }),
+}));
+
+vi.mock('../creatures/CompletionEgg', () => ({
+  CompletionEgg: () => null,
+}));
+
+vi.mock('../creatures/creatures/Firefly', () => ({
+  Firefly: () => null,
+}));
+
+vi.mock('../creatures/creatures/WaterStrider', () => ({
+  WaterStrider: () => null,
+}));
+
 const mockTodo: Todo = {
   id: '123',
   text: 'Test todo',

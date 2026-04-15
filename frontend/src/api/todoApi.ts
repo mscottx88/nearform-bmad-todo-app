@@ -33,3 +33,25 @@ export function useCreateTodo() {
     },
   });
 }
+
+interface UpdateTodoInput {
+  id: string;
+  completed?: boolean;
+  text?: string;
+  color?: string;
+  positionX?: number;
+  positionY?: number;
+}
+
+export function useUpdateTodo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...fields }: UpdateTodoInput) => {
+      const { data } = await apiClient.patch<Todo>(`/todos/${id}`, fields);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+    },
+  });
+}
