@@ -1,6 +1,6 @@
 # Story 1.4: Empty Pond State & Design System
 
-Status: review
+Status: done
 
 ## Story
 

@@ -11,6 +11,7 @@
 
 .empty-hint__char {
   display: inline-block;
+  will-change: transform, opacity;
   animation:
     char-ripple 2.5s ease-in-out infinite,
     char-type 8s ease-out infinite;

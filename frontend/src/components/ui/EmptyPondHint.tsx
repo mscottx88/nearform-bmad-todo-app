@@ -16,6 +16,7 @@ export function EmptyPondHint() {
             key={i}
             className="empty-hint__char"
             style={{ animationDelay: `${i * 0.08}s` }}
+            aria-hidden="true"
           >
             {char === ' ' ? '\u00A0' : char}
           </span>
