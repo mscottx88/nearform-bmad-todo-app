@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { usePondStore } from '../../stores/usePondStore';
@@ -62,29 +62,33 @@ const fragmentShader = /* glsl */ `
   }
 `;
 
-const waterUniforms = {
-  uTime: { value: 0 },
-  uGlowIntensity: { value: 1.0 },
-  uNeonColor: { value: new THREE.Vector3(0.0, 0.933, 1.0) },
-};
+function createUniforms() {
+  return {
+    uTime: { value: 0 },
+    uGlowIntensity: { value: 1.0 },
+    uNeonColor: { value: new THREE.Vector3(0.0, 0.933, 1.0) },
+  };
+}
 
 export function WaterSurface() {
   const meshRef = useRef<THREE.Mesh>(null);
+  const [uniforms] = useState(createUniforms);
   const glowIntensity = usePondStore((s) => s.glowIntensity);
 
   useFrame((state) => {
-    if (meshRef.current) {
-      const material = meshRef.current.material as THREE.ShaderMaterial;
-      material.uniforms.uTime.value = state.clock.elapsedTime;
-      material.uniforms.uGlowIntensity.value = glowIntensity;
-    }
+    const mesh = meshRef.current;
+    if (!mesh || !mesh.material) return;
+    const material = mesh.material as THREE.ShaderMaterial;
+    if (!material.uniforms) return;
+    material.uniforms.uTime.value = state.clock.elapsedTime;
+    material.uniforms.uGlowIntensity.value = glowIntensity;
   });
 
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
       <planeGeometry args={[100, 100, 64, 64]} />
       <shaderMaterial
-        uniforms={waterUniforms}
+        uniforms={uniforms}
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
         wireframe

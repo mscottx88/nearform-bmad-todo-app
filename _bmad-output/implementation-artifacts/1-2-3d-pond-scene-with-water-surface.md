@@ -1,6 +1,6 @@
 # Story 1.2: 3D Pond Scene with Water Surface
 
-Status: review
+Status: done
 
 ## Story
 

@@ -1,16 +1,8 @@
-import { useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
 import { useEffect } from 'react';
+import { OrbitControls } from '@react-three/drei';
 import { usePondStore } from '../../stores/usePondStore';
 
 export function PondCamera() {
-  const { camera } = useThree();
-
-  useEffect(() => {
-    camera.position.set(0, 15, 20);
-    camera.lookAt(0, 0, 0);
-  }, [camera]);
-
   useEffect(() => {
     const handleResize = () => {
       usePondStore.getState().setViewportSize(window.innerWidth, window.innerHeight);
