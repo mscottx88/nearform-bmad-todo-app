@@ -104,7 +104,7 @@ export function WaterSurface() {
   });
 
   return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={0}>
       <planeGeometry args={[100, 100, 64, 64]} />
       <shaderMaterial
         uniforms={uniforms}
@@ -112,8 +112,7 @@ export function WaterSurface() {
         fragmentShader={fragmentShader}
         wireframe
         transparent
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
+        depthWrite
       />
     </mesh>
   );
