@@ -45,6 +45,7 @@ export function PondCamera() {
       enableDamping
       dampingFactor={0.05}
       enablePan
+      zoomToCursor
       mouseButtons={{
         LEFT: THREE.MOUSE.ROTATE,
         MIDDLE: THREE.MOUSE.PAN,
