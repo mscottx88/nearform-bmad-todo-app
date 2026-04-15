@@ -12,9 +12,9 @@ const FORM_DURATION = 0.2;
 const DROP_DURATION = 0.3;
 const SETTLE_DURATION = 0.4;
 const PAD_RADIUS = 1.0;
-const RIM_HEIGHT = 0.06;
+const RIM_HEIGHT = 0.07;
 const SEGMENTS = 48;
-const NOTCH_ANGLE = 0.08; // radians — small V-notch opening
+const NOTCH_ANGLE = 0.08;
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -24,10 +24,55 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-/**
- * Build an organic lily pad shape — irregular edge with a V-notch.
- * Returns points on the XZ plane (Y is up).
- */
+// Procedural vein shader for the lily pad surface
+const padVertexShader = /* glsl */ `
+  varying vec2 vPos;
+  void main() {
+    vPos = position.xz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const padFragmentShader = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uSeed;
+  varying vec2 vPos;
+
+  void main() {
+    // Radial veins from notch point toward edges
+    float angle = atan(vPos.y, vPos.x);
+    float dist = length(vPos);
+
+    // Main radial veins — 7-9 primary veins
+    float veins = 0.0;
+    float veinCount = 8.0;
+    float veinAngle = mod(angle * veinCount + uSeed, 3.14159) - 1.5708;
+    veins += smoothstep(0.06, 0.0, abs(veinAngle)) * 0.35;
+
+    // Secondary branching veins
+    float branchCount = 20.0;
+    float branchAngle = mod(angle * branchCount + uSeed * 2.3, 3.14159) - 1.5708;
+    float branchFade = smoothstep(0.3, 0.8, dist);
+    veins += smoothstep(0.08, 0.0, abs(branchAngle)) * 0.2 * branchFade;
+
+    // Central vein running from notch
+    float centralVein = smoothstep(0.04, 0.0, abs(vPos.y)) * smoothstep(0.0, 0.3, vPos.x);
+    veins += centralVein * 0.3;
+
+    // Base dark color with subtle green tint
+    vec3 baseColor = vec3(0.0, 0.02, 0.01);
+    // Vein color — subtle neon tinted
+    vec3 veinColor = uColor * 0.08;
+
+    vec3 finalColor = baseColor + veinColor * veins;
+
+    // Slight radial gradient — lighter at edges
+    finalColor += uColor * 0.015 * dist;
+
+    gl_FragColor = vec4(finalColor, 1.0);
+  }
+`;
+
 function buildPadShape(radius: number, segments: number, seed: number): THREE.Shape {
   const shape = new THREE.Shape();
   const notchStart = -NOTCH_ANGLE;
@@ -36,7 +81,6 @@ function buildPadShape(radius: number, segments: number, seed: number): THREE.Sh
   let first = true;
   for (let i = 0; i <= segments; i++) {
     const angle = notchEnd + (i / segments) * (Math.PI * 2 - (notchEnd - notchStart));
-    // Organic wobble on the radius — 3 harmonics seeded per-pad
     const wobble =
       1.0 +
       Math.sin(angle * 3 + seed) * 0.06 +
@@ -52,7 +96,6 @@ function buildPadShape(radius: number, segments: number, seed: number): THREE.Sh
       shape.lineTo(x, z);
     }
   }
-  // Close with a short notch inward (not to center)
   const notchDepth = radius * 0.6;
   shape.lineTo(Math.cos(notchStart) * notchDepth, Math.sin(notchStart) * notchDepth);
   shape.closePath();
@@ -76,24 +119,28 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
   const color = todo.color || '#00eeff';
+  const colorVec = useMemo(() => new THREE.Color(color), [color]);
 
   const padShape = useMemo(
     () => buildPadShape(PAD_RADIUS, SEGMENTS, driftSeed.current),
     [],
   );
 
+  // Smooth solid rim — extruded wall with enough verts for a clean surface
   const rimGeometry = useMemo(() => {
     const points = padShape.getPoints(SEGMENTS);
     const geo = new THREE.BufferGeometry();
     const vertices: number[] = [];
     const indices: number[] = [];
 
-    // Two rings of vertices: bottom edge (y=0) and top edge (y=RIM_HEIGHT)
     for (const p of points) {
+      // Bottom edge
       vertices.push(p.x, 0, p.y);
-      vertices.push(p.x, RIM_HEIGHT, p.y);
+      // Top edge — flared slightly outward for a curled lip
+      const nx = p.x * 1.04;
+      const nz = p.y * 1.04;
+      vertices.push(nx, RIM_HEIGHT, nz);
     }
-    // Connect pairs into quads
     for (let i = 0; i < points.length - 1; i++) {
       const a = i * 2;
       const b = a + 1;
@@ -110,7 +157,6 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
 
   const flatGeometry = useMemo(() => {
     const shapeGeo = new THREE.ShapeGeometry(padShape, SEGMENTS);
-    // ShapeGeometry creates on XY — rotate verts to XZ
     const pos = shapeGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -121,6 +167,11 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
     shapeGeo.computeVertexNormals();
     return shapeGeo;
   }, [padShape]);
+
+  const [padUniforms] = useState(() => ({
+    uColor: { value: new THREE.Vector3(colorVec.r, colorVec.g, colorVec.b) },
+    uSeed: { value: driftSeed.current },
+  }));
 
   useEffect(() => {
     const group = groupRef.current;
@@ -184,22 +235,27 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
 
   return (
     <group ref={groupRef}>
-      {/* Opaque black fill to occlude water beneath */}
+      {/* Pad surface with procedural vein texture */}
       <mesh geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10}>
-        <meshBasicMaterial color="#000000" side={THREE.DoubleSide} />
+        <shaderMaterial
+          uniforms={padUniforms}
+          vertexShader={padVertexShader}
+          fragmentShader={padFragmentShader}
+          side={THREE.DoubleSide}
+        />
       </mesh>
-      {/* Raised rim — wireframe for neon outline look */}
+      {/* Smooth solid raised rim — flared outward for curled lip */}
       <mesh geometry={rimGeometry} position={[0, 0.1, 0]} renderOrder={11}>
-        <meshBasicMaterial color={color} wireframe transparent opacity={0.8} />
+        <meshBasicMaterial color={color} transparent opacity={0.4} side={THREE.DoubleSide} />
       </mesh>
-      {/* Solid top edge of rim for bright outline */}
+      {/* Bright neon top edge */}
       <lineLoop renderOrder={12}>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
             args={[
               new Float32Array(
-                padShape.getPoints(SEGMENTS).flatMap((p) => [p.x, 0.1 + RIM_HEIGHT, p.y]),
+                padShape.getPoints(SEGMENTS).flatMap((p) => [p.x * 1.04, 0.1 + RIM_HEIGHT, p.y * 1.04]),
               ),
               3,
             ]}
