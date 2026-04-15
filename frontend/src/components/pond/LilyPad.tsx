@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { Todo } from '../../types';
 import { useUpdateTodo } from '../../api/todoApi';
 import { useCreateCreature, useDeleteCreature } from '../../api/creatureApi';
+import { usePondStore } from '../../stores/usePondStore';
 import { CompletionEgg } from '../creatures/CompletionEgg';
 import { Firefly } from '../creatures/creatures/Firefly';
 import { WaterStrider } from '../creatures/creatures/WaterStrider';
@@ -143,6 +144,12 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
 
   // Update target Y when completion state changes
   targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
+
+  const PAD_ZOOM_DISTANCE = 3.5; // camera distance to fill ~75% of viewport
+
+  const handlePadClick = useCallback(() => {
+    usePondStore.getState().focusCamera(posX, posZ, PAD_ZOOM_DISTANCE);
+  }, [posX, posZ]);
 
   const handleEggToggle = useCallback(() => {
     const newCompleted = !todo.completed;
@@ -326,7 +333,7 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   return (
     <group ref={groupRef}>
       {/* Pad surface with procedural vein texture */}
-      <mesh ref={padMeshRef} geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10}>
+      <mesh ref={padMeshRef} geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10} onClick={handlePadClick}>
         <shaderMaterial
           uniforms={padUniforms}
           vertexShader={padVertexShader}

@@ -1,6 +1,6 @@
 # Story 2.3: Completion Egg — Hatch to Complete
 
-Status: review
+Status: done
 
 ## Story
 

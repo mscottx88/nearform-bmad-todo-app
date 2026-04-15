@@ -1,58 +1,8 @@
-import { useRef } from 'react';
+import { useRef, useCallback, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-type EggState = 'whole' | 'cracking' | 'hatched';
-
-const CRACK_DURATION = 0.4;
-const REFORM_DURATION = 0.3;
-
-// Egg-shaped ellipsoid: taller than wide
-const EGG_RADIUS_X = 0.1;
-const EGG_RADIUS_Y = 0.15;
-
-// Procedural egg shader with spots
-const eggVertexShader = /* glsl */ `
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-  void main() {
-    vNormal = normalize(normalMatrix * normal);
-    vPosition = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const eggFragmentShader = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uOpacity;
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-
-  float spots(vec3 p) {
-    // Procedural spots using sin combinations
-    float s1 = sin(p.x * 25.0) * sin(p.y * 30.0) * sin(p.z * 20.0);
-    float s2 = sin(p.x * 15.0 + 2.0) * sin(p.y * 20.0 + 1.0);
-    return smoothstep(0.3, 0.5, s1 + s2 * 0.5);
-  }
-
-  void main() {
-    // Base shell: semi-transparent with neon tint
-    float rim = 1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0)));
-    float rimGlow = pow(rim, 2.0) * 0.6;
-
-    // Spots — darker patches on the shell
-    float spotPattern = spots(vPosition * 8.0);
-
-    vec3 shellColor = uColor * (0.3 + rimGlow);
-    vec3 spotColor = uColor * 0.1;
-    vec3 finalColor = mix(shellColor, spotColor, spotPattern * 0.4);
-
-    // Bright rim outline effect
-    finalColor += uColor * rimGlow;
-
-    gl_FragColor = vec4(finalColor, uOpacity * (0.4 + rimGlow * 0.6));
-  }
-`;
+const CRACK_DURATION = 0.8;
 
 interface CompletionEggProps {
   color: string;
@@ -67,99 +17,138 @@ export function CompletionEgg({
   onToggle,
   padRadius,
 }: CompletionEggProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const eggState = useRef<EggState>(completed ? 'hatched' : 'whole');
-  const animTimer = useRef(0);
+  const groupRef = useRef<THREE.Group>(null);
+  const leftRef = useRef<THREE.Mesh>(null);
+  const rightRef = useRef<THREE.Mesh>(null);
   const animating = useRef(false);
-
-  if (completed && eggState.current === 'whole' && !animating.current) {
-    eggState.current = 'hatched';
-  }
-  if (!completed && eggState.current === 'hatched' && !animating.current) {
-    eggState.current = 'whole';
-  }
-
-  const colorVec = new THREE.Color(color);
-  const uniforms = useRef({
-    uColor: { value: new THREE.Vector3(colorVec.r, colorVec.g, colorVec.b) },
-    uOpacity: { value: 0.85 },
-  });
+  const animTimer = useRef(0);
+  const [visualState, setVisualState] = useState<'whole' | 'cracking' | 'hatched'>(
+    completed ? 'hatched' : 'whole',
+  );
 
   useFrame((state, delta) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
+    const group = groupRef.current;
+    if (!group) return;
 
     if (animating.current) {
       animTimer.current += delta;
+      const t = Math.min(animTimer.current / CRACK_DURATION, 1);
 
-      if (eggState.current === 'cracking') {
-        const t = Math.min(animTimer.current / CRACK_DURATION, 1);
-        mesh.rotation.z = Math.sin(t * Math.PI * 6) * 0.3 * (1 - t);
-        mesh.scale.y = 1 - t * 0.5;
-        uniforms.current.uOpacity.value = 0.85 - t * 0.35;
-        if (t >= 1) {
-          eggState.current = 'hatched';
-          animating.current = false;
-          animTimer.current = 0;
-          mesh.rotation.z = 0;
+      if (visualState === 'cracking') {
+        if (t < 0.3) {
+          // Phase 1: wobble intensely
+          const wobbleT = t / 0.3;
+          group.rotation.z = Math.sin(wobbleT * Math.PI * 8) * 0.25 * (1 - wobbleT * 0.5);
+        } else if (t < 0.7) {
+          // Phase 2: split apart — two halves separate
+          group.rotation.z = 0;
+          const splitT = (t - 0.3) / 0.4;
+          if (leftRef.current && rightRef.current) {
+            leftRef.current.position.x = -splitT * 0.06;
+            leftRef.current.rotation.z = splitT * 0.3;
+            rightRef.current.position.x = splitT * 0.06;
+            rightRef.current.rotation.z = -splitT * 0.3;
+          }
+        } else {
+          // Phase 3: collapse to shell
+          const collapseT = (t - 0.7) / 0.3;
+          group.scale.y = 1 - collapseT * 0.55;
+          if (leftRef.current && rightRef.current) {
+            leftRef.current.position.x = 0.06 * (1 - collapseT);
+            rightRef.current.position.x = -0.06 * (1 - collapseT);
+            leftRef.current.rotation.z = 0.3 * (1 - collapseT);
+            rightRef.current.rotation.z = -0.3 * (1 - collapseT);
+          }
         }
-      } else if (eggState.current === 'whole' && animating.current) {
-        const t = Math.min(animTimer.current / REFORM_DURATION, 1);
-        mesh.scale.y = 0.5 + t * 0.5;
-        uniforms.current.uOpacity.value = 0.5 + t * 0.35;
+
         if (t >= 1) {
           animating.current = false;
           animTimer.current = 0;
+          group.rotation.z = 0;
+          group.scale.y = 0.45;
+          if (leftRef.current) { leftRef.current.position.x = 0; leftRef.current.rotation.z = 0; }
+          if (rightRef.current) { rightRef.current.position.x = 0; rightRef.current.rotation.z = 0; }
+          setVisualState('hatched');
         }
       }
-    } else if (eggState.current === 'whole') {
+    } else if (visualState === 'whole') {
+      // Gentle pulse
       const t = state.clock.elapsedTime;
-      const pulse = 1 + Math.sin(t * 3) * 0.06;
-      mesh.scale.set(pulse, pulse * 1.05, pulse);
+      const pulse = 1 + Math.sin(t * 2.5) * 0.04;
+      group.scale.set(pulse, pulse, pulse);
     }
   });
 
-  const handleClick = (e: THREE.Event) => {
-    (e as unknown as { stopPropagation: () => void }).stopPropagation();
-    if (animating.current) return;
+  const handleClick = useCallback(
+    (e: THREE.Event) => {
+      (e as unknown as { stopPropagation: () => void }).stopPropagation();
+      if (animating.current) return;
 
-    if (eggState.current === 'whole') {
-      eggState.current = 'cracking';
-      animating.current = true;
-      animTimer.current = 0;
-    } else if (eggState.current === 'hatched') {
-      animating.current = true;
-      animTimer.current = 0;
-      eggState.current = 'whole';
-    }
-    onToggle();
-  };
+      if (!completed) {
+        // Crack open
+        animating.current = true;
+        animTimer.current = 0;
+        setVisualState('cracking');
+      } else {
+        // Reform — instant for now
+        setVisualState('whole');
+        const group = groupRef.current;
+        if (group) { group.scale.set(1, 1, 1); }
+      }
+      onToggle();
+    },
+    [completed, onToggle],
+  );
 
-  const isHatched = eggState.current === 'hatched' && !animating.current;
+  const isShell = visualState === 'hatched';
+  const shellOpacity = isShell ? 0.15 : 0.35;
+  const spotOpacity = isShell ? 0.15 : 0.35;
 
   return (
-    <group position={[padRadius * 0.5, 0.12, 0]}>
-      <mesh
-        ref={meshRef}
-        onClick={handleClick}
-        scale={isHatched ? [1, 0.5, 1] : [1, 1, 1]}
-      >
-        <sphereGeometry args={[EGG_RADIUS_X, 12, 12]} />
-        <shaderMaterial
-          uniforms={uniforms.current}
-          vertexShader={eggVertexShader}
-          fragmentShader={eggFragmentShader}
+    <group
+      ref={groupRef}
+      position={[padRadius * 0.5, 0.14, 0]}
+      scale={isShell ? [1, 0.45, 1] : [1, 1, 1]}
+      onClick={handleClick}
+    >
+      {/* Left half of egg */}
+      <mesh ref={leftRef}>
+        <sphereGeometry args={[0.12, 12, 10, 0, Math.PI]} />
+        <meshBasicMaterial
+          color="#e0e8ff"
           transparent
+          opacity={shellOpacity}
           side={THREE.DoubleSide}
         />
       </mesh>
-      {/* Neon outline ring at egg equator */}
-      <mesh
-        rotation={[Math.PI / 2, 0, 0]}
-        position={[0, isHatched ? 0 : EGG_RADIUS_Y * 0.3, 0]}
-      >
-        <ringGeometry args={[EGG_RADIUS_X * 0.95, EGG_RADIUS_X * 1.05, 16]} />
-        <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
+      {/* Right half of egg */}
+      <mesh ref={rightRef}>
+        <sphereGeometry args={[0.12, 12, 10, Math.PI, Math.PI]} />
+        <meshBasicMaterial
+          color="#e0e8ff"
+          transparent
+          opacity={shellOpacity}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Neon spots overlay */}
+      <mesh scale={[1.05, 1.05, 1.05]}>
+        <icosahedronGeometry args={[0.12, 0]} />
+        <meshBasicMaterial
+          color={color}
+          wireframe
+          transparent
+          opacity={spotOpacity}
+        />
+      </mesh>
+      {/* Inner glow */}
+      <mesh scale={[0.5, 0.5, 0.5]}>
+        <sphereGeometry args={[0.12, 6, 6]} />
+        <meshBasicMaterial
+          color="#ffffff"
+          transparent
+          opacity={isShell ? 0.05 : 0.15}
+        />
       </mesh>
     </group>
   );

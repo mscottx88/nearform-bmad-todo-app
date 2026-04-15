@@ -26,51 +26,51 @@ so that adding a thought feels like depositing something alive into the water.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create todo API hooks (AC: #6, #7)
-  - [ ] Create `frontend/src/api/todoApi.ts`
-  - [ ] `useTodos()` — React Query `useQuery(['todos', 'list'], ...)` calling `GET /api/todos`
-  - [ ] `useCreateTodo()` — React Query `useMutation` calling `POST /api/todos` with optimistic update
-  - [ ] Optimistic: add pad immediately on mutate, roll back on error, invalidate on settle
+- [x] Task 1: Create todo API hooks (AC: #6, #7)
+  - [x] Create `frontend/src/api/todoApi.ts`
+  - [x] `useTodos()` — React Query `useQuery(['todos', 'list'], ...)` calling `GET /api/todos`
+  - [x] `useCreateTodo()` — React Query `useMutation` calling `POST /api/todos` with optimistic update
+  - [x] Optimistic: add pad immediately on mutate, roll back on error, invalidate on settle
 
-- [ ] Task 2: Create LilyPad component (AC: #2, #4, #5)
-  - [ ] Create `frontend/src/components/pond/LilyPad.tsx`
-  - [ ] Geometry: `CylinderGeometry` (radius ~1.2, height 0.08, 16 radial segments) — flat disc
-  - [ ] Material: `MeshStandardMaterial` with `emissive={todo.color}`, `emissiveIntensity=0.6`, `transparent`, `opacity=0.85`
-  - [ ] Position: `[todo.positionX, 0.05, todo.positionY]` (slightly above water)
-  - [ ] Drop animation in `useFrame`: phase state machine (forming → dropping → settling → resting)
-  - [ ] Resting drift: subtle sine-based X/Z oscillation per pad (unique seed)
-  - [ ] Text overlay via drei `<Html>`: show todo text in Inter font
+- [x] Task 2: Create LilyPad component (AC: #2, #4, #5)
+  - [x] Create `frontend/src/components/pond/LilyPad.tsx`
+  - [x] Geometry: `CylinderGeometry` (radius ~1.2, height 0.08, 16 radial segments) — flat disc
+  - [x] Material: `MeshStandardMaterial` with `emissive={todo.color}`, `emissiveIntensity=0.6`, `transparent`, `opacity=0.85`
+  - [x] Position: `[todo.positionX, 0.05, todo.positionY]` (slightly above water)
+  - [x] Drop animation in `useFrame`: phase state machine (forming → dropping → settling → resting)
+  - [x] Resting drift: subtle sine-based X/Z oscillation per pad (unique seed)
+  - [x] Text overlay via drei `<Html>`: show todo text in Inter font
 
-- [ ] Task 3: Create TodoInput component (AC: #1, #3)
-  - [ ] Create `frontend/src/components/ui/TodoInput.tsx` and `TodoInput.css`
-  - [ ] Rendered as React portal outside the Canvas
-  - [ ] Neon-styled input: `--font-mono`, `--neon-cyan` border/glow, dark background
-  - [ ] Enter submits (calls `useCreateTodo` with random position), Escape cancels
-  - [ ] Input dissolves with 100ms CSS opacity transition on submit
-  - [ ] Manages its own open/close state via a ref/callback from App
+- [x] Task 3: Create TodoInput component (AC: #1, #3)
+  - [x] Create `frontend/src/components/ui/TodoInput.tsx` and `TodoInput.css`
+  - [x] Rendered as React portal outside the Canvas
+  - [x] Neon-styled input: `--font-mono`, `--neon-cyan` border/glow, dark background
+  - [x] Enter submits (calls `useCreateTodo` with random position), Escape cancels
+  - [x] Input dissolves with 100ms CSS opacity transition on submit
+  - [x] Manages its own open/close state via a ref/callback from App
 
-- [ ] Task 4: Create useKeyboardShortcuts hook (AC: #1, #3)
-  - [ ] Create `frontend/src/hooks/useKeyboardShortcuts.ts`
-  - [ ] Listen for `N` or `/` when no input is focused → open TodoInput
-  - [ ] Skip when TodoInput is already active or any other input is focused
+- [x] Task 4: Create useKeyboardShortcuts hook (AC: #1, #3)
+  - [x] Create `frontend/src/hooks/useKeyboardShortcuts.ts`
+  - [x] Listen for `N` or `/` when no input is focused → open TodoInput
+  - [x] Skip when TodoInput is already active or any other input is focused
 
-- [ ] Task 5: Integrate into PondScene and App (AC: #2, #4, #7)
-  - [ ] In `PondScene.tsx`: fetch todos via `useTodos()`, map to `<LilyPad>` components inside Canvas
-  - [ ] Conditionally render `<EmptyPondHint>` only when `todos.length === 0`
-  - [ ] In `App.tsx`: add `<TodoInput>` alongside PondScene (outside Canvas, inside ViewportGuard)
-  - [ ] Wire keyboard shortcuts hook in App
+- [x] Task 5: Integrate into PondScene and App (AC: #2, #4, #7)
+  - [x] In `PondScene.tsx`: fetch todos via `useTodos()`, map to `<LilyPad>` components inside Canvas
+  - [x] Conditionally render `<EmptyPondHint>` only when `todos.length === 0`
+  - [x] In `App.tsx`: add `<TodoInput>` alongside PondScene (outside Canvas, inside ViewportGuard)
+  - [x] Wire keyboard shortcuts hook in App
 
-- [ ] Task 6: Extend WaterSurface for impact ripples (AC: #5)
-  - [ ] Add uniform `uDropCenter` (vec2) and `uDropTime` (float) to WaterSurface shader
-  - [ ] When a pad drops, set the drop center to the pad's XZ position and reset drop time
-  - [ ] Vertex shader adds an extra ripple from `uDropCenter` that decays over ~1s
-  - [ ] Expose a `triggerRipple(x, z)` function via a store or ref
+- [x] Task 6: Extend WaterSurface for impact ripples (AC: #5)
+  - [x] Add uniform `uDropCenter` (vec2) and `uDropTime` (float) to WaterSurface shader
+  - [x] When a pad drops, set the drop center to the pad's XZ position and reset drop time
+  - [x] Vertex shader adds an extra ripple from `uDropCenter` that decays over ~1s
+  - [x] Expose a `triggerRipple(x, z)` function via a store or ref
 
-- [ ] Task 7: Write tests (AC: all)
-  - [ ] `frontend/src/components/pond/LilyPad.test.tsx` — mock R3F, verify component mounts
-  - [ ] `frontend/src/components/ui/TodoInput.test.tsx` — verify input renders, Enter submits, Escape cancels
-  - [ ] `frontend/src/api/todoApi.test.ts` — mock axios, verify API calls
-  - [ ] Run full test suite
+- [x] Task 7: Write tests (AC: all)
+  - [x] `frontend/src/components/pond/LilyPad.test.tsx` — mock R3F, verify component mounts
+  - [x] `frontend/src/components/ui/TodoInput.test.tsx` — verify input renders, Enter submits, Escape cancels
+  - [x] `frontend/src/api/todoApi.test.ts` — mock axios, verify API calls
+  - [x] Run full test suite
 
 ## Dev Notes
 

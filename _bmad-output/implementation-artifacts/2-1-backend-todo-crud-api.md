@@ -26,50 +26,50 @@ so that the frontend can create, read, update, and delete todos reliably.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create Pydantic schemas (AC: #5, #6)
-  - [ ] Create `backend/src/schemas/__init__.py`
-  - [ ] Create `backend/src/schemas/todo.py` with `TodoCreate`, `TodoUpdate`, `TodoResponse`
-  - [ ] `TodoCreate`: `text: str` (required), `color: str | None` (optional, regex `^#[0-9a-fA-F]{6}$`), `position_x: float | None`, `position_y: float | None`
-  - [ ] `TodoUpdate`: all fields optional — `text`, `completed`, `color`, `position_x`, `position_y`
-  - [ ] `TodoResponse`: all Todo fields except `embedding` vector, with `model_config = ConfigDict(from_attributes=True)`
+- [x] Task 1: Create Pydantic schemas (AC: #5, #6)
+  - [x] Create `backend/src/schemas/__init__.py`
+  - [x] Create `backend/src/schemas/todo.py` with `TodoCreate`, `TodoUpdate`, `TodoResponse`
+  - [x] `TodoCreate`: `text: str` (required), `color: str | None` (optional, regex `^#[0-9a-fA-F]{6}$`), `position_x: float | None`, `position_y: float | None`
+  - [x] `TodoUpdate`: all fields optional — `text`, `completed`, `color`, `position_x`, `position_y`
+  - [x] `TodoResponse`: all Todo fields except `embedding` vector, with `model_config = ConfigDict(from_attributes=True)`
 
-- [ ] Task 2: Create todo service layer (AC: #1, #2, #3, #4, #7)
-  - [ ] Create `backend/src/services/__init__.py`
-  - [ ] Create `backend/src/services/todo_service.py`
-  - [ ] `create_todo(db: Session, data: TodoCreate) -> Todo` — creates with defaults, returns ORM object
-  - [ ] `list_todos(db: Session) -> list[Todo]` — filters `WHERE deleted=false AND archived=false`, ordered by `created_at DESC`
-  - [ ] `get_todo(db: Session, todo_id: UUID) -> Todo` — raises `TodoNotFoundError` if not found or deleted
-  - [ ] `update_todo(db: Session, todo_id: UUID, data: TodoUpdate) -> Todo` — partial update via `model_dump(exclude_unset=True)`
-  - [ ] `delete_todo(db: Session, todo_id: UUID) -> Todo` — sets `deleted=true`, `deleted_at=now(UTC)`, returns updated todo
+- [x] Task 2: Create todo service layer (AC: #1, #2, #3, #4, #7)
+  - [x] Create `backend/src/services/__init__.py`
+  - [x] Create `backend/src/services/todo_service.py`
+  - [x] `create_todo(db: Session, data: TodoCreate) -> Todo` — creates with defaults, returns ORM object
+  - [x] `list_todos(db: Session) -> list[Todo]` — filters `WHERE deleted=false AND archived=false`, ordered by `created_at DESC`
+  - [x] `get_todo(db: Session, todo_id: UUID) -> Todo` — raises `TodoNotFoundError` if not found or deleted
+  - [x] `update_todo(db: Session, todo_id: UUID, data: TodoUpdate) -> Todo` — partial update via `model_dump(exclude_unset=True)`
+  - [x] `delete_todo(db: Session, todo_id: UUID) -> Todo` — sets `deleted=true`, `deleted_at=now(UTC)`, returns updated todo
 
-- [ ] Task 3: Implement API route handlers (AC: #1-#7)
-  - [ ] Replace placeholder in `backend/src/api/todos.py` with full CRUD
-  - [ ] `POST /api/todos` — accepts `TodoCreate`, returns `TodoResponse`, status 201
-  - [ ] `GET /api/todos` — returns `list[TodoResponse]`, status 200
-  - [ ] `PATCH /api/todos/{todo_id}` — accepts `TodoUpdate`, returns `TodoResponse`, status 200
-  - [ ] `DELETE /api/todos/{todo_id}` — returns `TodoResponse` (soft-deleted), status 200
-  - [ ] All handlers use `Depends(get_db)` for database session
-  - [ ] All handlers are sync `def` (NOT `async def`)
+- [x] Task 3: Implement API route handlers (AC: #1-#7)
+  - [x] Replace placeholder in `backend/src/api/todos.py` with full CRUD
+  - [x] `POST /api/todos` — accepts `TodoCreate`, returns `TodoResponse`, status 201
+  - [x] `GET /api/todos` — returns `list[TodoResponse]`, status 200
+  - [x] `PATCH /api/todos/{todo_id}` — accepts `TodoUpdate`, returns `TodoResponse`, status 200
+  - [x] `DELETE /api/todos/{todo_id}` — returns `TodoResponse` (soft-deleted), status 200
+  - [x] All handlers use `Depends(get_db)` for database session
+  - [x] All handlers are sync `def` (NOT `async def`)
 
-- [ ] Task 4: Write service tests (AC: #1-#4, #7)
-  - [ ] Create `backend/tests/services/test_todo_service.py`
-  - [ ] Test create, list, get, update, delete operations
-  - [ ] Test soft-delete filter (deleted todos not returned by list)
-  - [ ] Test TodoNotFoundError for missing/deleted todos
-  - [ ] Tests need a real DB session (use the running PostgreSQL)
+- [x] Task 4: Write service tests (AC: #1-#4, #7)
+  - [x] Create `backend/tests/services/test_todo_service.py`
+  - [x] Test create, list, get, update, delete operations
+  - [x] Test soft-delete filter (deleted todos not returned by list)
+  - [x] Test TodoNotFoundError for missing/deleted todos
+  - [x] Tests need a real DB session (use the running PostgreSQL)
 
-- [ ] Task 5: Write API integration tests (AC: #1-#7)
-  - [ ] Expand `backend/tests/api/test_todos.py`
-  - [ ] Test POST creates todo with defaults, returns 201
-  - [ ] Test GET returns only active todos
-  - [ ] Test PATCH updates specific fields
-  - [ ] Test DELETE soft-deletes
-  - [ ] Test 404 for nonexistent todo
-  - [ ] Test validation errors (empty text, invalid color)
+- [x] Task 5: Write API integration tests (AC: #1-#7)
+  - [x] Expand `backend/tests/api/test_todos.py`
+  - [x] Test POST creates todo with defaults, returns 201
+  - [x] Test GET returns only active todos
+  - [x] Test PATCH updates specific fields
+  - [x] Test DELETE soft-deletes
+  - [x] Test 404 for nonexistent todo
+  - [x] Test validation errors (empty text, invalid color)
 
-- [ ] Task 6: Run all quality checks (AC: all)
-  - [ ] `ruff check`, `ruff format`, `mypy`, `pytest` all pass
-  - [ ] Verify snake_case in all responses
+- [x] Task 6: Run all quality checks (AC: all)
+  - [x] `ruff check`, `ruff format`, `mypy`, `pytest` all pass
+  - [x] Verify snake_case in all responses
 
 ## Dev Notes
 

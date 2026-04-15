@@ -15,6 +15,12 @@ vi.mock('../../api/todoApi', () => ({
   useUpdateTodo: () => ({ mutate: vi.fn() }),
 }));
 
+vi.mock('../../stores/usePondStore', () => ({
+  usePondStore: Object.assign(() => 1.0, {
+    getState: () => ({ focusCamera: vi.fn() }),
+  }),
+}));
+
 vi.mock('../../api/creatureApi', () => ({
   useCreateCreature: () => ({ mutate: vi.fn() }),
   useDeleteCreature: () => ({ mutate: vi.fn() }),

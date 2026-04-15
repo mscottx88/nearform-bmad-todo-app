@@ -9,7 +9,11 @@ vi.mock('@react-three/fiber', () => ({
   ),
   useFrame: vi.fn(),
   useThree: () => ({
-    camera: { position: { set: vi.fn() }, lookAt: vi.fn() },
+    camera: {
+      position: { set: vi.fn(), x: 0, y: 15, z: 20, clone: () => ({ sub: () => ({ normalize: () => ({ multiplyScalar: () => ({}) }) }) }), distanceTo: () => 25, copy: vi.fn(), add: vi.fn() },
+      lookAt: vi.fn(),
+    },
+    gl: { domElement: document.createElement('canvas') },
   }),
 }));
 
@@ -25,6 +29,10 @@ vi.mock('@react-three/drei', () => ({
 
 vi.mock('../../api/todoApi', () => ({
   useTodos: () => ({ data: [], isLoading: false }),
+}));
+
+vi.mock('./LilyPad', () => ({
+  LilyPad: () => null,
 }));
 
 describe('PondScene', () => {

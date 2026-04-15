@@ -23,6 +23,7 @@ interface RippleEvent {
 interface FocusTarget {
   x: number;
   z: number;
+  zoom?: number; // target camera distance, if set
 }
 
 interface PondState {
@@ -34,7 +35,7 @@ interface PondState {
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   triggerRipple: (x: number, z: number) => void;
-  focusCamera: (x: number, z: number) => void;
+  focusCamera: (x: number, z: number, zoom?: number) => void;
 }
 
 export const usePondStore = create<PondState>((set) => ({
@@ -57,6 +58,6 @@ export const usePondStore = create<PondState>((set) => ({
   triggerRipple: (x: number, z: number) =>
     set({ dropRipple: { x, z, time: performance.now() / 1000 } }),
 
-  focusCamera: (x: number, z: number) =>
-    set({ cameraFocus: { x, z } }),
+  focusCamera: (x: number, z: number, zoom?: number) =>
+    set({ cameraFocus: { x, z, zoom } }),
 }));
