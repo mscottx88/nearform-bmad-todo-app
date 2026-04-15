@@ -1,5 +1,6 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PondScene } from './PondScene';
 
 vi.mock('@react-three/fiber', () => ({
@@ -22,9 +23,18 @@ vi.mock('@react-three/drei', () => ({
   Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock('../../api/todoApi', () => ({
+  useTodos: () => ({ data: [], isLoading: false }),
+}));
+
 describe('PondScene', () => {
   it('mounts without errors', () => {
-    const { getByTestId } = render(<PondScene />);
+    const queryClient = new QueryClient();
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
     expect(getByTestId('r3f-canvas')).toBeInTheDocument();
   });
 });

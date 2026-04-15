@@ -3,13 +3,17 @@ import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
+import { useTodos } from '../../api/todoApi';
 import { WaterSurface } from './WaterSurface';
+import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 
 export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const [glError, setGlError] = useState<string | null>(null);
+  const { data: todos = [] } = useTodos();
+  const [seenIds] = useState(() => new Set<string>());
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -20,6 +24,10 @@ export function PondScene() {
     canvas.addEventListener('webglcontextrestored', () => {
       console.info('WebGL context restored');
     });
+  }, []);
+
+  const handleDropComplete = useCallback((x: number, z: number) => {
+    usePondStore.getState().triggerRipple(x, z);
   }, []);
 
   if (glError) {
@@ -51,7 +59,19 @@ export function PondScene() {
       <pointLight position={[0, 10, 0]} intensity={0.3} color="#00eeff" />
 
       <WaterSurface />
-      <EmptyPondHint />
+      {todos.length === 0 && <EmptyPondHint />}
+      {todos.map((todo) => {
+        const isNew = !seenIds.has(todo.id);
+        if (isNew) seenIds.add(todo.id);
+        return (
+          <LilyPad
+            key={todo.id}
+            todo={todo}
+            isNew={isNew}
+            onDropComplete={handleDropComplete}
+          />
+        );
+      })}
       <PondCamera />
 
       <EffectComposer>

@@ -1,0 +1,34 @@
+.todo-input-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 15vh;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.todo-input {
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid var(--neon-cyan);
+  box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  padding: 12px 24px;
+  outline: none;
+  min-width: 320px;
+  border-radius: 2px;
+  pointer-events: auto;
+  transition: opacity 100ms ease-out;
+}
+
+.todo-input::placeholder {
+  color: rgba(0, 238, 255, 0.3);
+}
+
+.todo-input--dissolving {
+  opacity: 0;
+  pointer-events: none;
+}

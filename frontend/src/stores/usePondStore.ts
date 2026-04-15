@@ -14,18 +14,27 @@ const getWindowSize = () =>
     ? { width: window.innerWidth, height: window.innerHeight }
     : { width: 1920, height: 1080 };
 
+interface RippleEvent {
+  x: number;
+  z: number;
+  time: number;
+}
+
 interface PondState {
   atmosphereMode: AtmosphereMode | 'base';
   glowIntensity: number;
   viewportSize: { width: number; height: number };
+  dropRipple: RippleEvent | null;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
+  triggerRipple: (x: number, z: number) => void;
 }
 
 export const usePondStore = create<PondState>((set) => ({
   atmosphereMode: 'base',
   glowIntensity: GLOW_INTENSITY.base,
   viewportSize: getWindowSize(),
+  dropRipple: null,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -36,4 +45,7 @@ export const usePondStore = create<PondState>((set) => ({
 
   setViewportSize: (width: number, height: number) =>
     set({ viewportSize: { width: Math.max(1, width), height: Math.max(1, height) } }),
+
+  triggerRipple: (x: number, z: number) =>
+    set({ dropRipple: { x, z, time: performance.now() / 1000 } }),
 }));
