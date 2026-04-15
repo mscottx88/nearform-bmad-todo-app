@@ -132,12 +132,19 @@ export function CursorFirefly() {
     const canvas: HTMLCanvasElement | null = canvasRef.current;
     if (!canvas) return;
 
+    const dpr = window.devicePixelRatio || 1;
     const resize = (): void => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      const c = canvas.getContext('2d');
+      if (c) c.scale(dpr, dpr);
     };
     resize();
     window.addEventListener('resize', resize);
+
+    const ctx: CanvasRenderingContext2D | null = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
 
     const onMove = (e: MouseEvent): void => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
@@ -165,10 +172,7 @@ export function CursorFirefly() {
     document.addEventListener('mouseleave', onLeave);
 
     const draw = (): void => {
-      const ctx: CanvasRenderingContext2D | null = canvas.getContext('2d');
-      if (!ctx) { rafRef.current = requestAnimationFrame(draw); return; }
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
       if (!mouseSeenRef.current) { rafRef.current = requestAnimationFrame(draw); return; }
 
@@ -238,5 +242,5 @@ export function CursorFirefly() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="cursor-firefly-canvas" />;
+  return <canvas ref={canvasRef} className="cursor-firefly-canvas" aria-hidden="true" />;
 }

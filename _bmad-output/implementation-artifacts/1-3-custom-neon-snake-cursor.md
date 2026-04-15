@@ -1,6 +1,6 @@
 # Story 1.3: Custom Neon Snake Cursor
 
-Status: review
+Status: done
 
 ## Story
 
@@ -10,11 +10,11 @@ so that every mouse movement feels immersive and part of the pond aesthetic.
 
 ## Acceptance Criteria
 
-1. **Given** the app is loaded, **When** I move my mouse anywhere in the viewport, **Then** the system cursor is hidden and replaced by a neon crosshair head with a hexagon chain tail using spring/lerp animation.
+1. **Given** the app is loaded, **When** I move my mouse anywhere in the viewport, **Then** the system cursor is hidden and replaced by a neon wireframe firefly with fluttering wings and smooth lerp-based movement.
 
-2. **Given** the cursor snake is active, **When** I move the mouse, **Then** the trail follows with smooth lerp animation and cycles through multi-color neon glow (pink, cyan, orange, green, gold) driven by movement speed.
+2. **Given** the cursor firefly is active, **When** I move the mouse, **Then** the firefly follows with smooth lerp animation, pulsates between neon green (#39ff14) and neon yellow (#eeff00), smoothly rotates toward the movement direction, and leaves a neon yellow glow-dot trail.
 
-3. **Given** the cursor snake is rendering, **When** inspecting the DOM, **Then** it renders on a separate 2D canvas overlay (z-index 9999) above the 3D scene, with `pointer-events: none` so clicks pass through.
+3. **Given** the cursor firefly is rendering, **When** inspecting the DOM, **Then** it renders on a separate 2D canvas overlay (z-index 9999) above the 3D scene, with `pointer-events: none` so clicks pass through.
 
 ## Tasks / Subtasks
 
@@ -150,8 +150,8 @@ Claude Opus 4.6 (1M context)
 
 ### File List
 
-- frontend/src/components/effects/CursorSnake.tsx (new — ported)
-- frontend/src/components/effects/CursorSnake.css (new — ported)
-- frontend/src/components/effects/CursorSnake.test.tsx (new)
+- frontend/src/components/effects/CursorFirefly.tsx (new — adapted from rag-csv-crew CursorSnake)
+- frontend/src/components/effects/CursorFirefly.css (new)
+- frontend/src/components/effects/CursorFirefly.test.tsx (new)
 - frontend/src/styles/global.css (modified — re-enabled cursor: none)
-- frontend/src/App.tsx (modified — added CursorSnake)
+- frontend/src/App.tsx (modified — added CursorFirefly)
