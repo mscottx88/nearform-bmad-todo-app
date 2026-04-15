@@ -1,6 +1,6 @@
 # Story 1.1: Project Scaffolding & Infrastructure
 
-Status: review
+Status: done
 
 ## Story
 
@@ -72,6 +72,36 @@ so that all subsequent stories have a working development environment with a sin
 - [x] Task 7: CI/CD GitHub Actions (AC: #6)
   - [x] Create `.github/workflows/ci-backend.yml` — runs on push/PR: ruff, mypy, pytest with PostgreSQL service container
   - [x] Create `.github/workflows/ci-frontend.yml` — runs on push/PR: tsc, vitest, vite build
+
+### Review Findings
+
+- [x] [Review][Decision] DateTime columns — resolved: changed to timezone-aware (`DateTime(timezone=True)`)
+
+- [x] [Review][Patch] Migration: added `CREATE EXTENSION IF NOT EXISTS vector` — fixed
+- [x] [Review][Patch] Added GIN full-text search index on `todos.text` — fixed
+- [x] [Review][Patch] Added HNSW vector similarity index on `todos.embedding` — fixed
+- [x] [Review][Patch] Partial index now uses `WHERE deleted = false` clause — fixed
+- [x] [Review][Patch] Boolean columns now have `server_default` — fixed
+- [x] [Review][Patch] CORS origins: added `.strip()` to split items — fixed
+- [x] [Review][Patch] `get_db()`: added explicit rollback/close — fixed
+- [x] [Review][Patch] Deleted premature `services/` and `schemas/` directories — fixed
+- [x] [Review][Patch] Removed premature `SearchResult`/`SearchResponse` types — fixed
+- [x] [Review][Patch] Added `pool_pre_ping=True` to engine — fixed
+- [x] [Review][Patch] Frontend API client: added error response interceptor — fixed
+- [x] [Review][Patch] Makefile `dev` target: added `trap` for clean process kill — fixed
+
+- [x] [Review][Defer] `google_api_key` defaults to empty string — no startup validation — deferred, Story 5.1
+- [x] [Review][Defer] No authentication on any endpoint — deferred, future story
+- [x] [Review][Defer] Soft delete not enforced at query layer — deferred, Story 2.1
+- [x] [Review][Defer] CI does not run migrations before tests — deferred, no DB tests yet
+- [x] [Review][Defer] `embedding_status` no DB check constraint — deferred, low priority
+- [x] [Review][Defer] `Creature.todo_id` FK lacks `ondelete` clause — deferred, soft delete pattern
+- [x] [Review][Defer] `color` field no hex format check constraint — deferred, low priority
+- [x] [Review][Defer] `updated_at` onupdate is ORM-only, not DB trigger — deferred, low priority
+- [x] [Review][Defer] `database_url` no format validation — deferred, low priority
+- [x] [Review][Defer] `archive_threshold_days` accepts 0/negative — deferred, no archive logic yet
+- [x] [Review][Defer] Frontend `VITE_API_URL` relative path won't work in production — deferred, deployment concern
+- [x] [Review][Defer] CI workflows don't trigger on root-level file changes — deferred, acceptable scope
 
 ## Dev Notes
 

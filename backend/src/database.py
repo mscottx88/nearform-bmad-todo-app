@@ -5,11 +5,21 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.config import settings
 
-engine = create_engine(settings.database_url, echo=False)
+engine = create_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+)
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def get_db() -> Generator[Session]:
-    with SessionLocal() as session:
+    session = SessionLocal()
+    try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

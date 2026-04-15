@@ -21,6 +21,9 @@ class Creature(Base):
     )
     creature_type: Mapped[str] = mapped_column(String(50), nullable=False)
     rarity: Mapped[str] = mapped_column(String(20), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
 
     __table_args__ = (UniqueConstraint("todo_id", name="uq_creatures_todo_id"),)

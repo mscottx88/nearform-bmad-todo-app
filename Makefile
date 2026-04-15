@@ -11,7 +11,7 @@ dev-frontend:
 
 dev: dev-db
 	@echo "Starting backend and frontend..."
-	cd backend && uv run uvicorn src.main:app --reload --port 8000 & cd frontend && npm run dev
+	trap 'kill 0' INT TERM; (cd backend && uv run uvicorn src.main:app --reload --port 8000) & (cd frontend && npm run dev) & wait
 
 test:
 	cd backend && uv run pytest

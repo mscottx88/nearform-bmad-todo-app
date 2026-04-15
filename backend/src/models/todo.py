@@ -1,8 +1,17 @@
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, DateTime, Float, Index, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    Index,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,19 +27,63 @@ class Todo(Base):
         server_default=func.gen_random_uuid(),
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    completed: Mapped[bool] = mapped_column(Boolean, default=False)
-    color: Mapped[str] = mapped_column(String(7), default="#00eeff")
-    position_x: Mapped[float | None] = mapped_column(Float, nullable=True)
-    position_y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completed: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=sa.text("false"),
+    )
+    color: Mapped[str] = mapped_column(
+        String(7),
+        server_default=sa.text("'#00eeff'"),
+    )
+    position_x: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+    position_y: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
     embedding = mapped_column(Vector(768), nullable=True)
-    embedding_status: Mapped[str] = mapped_column(String(20), default="pending")
-    archived: Mapped[bool] = mapped_column(Boolean, default=False)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    embedding_status: Mapped[str] = mapped_column(
+        String(20),
+        server_default=sa.text("'pending'"),
+    )
+    archived: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=sa.text("false"),
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=sa.text("false"),
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
-    __table_args__ = (Index("ix_todos_deleted_archived", "deleted", "archived"),)
+    __table_args__ = (
+        Index(
+            "ix_todos_active",
+            "deleted",
+            "archived",
+            postgresql_where=sa.text("deleted = false"),
+        ),
+        Index(
+            "ix_todos_text_search",
+            sa.text("to_tsvector('english', text)"),
+            postgresql_using="gin",
+        ),
+    )

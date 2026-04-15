@@ -32,13 +32,3 @@ export interface Creature {
 }
 
 export type AtmosphereMode = 'zen' | 'cyberpunk';
-
-export interface SearchResult {
-  todo: Todo;
-  score: number;
-}
-
-export interface SearchResponse {
-  results: SearchResult[];
-  query: string;
-}
