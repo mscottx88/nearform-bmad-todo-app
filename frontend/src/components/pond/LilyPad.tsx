@@ -4,13 +4,14 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
 
-type DropPhase = 'forming' | 'dropping' | 'settling' | 'resting';
+type DropPhase = 'forming' | 'dropping' | 'settling' | 'pulsing' | 'resting';
 
 const DROP_Y_START = 3;
 const DROP_Y_REST = 0.05;
 const FORM_DURATION = 0.2;
 const DROP_DURATION = 0.3;
 const SETTLE_DURATION = 0.4;
+const PULSE_DURATION = 1.2; // 3 pulses over ~1.2 seconds
 const PAD_RADIUS = 1.0;
 const RIM_HEIGHT = 0.07;
 const SEGMENTS = 48;
@@ -69,7 +70,8 @@ const padFragmentShader = /* glsl */ `
     // Slight radial gradient — lighter at edges
     finalColor += uColor * 0.015 * dist;
 
-    gl_FragColor = vec4(finalColor, 1.0);
+    // Slightly transparent so overlapping pads don't look harsh
+    gl_FragColor = vec4(finalColor, 0.92);
   }
 `;
 
@@ -112,11 +114,13 @@ interface LilyPadProps {
 export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   const isRecent = Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS;
   const groupRef = useRef<THREE.Group>(null);
+  const rimRef = useRef<THREE.Mesh>(null);
   const phaseRef = useRef<DropPhase>(isRecent ? 'forming' : 'resting');
   const phaseTimer = useRef(0);
   const driftSeed = useRef(Math.random() * Math.PI * 2);
   const rotationY = useRef(Math.random() * Math.PI * 2);
   const dropNotified = useRef(false);
+  const restStartTime = useRef(0);
   const [textOpacity, setTextOpacity] = useState(isRecent ? 0 : 1);
 
   const posX = todo.positionX ?? 0;
@@ -196,11 +200,15 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
     const phase = phaseRef.current;
 
     if (phase === 'resting') {
-      const t = state.clock.elapsedTime;
+      if (restStartTime.current === 0) {
+        restStartTime.current = state.clock.elapsedTime;
+      }
+      const t = state.clock.elapsedTime - restStartTime.current;
       const seed = driftSeed.current;
-      group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08;
-      group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06;
-      group.position.y = DROP_Y_REST + Math.sin(t * 0.5 + seed) * 0.02;
+      const ramp = Math.min(t / 3, 1); // drift builds over 3 seconds
+      group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
+      group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
+      group.position.y = DROP_Y_REST + Math.sin(t * 0.5 + seed) * 0.02 * ramp;
       return;
     }
 
@@ -232,6 +240,31 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
       const bounce = Math.sin(t * Math.PI) * 0.05 * (1 - t);
       group.position.set(posX, DROP_Y_REST + bounce, posZ);
       if (t >= 1) {
+        phaseTimer.current = 0;
+        phaseRef.current = 'pulsing';
+      }
+    } else if (phase === 'pulsing') {
+      const t = Math.min(phaseTimer.current / PULSE_DURATION, 1);
+      const wave = Math.sin(t * Math.PI * 6);
+      const decay = 1 - t;
+      // Scale pulse
+      group.scale.setScalar(1.0 + wave * 0.12 * decay);
+      // Rim: fade-blink between yellow glow and normal color
+      if (rimRef.current) {
+        const mat = rimRef.current.material as THREE.MeshBasicMaterial;
+        const glow = Math.max(0, wave) * decay;
+        mat.color.set(color).lerp(new THREE.Color('#ffd700'), glow);
+        mat.opacity = 0.4 + glow * 0.6;
+      }
+      if (t >= 1) {
+        group.scale.setScalar(1);
+        if (rimRef.current) {
+          const mat = rimRef.current.material as THREE.MeshBasicMaterial;
+          mat.color.set(color);
+          mat.opacity = 0.4;
+        }
+        group.position.set(posX, DROP_Y_REST, posZ);
+        restStartTime.current = 0;
         phaseRef.current = 'resting';
       }
     }
@@ -246,10 +279,11 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
           vertexShader={padVertexShader}
           fragmentShader={padFragmentShader}
           side={THREE.DoubleSide}
+          transparent
         />
       </mesh>
       {/* Smooth solid raised rim — flared outward for curled lip */}
-      <mesh geometry={rimGeometry} position={[0, 0.1, 0]} renderOrder={11}>
+      <mesh ref={rimRef} geometry={rimGeometry} position={[0, 0.1, 0]} renderOrder={11}>
         <meshBasicMaterial color={color} transparent opacity={0.4} side={THREE.DoubleSide} />
       </mesh>
       {/* Bright neon top edge */}

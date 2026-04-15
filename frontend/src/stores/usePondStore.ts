@@ -20,14 +20,21 @@ interface RippleEvent {
   time: number;
 }
 
+interface FocusTarget {
+  x: number;
+  z: number;
+}
+
 interface PondState {
   atmosphereMode: AtmosphereMode | 'base';
   glowIntensity: number;
   viewportSize: { width: number; height: number };
   dropRipple: RippleEvent | null;
+  cameraFocus: FocusTarget | null;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   triggerRipple: (x: number, z: number) => void;
+  focusCamera: (x: number, z: number) => void;
 }
 
 export const usePondStore = create<PondState>((set) => ({
@@ -35,6 +42,7 @@ export const usePondStore = create<PondState>((set) => ({
   glowIntensity: GLOW_INTENSITY.base,
   viewportSize: getWindowSize(),
   dropRipple: null,
+  cameraFocus: null,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -48,4 +56,7 @@ export const usePondStore = create<PondState>((set) => ({
 
   triggerRipple: (x: number, z: number) =>
     set({ dropRipple: { x, z, time: performance.now() / 1000 } }),
+
+  focusCamera: (x: number, z: number) =>
+    set({ cameraFocus: { x, z } }),
 }));

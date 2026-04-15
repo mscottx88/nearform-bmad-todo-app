@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useCreateTodo } from '../../api/todoApi';
+import { usePondStore } from '../../stores/usePondStore';
 import './TodoInput.css';
 
 interface TodoInputProps {
@@ -9,9 +10,12 @@ interface TodoInputProps {
 }
 
 function generatePosition(): { positionX: number; positionY: number } {
+  // Spread across a wider area, use golden-angle spiral offset for variety
+  const angle = Math.random() * Math.PI * 2;
+  const radius = 3 + Math.random() * 12;
   return {
-    positionX: (Math.random() - 0.5) * 16,
-    positionY: (Math.random() - 0.5) * 12,
+    positionX: Math.cos(angle) * radius,
+    positionY: Math.sin(angle) * radius,
   };
 }
 
@@ -39,6 +43,7 @@ export function TodoInput({ isOpen, onClose }: TodoInputProps) {
       setDissolving(true);
       const pos = generatePosition();
       createTodo.mutate({ text, ...pos });
+      usePondStore.getState().focusCamera(pos.positionX, pos.positionY);
       setTimeout(() => {
         setDissolving(false);
         onClose();
