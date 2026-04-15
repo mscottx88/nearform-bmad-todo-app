@@ -1,6 +1,6 @@
 # Story 2.1: Backend Todo CRUD API
 
-Status: review
+Status: done
 
 ## Story
 

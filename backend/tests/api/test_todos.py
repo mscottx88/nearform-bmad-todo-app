@@ -34,11 +34,15 @@ def test_create_todo_invalid_color(client: TestClient) -> None:
         json={"text": "Bad color", "color": "red"},
     )
     assert response.status_code == 422
+    data = response.json()
+    assert data["error"] == "validation_error"
+    assert "message" in data
 
 
 def test_create_todo_empty_text(client: TestClient) -> None:
     response = client.post("/api/todos", json={"text": ""})
     assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
 
 
 def test_list_todos_empty(client: TestClient) -> None:
@@ -126,6 +130,8 @@ def test_delete_todo_not_found(client: TestClient) -> None:
     fake_id = str(uuid.uuid4())
     response = client.delete(f"/api/todos/{fake_id}")
     assert response.status_code == 404
+    data = response.json()
+    assert data["error"] == "not_found"
 
 
 def test_response_uses_snake_case(client: TestClient) -> None:
