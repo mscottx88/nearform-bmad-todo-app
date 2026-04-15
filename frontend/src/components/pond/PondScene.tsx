@@ -13,7 +13,6 @@ export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [] } = useTodos();
-  const [seenIds] = useState(() => new Set<string>());
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -60,18 +59,13 @@ export function PondScene() {
 
       <WaterSurface />
       {todos.length === 0 && <EmptyPondHint />}
-      {todos.map((todo) => {
-        const isNew = !seenIds.has(todo.id);
-        if (isNew) seenIds.add(todo.id);
-        return (
-          <LilyPad
-            key={todo.id}
-            todo={todo}
-            isNew={isNew}
-            onDropComplete={handleDropComplete}
-          />
-        );
-      })}
+      {todos.map((todo) => (
+        <LilyPad
+          key={todo.id}
+          todo={todo}
+          onDropComplete={handleDropComplete}
+        />
+      ))}
       <PondCamera />
 
       <EffectComposer>

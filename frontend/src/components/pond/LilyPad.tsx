@@ -102,19 +102,22 @@ function buildPadShape(radius: number, segments: number, seed: number): THREE.Sh
   return shape;
 }
 
+const RECENT_THRESHOLD_MS = 3000;
+
 interface LilyPadProps {
   todo: Todo;
-  isNew?: boolean;
   onDropComplete?: (x: number, z: number) => void;
 }
 
-export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
+export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
+  const isRecent = Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS;
   const groupRef = useRef<THREE.Group>(null);
-  const phaseRef = useRef<DropPhase>(isNew ? 'forming' : 'resting');
+  const phaseRef = useRef<DropPhase>(isRecent ? 'forming' : 'resting');
   const phaseTimer = useRef(0);
   const driftSeed = useRef(Math.random() * Math.PI * 2);
+  const rotationY = useRef(Math.random() * Math.PI * 2);
   const dropNotified = useRef(false);
-  const [showText, setShowText] = useState(!isNew);
+  const [textOpacity, setTextOpacity] = useState(isRecent ? 0 : 1);
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
@@ -176,7 +179,8 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
   useEffect(() => {
     const group = groupRef.current;
     if (!group?.position) return;
-    if (isNew) {
+    group.rotation.y = rotationY.current;
+    if (phaseRef.current !== 'resting') {
       group.position.set(posX, DROP_Y_START, posZ);
       group.scale.setScalar(0);
     } else {
@@ -215,6 +219,7 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
       const y = DROP_Y_START + (DROP_Y_REST - DROP_Y_START) * easeInOut(t);
       group.position.set(posX, y, posZ);
       if (t >= 1) {
+        setTextOpacity(1);
         if (!dropNotified.current && onDropComplete) {
           onDropComplete(posX, posZ);
           dropNotified.current = true;
@@ -228,7 +233,6 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
       group.position.set(posX, DROP_Y_REST + bounce, posZ);
       if (t >= 1) {
         phaseRef.current = 'resting';
-        setShowText(true);
       }
     }
   });
@@ -263,31 +267,30 @@ export function LilyPad({ todo, isNew = false, onDropComplete }: LilyPadProps) {
         </bufferGeometry>
         <lineBasicMaterial color={color} linewidth={1} />
       </lineLoop>
-      {/* Text label */}
-      {showText && (
-        <Html
-          position={[0, 0.2, 0]}
-          center
-          style={{ pointerEvents: 'none' }}
+      {/* Text label — fades in on landing */}
+      <Html
+        position={[0, 0.2, 0]}
+        center
+        style={{ pointerEvents: 'none' }}
+      >
+        <div
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            color: '#ffffff',
+            fontSize: '11px',
+            textShadow: `0 0 6px ${color}`,
+            whiteSpace: 'nowrap',
+            opacity: textOpacity,
+            transition: 'opacity 200ms ease-in',
+            maxWidth: '100px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            userSelect: 'none',
+          }}
         >
-          <div
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              color: '#ffffff',
-              fontSize: '11px',
-              textShadow: `0 0 6px ${color}`,
-              whiteSpace: 'nowrap',
-              opacity: 0.9,
-              maxWidth: '100px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              userSelect: 'none',
-            }}
-          >
-            {todo.text}
-          </div>
-        </Html>
-      )}
+          {todo.text}
+        </div>
+      </Html>
     </group>
   );
 }

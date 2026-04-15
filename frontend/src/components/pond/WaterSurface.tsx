@@ -88,6 +88,7 @@ export function WaterSurface() {
   const [uniforms] = useState(createUniforms);
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const dropRipple = usePondStore((s) => s.dropRipple);
+  const lastRippleRef = useRef<number>(0);
 
   useFrame((state) => {
     const mesh = meshRef.current;
@@ -97,9 +98,10 @@ export function WaterSurface() {
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uGlowIntensity.value = glowIntensity;
 
-    if (dropRipple) {
+    if (dropRipple && dropRipple.time !== lastRippleRef.current) {
       material.uniforms.uDropCenter.value.set(dropRipple.x, dropRipple.z);
-      material.uniforms.uDropTime.value = dropRipple.time;
+      material.uniforms.uDropTime.value = state.clock.elapsedTime;
+      lastRippleRef.current = dropRipple.time;
     }
   });
 
