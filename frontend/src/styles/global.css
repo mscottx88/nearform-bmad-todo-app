@@ -13,7 +13,7 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
   background: var(--pond-dark);
-  /* cursor: none; — re-enabled in Story 1.3 when neon snake cursor is implemented */
+  cursor: none;
   font-family: 'Inter', sans-serif;
   color: var(--neon-cyan);
 }
