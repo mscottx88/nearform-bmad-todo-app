@@ -29,10 +29,10 @@ so that I experience an immersive neon pond environment from the moment the app 
 
 - [x] Task 2: Create WaterSurface component (AC: #1, #3)
   - [x] Create `frontend/src/components/pond/WaterSurface.tsx`
-  - [x] Render a `PlaneGeometry` (100x100, 128x128 segments) rotated flat (rotation-x = -PI/2)
-  - [x] Create a custom `ShaderMaterial` with uniforms: `uTime`, `uWaterColor`, `uReflectionColor`, `uGlowIntensity`
-  - [x] Vertex shader: 5-layer sine-based vertex displacement for organic ripple animation
-  - [x] Fragment shader: base water color + reflection highlights at wave peaks + emissive Bloom output
+  - [x] Render a `PlaneGeometry` (100x100, 64x64 segments) rotated flat (rotation-x = -PI/2) — wireframe mode with additive blending
+  - [x] Create a custom `ShaderMaterial` with uniforms: `uTime`, `uNeonColor`, `uGlowIntensity` — wireframe neon aesthetic (user-requested deviation from original solid surface spec)
+  - [x] Vertex shader: 5-layer circular ripple displacement for organic pond ripple animation
+  - [x] Fragment shader: neon cyan brightness modulated by ripple elevation + edge fade
   - [x] Use `useFrame` to update `uTime` each frame via material.uniforms
   - [x] Read `glowIntensity` from `usePondStore` to modulate shader emissive output
 

@@ -15,6 +15,7 @@ export function PondCamera() {
     const handleResize = () => {
       usePondStore.getState().setViewportSize(window.innerWidth, window.innerHeight);
     };
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
