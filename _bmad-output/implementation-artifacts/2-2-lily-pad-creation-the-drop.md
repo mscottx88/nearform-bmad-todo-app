@@ -1,6 +1,6 @@
 # Story 2.2: Lily Pad Creation — The Drop
 
-Status: review
+Status: done
 
 ## Story
 
