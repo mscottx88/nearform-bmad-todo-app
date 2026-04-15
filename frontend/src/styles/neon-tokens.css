@@ -1,0 +1,12 @@
+:root {
+  --neon-pink: #ff10f0;
+  --neon-cyan: #00eeff;
+  --neon-orange: #ff6600;
+  --neon-green: #39ff14;
+  --neon-gold: #ffd700;
+  --pond-dark: #000000;
+  --water-surface: rgba(0, 20, 40, 0.8);
+  --water-deep: rgba(0, 10, 25, 0.95);
+  --water-reflection: rgba(0, 238, 255, 0.05);
+  --glow-intensity: 1.0;
+}

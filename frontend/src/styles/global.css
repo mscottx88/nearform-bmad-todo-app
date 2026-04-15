@@ -1,0 +1,28 @@
+@import './neon-tokens.css';
+
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;500;600&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--pond-dark);
+  cursor: none;
+  font-family: 'Inter', sans-serif;
+  color: var(--neon-cyan);
+}
+
+::selection {
+  background: var(--neon-pink);
+  color: var(--pond-dark);
+}
+
+::-webkit-scrollbar {
+  display: none;
+}

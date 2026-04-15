@@ -2,6 +2,9 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
 [project]
 name = "hub-template-python"
 version = "0.0.1"
@@ -14,7 +17,16 @@ requires-python = ">=3.13"
 
 readme = "README.md"
 
-dependencies = []
+dependencies = [
+    "alembic>=1.18.4",
+    "fastapi>=0.135.3",
+    "pgvector>=0.4.2",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
+    "pydantic-settings>=2.13.1",
+    "sqlalchemy>=2.0.49",
+    "uvicorn>=0.44.0",
+]
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
@@ -35,6 +47,7 @@ filename = "pyproject.toml"
 [tool.ruff]
 line-length = 90
 target-version = "py313"
+exclude = [".claude", "_bmad", "_bmad-output", "backend/migrations/versions", "frontend"]
 
 [tool.ruff.lint]
 select = [
@@ -54,7 +67,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = [
+"backend/tests/*" = [
     "S101",  # asserts allowed in tests
 ]
 
@@ -83,11 +96,11 @@ strict_equality = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "tests.*"
+module = "backend.tests.*"
 disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["backend/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -95,4 +108,13 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.8.0",
+    "pre-commit>=4.0.0",
 ]
