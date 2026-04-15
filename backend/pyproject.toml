@@ -2,9 +2,6 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-include = ["backend*"]
-
 [project]
 name = "hub-template-python"
 version = "0.0.1"
@@ -47,7 +44,7 @@ filename = "pyproject.toml"
 [tool.ruff]
 line-length = 90
 target-version = "py313"
-exclude = [".claude", "_bmad", "_bmad-output", "backend/migrations/versions", "frontend"]
+exclude = [".claude", "_bmad", "_bmad-output", "migrations/versions"]
 
 [tool.ruff.lint]
 select = [
@@ -67,7 +64,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"backend/tests/*" = [
+"tests/*" = [
     "S101",  # asserts allowed in tests
 ]
 
@@ -96,11 +93,11 @@ strict_equality = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "backend.tests.*"
+module = "tests.*"
 disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

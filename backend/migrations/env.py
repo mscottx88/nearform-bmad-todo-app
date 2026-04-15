@@ -4,9 +4,9 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 # Import all models so they register with Base.metadata
-import backend.src.models  # noqa: F401
-from backend.src.config import settings
-from backend.src.models.base import Base
+import src.models  # noqa: F401
+from src.config import settings
+from src.models.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

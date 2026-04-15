@@ -4,17 +4,17 @@ on:
   push:
     paths:
       - 'backend/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
   pull_request:
     paths:
       - 'backend/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:

@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.src.models.base import Base
+from src.models.base import Base
 
 
 class Creature(Base):

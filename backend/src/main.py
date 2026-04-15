@@ -2,9 +2,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.src.api.todos import router as todos_router
-from backend.src.config import settings
-from backend.src.exceptions import AppError
+from src.api.todos import router as todos_router
+from src.config import settings
+from src.exceptions import AppError
 
 app = FastAPI(title="nearform-bmad-todo-app", version="0.1.0")
 
