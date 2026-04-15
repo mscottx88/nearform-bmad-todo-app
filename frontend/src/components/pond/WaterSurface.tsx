@@ -51,7 +51,7 @@ const fragmentShader = /* glsl */ `
   void main() {
     // Ripple crests glow brighter
     float rippleGlow = smoothstep(-0.02, 0.12, vElevation);
-    float brightness = (0.3 + rippleGlow * 0.7) * uGlowIntensity;
+    float brightness = (0.12 + rippleGlow * 0.28) * uGlowIntensity;
 
     // Fade toward edges for bounded pond feel
     float edgeFade = 1.0 - smoothstep(0.3, 0.52, length(vUv - 0.5));
