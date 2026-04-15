@@ -19,6 +19,7 @@ vi.mock('@react-three/postprocessing', () => ({
 
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
+  Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 describe('PondScene', () => {

@@ -14,7 +14,7 @@ html, body, #root {
   overflow: hidden;
   background: var(--pond-dark);
   cursor: none;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-sans);
   color: var(--neon-cyan);
 }
 

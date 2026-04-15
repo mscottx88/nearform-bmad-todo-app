@@ -9,4 +9,11 @@
   --water-deep: rgba(0, 10, 25, 0.95);
   --water-reflection: rgba(0, 238, 255, 0.05);
   --glow-intensity: 1.0;
+
+  /* Typography */
+  --font-mono: 'Share Tech Mono', monospace;
+  --font-sans: 'Inter', sans-serif;
+
+  /* Z-layers */
+  --z-cursor: 9999;
 }

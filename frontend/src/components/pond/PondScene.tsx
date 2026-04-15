@@ -5,6 +5,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
 import { WaterSurface } from './WaterSurface';
 import { PondCamera } from './PondCamera';
+import { EmptyPondHint } from '../ui/EmptyPondHint';
 
 export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
@@ -50,6 +51,7 @@ export function PondScene() {
       <pointLight position={[0, 10, 0]} intensity={0.3} color="#00eeff" />
 
       <WaterSurface />
+      <EmptyPondHint />
       <PondCamera />
 
       <EffectComposer>

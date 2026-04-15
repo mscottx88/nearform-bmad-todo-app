@@ -1,17 +1,6 @@
-import { useEffect } from 'react';
 import { OrbitControls } from '@react-three/drei';
-import { usePondStore } from '../../stores/usePondStore';
 
 export function PondCamera() {
-  useEffect(() => {
-    const handleResize = () => {
-      usePondStore.getState().setViewportSize(window.innerWidth, window.innerHeight);
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   return (
     <OrbitControls
       target={[0, 0, 0]}
