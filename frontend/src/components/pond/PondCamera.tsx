@@ -24,8 +24,6 @@ export function PondCamera() {
   const targetVec = useRef(new THREE.Vector3(0, 0, 0));
   const animating = useRef(false);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
-  const priorFocus = useRef<{ x: number; z: number; distance: number } | null>(null);
-  const prevPopupId = useRef<string | null>(null);
 
   const cancelAnimation = useCallback(() => {
     animating.current = false;
@@ -88,51 +86,17 @@ export function PondCamera() {
     };
   }, [gl, handlePointerDown, handlePointerUp, handleWheel]);
 
-  // Capture prior camera focus on popup open; restore it on popup close
-  useEffect(() => {
-    const unsubscribe = usePondStore.subscribe((state) => {
-      const controls = controlsRef.current;
-      if (!controls) return;
-      const currentPopup = state.activePopupTodoId;
-
-      // Popup just opened (was null → non-null): capture prior camera state
-      if (prevPopupId.current === null && currentPopup !== null) {
-        priorFocus.current = {
-          x: controls.target.x,
-          z: controls.target.z,
-          distance: camera.position.distanceTo(controls.target),
-        };
-      }
-
-      // Popup just closed (was non-null → null): issue return animation
-      if (prevPopupId.current !== null && currentPopup === null && priorFocus.current) {
-        usePondStore.setState({
-          cameraFocus: {
-            x: priorFocus.current.x,
-            z: priorFocus.current.z,
-            zoom: priorFocus.current.distance,
-          },
-        });
-        priorFocus.current = null;
-      }
-
-      prevPopupId.current = currentPopup;
-    });
-    return unsubscribe;
-  }, [camera]);
-
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
 
-    // New pad focus takes priority
-    if (cameraFocus && !animating.current) {
+    // New pad focus takes priority — always run the full pan+zoom animation
+    // so the clicked pad reliably ends up centered at the focus distance.
+    // Update targetVec every frame while cameraFocus is set to override any
+    // earlier target (e.g. a water-click raycast hit that fired during the
+    // same pointer event before R3F dispatched the pad's onClick).
+    if (cameraFocus) {
       targetVec.current.set(cameraFocus.x, 0, cameraFocus.z);
-      const currentDist = camera.position.distanceTo(controls.target);
-      const targetDist = cameraFocus.zoom;
-      if (targetDist && Math.abs(currentDist - targetDist) < 2) {
-        cameraFocus.zoom = undefined;
-      }
       animating.current = true;
     }
 
@@ -172,6 +136,11 @@ export function PondCamera() {
           usePondStore.setState({ cameraFocus: null });
         }
       }
+    } else {
+      // Keep OrbitControls' internal damping/spherical state in sync with
+      // the camera every frame, even when we're not running a focus lerp —
+      // otherwise post-animation input (wheel zoom, drag) misfires.
+      controls.update();
     }
   });
 

@@ -1,0 +1,76 @@
+/* The outer drei <Html> container sits at the projected pad position.
+   `.action-popup` is a zero-size anchor; the SVG callout and panel position
+   themselves absolutely from this anchor so the whole thing follows the pad
+   as the camera moves. */
+.action-popup {
+  position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  font-family: var(--font-mono);
+}
+
+.action-popup__callout {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform: translateY(-100%);
+}
+
+.action-popup__callout line {
+  stroke: var(--neon-cyan);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 4px var(--neon-cyan));
+}
+
+.action-popup__panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  min-width: 140px;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 2px;
+  box-shadow:
+    0 0 8px var(--neon-cyan),
+    0 0 16px rgba(0, 238, 255, 0.35),
+    inset 0 0 6px rgba(0, 238, 255, 0.08);
+  pointer-events: auto;
+  user-select: none;
+}
+
+.action-popup__button {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: var(--neon-cyan);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  /* Global CSS hides the system cursor in favor of the neon firefly —
+     `cursor: pointer` here would reintroduce the OS arrow on hover. */
+  cursor: none;
+  text-shadow: 0 0 4px currentColor;
+  transition: background-color 100ms ease, box-shadow 100ms ease, transform 100ms ease;
+}
+
+.action-popup__button:hover {
+  background: rgba(0, 238, 255, 0.12);
+  box-shadow: 0 0 10px currentColor, inset 0 0 6px currentColor;
+}
+
+.action-popup__button:active {
+  transform: scale(0.96);
+}
+
+.action-popup__button--complete { color: var(--neon-green); }
+.action-popup__button--delete { color: var(--neon-pink); }
+.action-popup__button--set-color { color: var(--neon-cyan); }
+.action-popup__button--group { color: var(--neon-gold); }

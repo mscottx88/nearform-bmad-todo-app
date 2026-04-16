@@ -1,120 +1,86 @@
-import { useEffect, useRef, useState } from 'react';
-import { useFrame, useThree } from '@react-three/fiber';
-import { Billboard } from '@react-three/drei';
-import * as THREE from 'three';
+import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
-import { usePondStore } from '../../stores/usePondStore';
-import { PopupActionButton } from './PopupActionButton';
-
-const OFFSET_X = 1.5;
-const OFFSET_Y = 1.5;
-const OFFSET_Z = -1.5;
-const BUTTON_SPACING = 0.4;
-const MATERIALIZE_DURATION = 0.15; // seconds
-const FLIP_NDC_HIGH = 0.7;
-const FLIP_NDC_LOW = 0.3;
-
-function easeOut(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
+import './ActionPopup.css';
 
 interface ActionPopupProps {
   todo: Todo;
-  closing?: boolean;
   onComplete: () => void;
   onDelete: () => void;
   onSetColor: () => void;
   onGroup: () => void;
 }
 
+// Horizontal/vertical offset from the pad's projected screen position to the
+// top-left of the menu panel. SVG callout spans this same offset.
+const PANEL_OFFSET_X = 80;
+const PANEL_OFFSET_Y = 120;
+
 export function ActionPopup({
   todo,
-  closing = false,
   onComplete,
   onDelete,
   onSetColor,
   onGroup,
 }: ActionPopupProps) {
-  const scaleGroupRef = useRef<THREE.Group>(null);
-  const openStart = useRef<number | null>(null);
-  const closeStart = useRef<number | null>(null);
-  const cachedScale = useRef(0);
-  const [flipped, setFlipped] = useState(false);
-  const { camera } = useThree();
-  const cameraFocus = usePondStore((s) => s.cameraFocus);
-
-  const padX = todo.positionX ?? 0;
-  const padZ = todo.positionY ?? 0;
-
-  // Start materialize-in once the camera has finished focusing
-  useEffect(() => {
-    if (cameraFocus === null && openStart.current === null && !closing) {
-      openStart.current = performance.now() / 1000;
-    }
-  }, [cameraFocus, closing]);
-
-  // Start materialize-out when closing becomes true
-  useEffect(() => {
-    if (closing && closeStart.current === null) {
-      closeStart.current = performance.now() / 1000;
-    }
-  }, [closing]);
-
-  const probeVec = useRef(new THREE.Vector3());
-
-  useFrame((state) => {
-    const sg = scaleGroupRef.current;
-    if (!sg) return;
-
-    // Compute materialize scale
-    let scale = cachedScale.current;
-    if (closeStart.current !== null) {
-      const t = Math.min(
-        (state.clock.elapsedTime - closeStart.current) / MATERIALIZE_DURATION,
-        1,
-      );
-      scale = cachedScale.current * (1 - easeOut(t));
-    } else if (openStart.current !== null) {
-      const t = Math.min(
-        (state.clock.elapsedTime - openStart.current) / MATERIALIZE_DURATION,
-        1,
-      );
-      scale = easeOut(t);
-      cachedScale.current = scale;
-    } else {
-      scale = 0;
-    }
-    sg.scale.setScalar(scale);
-
-    // NDC flip check — project anchor point
-    const offsetX = flipped ? -OFFSET_X : OFFSET_X;
-    probeVec.current.set(padX + offsetX, OFFSET_Y, padZ + OFFSET_Z);
-    probeVec.current.project(camera);
-    if (!flipped && probeVec.current.x > FLIP_NDC_HIGH) {
-      setFlipped(true);
-    } else if (flipped && probeVec.current.x < -FLIP_NDC_LOW) {
-      setFlipped(false);
-    }
-  });
-
-  const anchorX = padX + (flipped ? -OFFSET_X : OFFSET_X);
-
+  // Drei <Html> with no `transform` renders a DOM overlay, positioning its
+  // top-left at the projection of the given 3D point. The panel and callout
+  // inside use absolute positioning relative to that anchor.
   return (
-    <Billboard position={[anchorX, OFFSET_Y, padZ + OFFSET_Z]}>
-      <group ref={scaleGroupRef} scale={0}>
-        <group position={[0, BUTTON_SPACING * 1.5, 0]}>
-          <PopupActionButton label="Complete" onClick={onComplete} color="#39ff14" />
-        </group>
-        <group position={[0, BUTTON_SPACING * 0.5, 0]}>
-          <PopupActionButton label="Delete" onClick={onDelete} color="#ff10f0" />
-        </group>
-        <group position={[0, -BUTTON_SPACING * 0.5, 0]}>
-          <PopupActionButton label="Set Color" onClick={onSetColor} color="#00eeff" />
-        </group>
-        <group position={[0, -BUTTON_SPACING * 1.5, 0]}>
-          <PopupActionButton label="Group" onClick={onGroup} color="#ffd700" />
-        </group>
-      </group>
-    </Billboard>
+    <Html
+      position={[todo.positionX ?? 0, 0.4, todo.positionY ?? 0]}
+      zIndexRange={[100, 0]}
+      style={{ pointerEvents: 'none' }}
+    >
+      <div className="action-popup">
+        <svg
+          className="action-popup__callout"
+          width={PANEL_OFFSET_X}
+          height={PANEL_OFFSET_Y}
+          viewBox={`0 0 ${PANEL_OFFSET_X} ${PANEL_OFFSET_Y}`}
+        >
+          <line
+            x1="0"
+            y1={PANEL_OFFSET_Y}
+            x2={PANEL_OFFSET_X}
+            y2="0"
+          />
+        </svg>
+        <div
+          className="action-popup__panel"
+          style={{
+            transform: `translate(${PANEL_OFFSET_X}px, -${PANEL_OFFSET_Y}px)`,
+          }}
+        >
+          <button
+            type="button"
+            className="action-popup__button action-popup__button--complete"
+            onClick={onComplete}
+          >
+            Complete
+          </button>
+          <button
+            type="button"
+            className="action-popup__button action-popup__button--delete"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            className="action-popup__button action-popup__button--set-color"
+            onClick={onSetColor}
+          >
+            Set Color
+          </button>
+          <button
+            type="button"
+            className="action-popup__button action-popup__button--group"
+            onClick={onGroup}
+          >
+            Group
+          </button>
+        </div>
+      </div>
+    </Html>
   );
 }

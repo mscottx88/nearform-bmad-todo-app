@@ -2,8 +2,12 @@ import axios, { type AxiosError } from 'axios';
 import camelcaseKeys from 'camelcase-keys';
 import decamelizeKeys from 'decamelize-keys';
 
+// Hardcoded to `/api` so Vite proxies to the backend in dev and a reverse
+// proxy can serve both from the same origin in prod. Avoids MSYS path-mangling
+// on Git Bash for Windows, which corrupts `/api` env values into
+// `C:/Program Files/Git/api`.
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: '/api',
 });
 
 apiClient.interceptors.response.use(
