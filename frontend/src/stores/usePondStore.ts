@@ -73,6 +73,8 @@ export const usePondStore = create<PondState>((set, get) => ({
   },
 
   closePopup: () => {
-    set({ activePopupTodoId: null });
+    // Also clear cameraFocus so a mid-focus-lerp dismiss doesn't keep
+    // animating the camera toward a pad whose popup is already gone.
+    set({ activePopupTodoId: null, cameraFocus: null });
   },
 }));

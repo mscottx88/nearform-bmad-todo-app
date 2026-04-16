@@ -150,7 +150,6 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   const handlePadClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
-      (e.nativeEvent as MouseEvent & { sceneHandled?: boolean }).sceneHandled = true;
       usePondStore.getState().openPopup(todo.id, posX, posZ);
     },
     [todo.id, posX, posZ],

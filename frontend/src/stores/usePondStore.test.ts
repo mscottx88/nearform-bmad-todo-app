@@ -52,13 +52,16 @@ describe('usePondStore', () => {
   });
 
   describe('closePopup', () => {
-    it('clears activePopupTodoId', () => {
+    it('clears activePopupTodoId and cameraFocus', () => {
       usePondStore.getState().openPopup('todo-1', 1, 1);
+      expect(usePondStore.getState().cameraFocus).not.toBeNull();
       usePondStore.getState().closePopup();
-      expect(usePondStore.getState().activePopupTodoId).toBeNull();
+      const state = usePondStore.getState();
+      expect(state.activePopupTodoId).toBeNull();
+      expect(state.cameraFocus).toBeNull();
     });
 
-    it('is a no-op on popup id when no popup is open', () => {
+    it('is a no-op when no popup is open', () => {
       usePondStore.getState().closePopup();
       expect(usePondStore.getState().activePopupTodoId).toBeNull();
     });

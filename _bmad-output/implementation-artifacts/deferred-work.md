@@ -14,3 +14,9 @@
 - `archive_threshold_days` accepts zero or negative values — no bounds validation
 - Frontend `VITE_API_URL=/api` is a relative path that only works with Vite dev proxy, not production deployments
 - CI workflows only trigger on `backend/**` and `frontend/**` paths — root-level changes (docker-compose, Makefile) go untested
+
+## Deferred from: code review of story 2-3-in-scene-action-popup (2026-04-16)
+
+- Popup is inert if its todo is removed from `useTodos` while `activePopupTodoId` is still set — `ActionPopup` unmounts but store state lingers; low-probability multi-tab/external-mutation edge case
+- No ARIA dialog semantics or focus management on the popup — screen readers get unannotated buttons; no focus trap; accessibility pass best done after scope is locked
+- SVG callout line does not re-enable `pointer-events` — clicks that land on the diagonal pass through to the canvas and close the popup via the water-click path; low-probability click target

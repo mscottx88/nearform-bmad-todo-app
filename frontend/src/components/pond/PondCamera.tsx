@@ -13,10 +13,6 @@ const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const mouseNDC = new THREE.Vector2();
 const hitPoint = new THREE.Vector3();
 
-interface SceneHandledEvent {
-  sceneHandled?: boolean;
-}
-
 export function PondCamera() {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera, gl } = useThree();
@@ -50,9 +46,6 @@ export function PondCamera() {
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
       if (Math.sqrt(dx * dx + dy * dy) > 5) return;
-
-      // If a 3D scene element (pad or popup button) absorbed this click, skip water logic
-      if ((e as PointerEvent & SceneHandledEvent).sceneHandled) return;
 
       mouseNDC.set(
         (e.clientX / window.innerWidth) * 2 - 1,
