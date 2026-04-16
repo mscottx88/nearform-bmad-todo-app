@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useFrame } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
@@ -117,9 +118,10 @@ const RECENT_THRESHOLD_MS = 3000;
 interface LilyPadProps {
   todo: Todo;
   onDropComplete?: (x: number, z: number) => void;
+  focused?: boolean;
 }
 
-export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
+export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps) {
   const isRecent = Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS;
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
@@ -145,11 +147,14 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
   // Update target Y when completion state changes
   targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
 
-  const PAD_ZOOM_DISTANCE = 3.5; // camera distance to fill ~75% of viewport
-
-  const handlePadClick = useCallback(() => {
-    usePondStore.getState().focusCamera(posX, posZ, PAD_ZOOM_DISTANCE);
-  }, [posX, posZ]);
+  const handlePadClick = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation();
+      (e.nativeEvent as MouseEvent & { sceneHandled?: boolean }).sceneHandled = true;
+      usePondStore.getState().openPopup(todo.id, posX, posZ);
+    },
+    [todo.id, posX, posZ],
+  );
 
   const handleEggToggle = useCallback(() => {
     const newCompleted = !todo.completed;
@@ -246,6 +251,10 @@ export function LilyPad({ todo, onDropComplete }: LilyPadProps) {
       const t = state.clock.elapsedTime - restStartTime.current;
       const seed = driftSeed.current;
       const ramp = Math.min(t / 3, 1);
+      // Progressive density override: ensure focused pads render at readable size
+      const targetScale = focused ? 1.2 : 1.0;
+      const currentScale = group.scale.x;
+      group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
       group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
       group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
       // Smooth transition between active/completed Y + gentle bob

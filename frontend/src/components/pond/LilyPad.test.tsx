@@ -1,7 +1,10 @@
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { LilyPad } from './LilyPad';
 import type { Todo } from '../../types';
+
+const openPopupMock = vi.fn();
+const focusCameraMock = vi.fn();
 
 vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn(),
@@ -17,7 +20,10 @@ vi.mock('../../api/todoApi', () => ({
 
 vi.mock('../../stores/usePondStore', () => ({
   usePondStore: Object.assign(() => 1.0, {
-    getState: () => ({ focusCamera: vi.fn() }),
+    getState: () => ({
+      focusCamera: focusCameraMock,
+      openPopup: openPopupMock,
+    }),
   }),
 }));
 
@@ -43,8 +49,8 @@ const mockTodo: Todo = {
   text: 'Test todo',
   completed: false,
   color: '#00eeff',
-  positionX: 0,
-  positionY: 0,
+  positionX: 5,
+  positionY: 7,
   embeddingStatus: 'pending',
   archived: false,
   archivedAt: null,
@@ -58,5 +64,14 @@ describe('LilyPad', () => {
   it('renders without errors', () => {
     const { container } = render(<LilyPad todo={mockTodo} />);
     expect(container).toBeTruthy();
+  });
+
+  it('calls openPopup with todo id and pad position when clicked', () => {
+    openPopupMock.mockClear();
+    const { container } = render(<LilyPad todo={mockTodo} />);
+    const padMesh = container.querySelector('mesh');
+    expect(padMesh).toBeTruthy();
+    if (padMesh) fireEvent.click(padMesh);
+    expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
   });
 });

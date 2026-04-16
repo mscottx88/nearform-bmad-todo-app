@@ -5,6 +5,7 @@ import { CursorFirefly } from './components/effects/CursorFirefly';
 import { ViewportGuard } from './components/ui/ViewportGuard';
 import { TodoInput } from './components/ui/TodoInput';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useClosePopupOnEscape } from './hooks/useClosePopupOnEscape';
 import './styles/global.css';
 
 const queryClient = new QueryClient();
@@ -16,6 +17,7 @@ function AppContent() {
   const closeInput = useCallback(() => setInputOpen(false), []);
 
   useKeyboardShortcuts(openInput);
+  useClosePopupOnEscape();
 
   return (
     <ViewportGuard>

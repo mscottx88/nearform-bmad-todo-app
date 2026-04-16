@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-16 # course correction after PRD simplification — egg/aphid/chameleon/trash-lizard removed, Action Popup introduced, Epic 6 deleted
+last_updated: 2026-04-16 # story 2.3 (Action Popup primitive) implemented — moved to review
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -56,7 +56,7 @@ development_status:
   epic-2: in-progress
   2-1-backend-todo-crud-api: done
   2-2-lily-pad-creation-the-drop: done
-  2-3-in-scene-action-popup: backlog  # primitive — foundation for 2.4, 2.5, and 4.1
+  2-3-in-scene-action-popup: review  # primitive — foundation for 2.4, 2.5, and 4.1
   2-4-completion-via-popup-green-flash-and-dissolve: backlog  # supersedes the done-then-obsoleted egg-hatch story below
   2-5-deletion-via-popup-red-flash-and-dissolve: backlog
   2-6-loading-and-error-states: backlog

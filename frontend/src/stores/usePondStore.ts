@@ -9,6 +9,8 @@ const GLOW_INTENSITY: Record<AtmosphereMode | 'base', number> = {
   cyberpunk: 1.4,
 };
 
+const POPUP_FOCUS_ZOOM = 4;
+
 const getWindowSize = () =>
   typeof window !== 'undefined'
     ? { width: window.innerWidth, height: window.innerHeight }
@@ -32,18 +34,22 @@ interface PondState {
   viewportSize: { width: number; height: number };
   dropRipple: RippleEvent | null;
   cameraFocus: FocusTarget | null;
+  activePopupTodoId: string | null;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   triggerRipple: (x: number, z: number) => void;
   focusCamera: (x: number, z: number, zoom?: number) => void;
+  openPopup: (todoId: string, x: number, z: number) => void;
+  closePopup: () => void;
 }
 
-export const usePondStore = create<PondState>((set) => ({
+export const usePondStore = create<PondState>((set, get) => ({
   atmosphereMode: 'base',
   glowIntensity: GLOW_INTENSITY.base,
   viewportSize: getWindowSize(),
   dropRipple: null,
   cameraFocus: null,
+  activePopupTodoId: null,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -60,4 +66,13 @@ export const usePondStore = create<PondState>((set) => ({
 
   focusCamera: (x: number, z: number, zoom?: number) =>
     set({ cameraFocus: { x, z, zoom } }),
+
+  openPopup: (todoId: string, x: number, z: number) => {
+    set({ activePopupTodoId: todoId });
+    get().focusCamera(x, z, POPUP_FOCUS_ZOOM);
+  },
+
+  closePopup: () => {
+    set({ activePopupTodoId: null });
+  },
 }));

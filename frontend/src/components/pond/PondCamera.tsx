@@ -13,6 +13,10 @@ const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const mouseNDC = new THREE.Vector2();
 const hitPoint = new THREE.Vector3();
 
+interface SceneHandledEvent {
+  sceneHandled?: boolean;
+}
+
 export function PondCamera() {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera, gl } = useThree();
@@ -20,8 +24,9 @@ export function PondCamera() {
   const targetVec = useRef(new THREE.Vector3(0, 0, 0));
   const animating = useRef(false);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const priorFocus = useRef<{ x: number; z: number; distance: number } | null>(null);
+  const prevPopupId = useRef<string | null>(null);
 
-  // Left click: track for click-vs-drag; any press cancels centering
   const cancelAnimation = useCallback(() => {
     animating.current = false;
     usePondStore.setState({ cameraFocus: null });
@@ -44,10 +49,12 @@ export function PondCamera() {
       const start = clickStart.current;
       clickStart.current = null;
 
-      // Only trigger on click (not drag)
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
       if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+
+      // If a 3D scene element (pad or popup button) absorbed this click, skip water logic
+      if ((e as PointerEvent & SceneHandledEvent).sceneHandled) return;
 
       mouseNDC.set(
         (e.clientX / window.innerWidth) * 2 - 1,
@@ -55,10 +62,16 @@ export function PondCamera() {
       );
       raycaster.setFromCamera(mouseNDC, camera);
       const hit = raycaster.ray.intersectPlane(waterPlane, hitPoint);
-      if (hit) {
-        targetVec.current.copy(hit);
-        animating.current = true;
+      if (!hit) return;
+
+      const { activePopupTodoId, closePopup } = usePondStore.getState();
+      if (activePopupTodoId !== null) {
+        closePopup();
+        return;
       }
+
+      targetVec.current.copy(hit);
+      animating.current = true;
     },
     [camera],
   );
@@ -75,6 +88,39 @@ export function PondCamera() {
     };
   }, [gl, handlePointerDown, handlePointerUp, handleWheel]);
 
+  // Capture prior camera focus on popup open; restore it on popup close
+  useEffect(() => {
+    const unsubscribe = usePondStore.subscribe((state) => {
+      const controls = controlsRef.current;
+      if (!controls) return;
+      const currentPopup = state.activePopupTodoId;
+
+      // Popup just opened (was null → non-null): capture prior camera state
+      if (prevPopupId.current === null && currentPopup !== null) {
+        priorFocus.current = {
+          x: controls.target.x,
+          z: controls.target.z,
+          distance: camera.position.distanceTo(controls.target),
+        };
+      }
+
+      // Popup just closed (was non-null → null): issue return animation
+      if (prevPopupId.current !== null && currentPopup === null && priorFocus.current) {
+        usePondStore.setState({
+          cameraFocus: {
+            x: priorFocus.current.x,
+            z: priorFocus.current.z,
+            zoom: priorFocus.current.distance,
+          },
+        });
+        priorFocus.current = null;
+      }
+
+      prevPopupId.current = currentPopup;
+    });
+    return unsubscribe;
+  }, [camera]);
+
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -82,11 +128,9 @@ export function PondCamera() {
     // New pad focus takes priority
     if (cameraFocus && !animating.current) {
       targetVec.current.set(cameraFocus.x, 0, cameraFocus.z);
-      // Skip zoom if camera is already near the target distance
       const currentDist = camera.position.distanceTo(controls.target);
       const targetDist = cameraFocus.zoom;
       if (targetDist && Math.abs(currentDist - targetDist) < 2) {
-        // Already close — just pan, no zoom
         cameraFocus.zoom = undefined;
       }
       animating.current = true;
@@ -97,7 +141,6 @@ export function PondCamera() {
       const speed = zoomDist ? LERP_SPEED * 1.5 : LERP_SPEED;
 
       if (zoomDist) {
-        // Zoom mode: lerp to exact final position (45° angle, fixed distance)
         const angle = Math.PI / 4;
         const idealTarget = targetVec.current;
         const idealCamX = idealTarget.x;
@@ -109,7 +152,6 @@ export function PondCamera() {
         camera.position.y = THREE.MathUtils.lerp(camera.position.y, idealCamY, speed);
         camera.position.z = THREE.MathUtils.lerp(camera.position.z, idealCamZ, speed);
       } else {
-        // Pan mode: slide camera and target together (preserves perspective)
         const dx = (targetVec.current.x - controls.target.x) * speed;
         const dz = (targetVec.current.z - controls.target.z) * speed;
         controls.target.x += dx;

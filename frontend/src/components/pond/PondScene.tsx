@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -8,11 +8,43 @@ import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
+import { ActionPopup } from '../ui/ActionPopup';
+
+const POPUP_CLOSE_ANIM_MS = 150;
 
 export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [] } = useTodos();
+
+  // Hold the popup id for the close animation duration after the store clears it
+  const [renderedPopupId, setRenderedPopupId] = useState<string | null>(
+    () => usePondStore.getState().activePopupTodoId,
+  );
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = usePondStore.subscribe((state, prev) => {
+      if (state.activePopupTodoId === prev.activePopupTodoId) return;
+      if (state.activePopupTodoId === null) {
+        setClosing(true);
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          setRenderedPopupId(null);
+          setClosing(false);
+        }, POPUP_CLOSE_ANIM_MS);
+      } else {
+        if (timeoutId) clearTimeout(timeoutId);
+        setRenderedPopupId(state.activePopupTodoId);
+        setClosing(false);
+      }
+    });
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      unsubscribe();
+    };
+  }, []);
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -44,6 +76,8 @@ export function PondScene() {
     );
   }
 
+  const popupTodo = renderedPopupId ? todos.find((t) => t.id === renderedPopupId) : null;
+
   return (
     <Canvas
       gl={{ antialias: true, alpha: false }}
@@ -64,8 +98,24 @@ export function PondScene() {
           key={todo.id}
           todo={todo}
           onDropComplete={handleDropComplete}
+          focused={renderedPopupId === todo.id && !closing}
         />
       ))}
+      {popupTodo && (
+        <ActionPopup
+          key={popupTodo.id}
+          todo={popupTodo}
+          closing={closing}
+          // TODO(Story 2.4): wire Complete to green-flash + dissolve completion
+          onComplete={() => console.log('Complete', popupTodo.id)}
+          // TODO(Story 2.5): wire Delete to red-flash + dissolve
+          onDelete={() => console.log('Delete', popupTodo.id)}
+          // TODO(Story 4.1): open color swatch panel
+          onSetColor={() => console.log('Set Color', popupTodo.id)}
+          // TODO(Epic 4.2): open group/ungroup flow
+          onGroup={() => console.log('Group', popupTodo.id)}
+        />
+      )}
       <PondCamera />
 
       <EffectComposer>
