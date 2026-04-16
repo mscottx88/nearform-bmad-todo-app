@@ -82,6 +82,13 @@ export function PondCamera() {
     // New pad focus takes priority
     if (cameraFocus && !animating.current) {
       targetVec.current.set(cameraFocus.x, 0, cameraFocus.z);
+      // Skip zoom if camera is already near the target distance
+      const currentDist = camera.position.distanceTo(controls.target);
+      const targetDist = cameraFocus.zoom;
+      if (targetDist && Math.abs(currentDist - targetDist) < 2) {
+        // Already close — just pan, no zoom
+        cameraFocus.zoom = undefined;
+      }
       animating.current = true;
     }
 
