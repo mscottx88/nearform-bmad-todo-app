@@ -125,67 +125,63 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 
 ### FR Coverage Map
 
+> Refreshed 2026-04-16 to match the current PRD (FR1-FR46 after simplification). The prior map referenced FR1-FR49 from the pre-simplification PRD.
+
 | FR | Epic | Description |
 |---|---|---|
-| FR1-FR7 | Epic 2 | Todo CRUD with lily pad creatures |
-| FR8-FR12 | Epic 4 | Color assignment and clustering |
-| FR13-FR24 | Epic 5 | Search and embedding pipeline |
-| FR25 | Epic 1 | 3D pond scene |
-| FR26-FR27 | Epic 7 | Ecosystem creatures |
-| FR28 | Epic 1 | Custom cursor |
-| FR29-FR31 | Epic 3 | Camera and atmosphere |
-| FR32 | Epic 2 | CRUD animations |
-| FR33-FR36 | Epic 6 | Trash lizard and archive |
-| FR37 | Epic 1 | Empty pond state |
-| FR38-FR40 | Epic 2 | Loading and error states |
-| FR41-FR42 | Epic 2 | Data persistence |
-| FR43 | Epic 5 | Vector embedding storage |
-| FR44-FR46 | Epic 8 | Sound design |
-| FR47-FR49 | Epic 1 | Dev infrastructure |
+| FR1-FR8 | Epic 2 | Todo CRUD via in-scene Action Popup (create, view, popup primitive, actions, dismiss, complete, delete, soft-state persistence) |
+| FR9-FR13 | Epic 4 | Color assignment, grouping/clustering, drag reposition (all via popup or drag) |
+| FR14-FR22 | Epic 5 | Type-anywhere hybrid search (full-text + vector, surface/submerge, camera auto-frame) |
+| FR23-FR25 | Epic 5 | Embedding generation pipeline (async via Google API) |
+| FR26 | Epic 1 | 3D neon pond surface |
+| FR27, FR28 | Epic 7 | Ecosystem creatures + rarity tiers on popup Complete |
+| FR29 | Epic 1 | Custom neon snake cursor |
+| FR30-FR32 | Epic 3 | Camera controls + atmosphere toggle |
+| FR33 | Epic 2 | Animation timings (300-500ms) |
+| FR34 | Epic 1 | Empty pond state |
+| FR35-FR37 | Epic 2 | Loading + error states + error recovery |
+| FR38, FR39 | Epic 2 | Data persistence (incl. soft-state flags) |
+| FR40 | Epic 5 | Vector embedding storage |
+| FR41-FR43 | Epic 8 | Sound design (ambient + interaction audio, toggle) |
+| FR44-FR46 | Epic 1 | Dev infrastructure (local startup, lint/typecheck CLI, CI) |
 
 ## Epic List
 
 ### Epic 1: The Living Pond
 User can open the app and see an immersive 3D neon pond with a custom cursor trail — the foundation is alive and inviting even with no todos.
-**FRs:** FR25, FR28, FR37, FR47, FR48, FR49
+**FRs:** FR26, FR29, FR34, FR44, FR45, FR46
 **ARs:** AR1-AR9
 **UX-DRs:** UX-DR1, UX-DR2, UX-DR15, UX-DR16, UX-DR20
 
 ### Epic 2: Todo Life on the Pond
-User can create, view, complete, and delete todos as lily pads floating on the pond — every action has a creature-based interaction and visual response.
-**FRs:** FR1-FR7, FR32, FR38, FR39, FR40, FR41, FR42
-**UX-DRs:** UX-DR3, UX-DR4, UX-DR5, UX-DR14, UX-DR17
+User can create, view, complete, and delete todos as lily pads floating on the pond — completion and deletion resolve through an in-scene neon wireframe action popup and a unified dissolve visual (green flash for complete, red for delete). Stories renumbered 2026-04-16 so the Action Popup primitive (2.3) precedes the Complete (2.4) and Delete (2.5) stories that depend on it.
+**FRs:** FR1, FR2, FR3, FR4, FR5, FR6, FR7, FR8, FR33, FR35, FR36, FR37, FR38, FR39
+**UX-DRs:** UX-DR3, UX-DR14, UX-DR17 (UX-DR4, UX-DR5 removed; new "Action Popup" pattern added to UX spec)
 
 ### Epic 3: Exploring the Pond
 User can orbit, zoom, and pan the camera to explore the pond spatially, and toggle between zen and cyberpunk atmospheres.
-**FRs:** FR29, FR30, FR31
+**FRs:** FR30, FR31, FR32
 **UX-DRs:** UX-DR10, UX-DR12
 
 ### Epic 4: Organizing the Pond
-User can assign neon colors to todos and group lily pads into labeled clusters, creating a personal visual organization system.
-**FRs:** FR8-FR12
+User can assign neon colors to todos and group lily pads into labeled clusters, creating a personal visual organization system. Color assignment and group/ungroup are actions on the Epic 2 popup; the chameleon creature is removed.
+**FRs:** FR9, FR10, FR11, FR12, FR13
 **ARs:** AR11
-**UX-DRs:** UX-DR6, UX-DR9
+**UX-DRs:** UX-DR9 (UX-DR6 removed; color flow folded into popup pattern in UX spec)
 
 ### Epic 5: Intelligent Search
 User can find any todo by typing anywhere — the pond reorganizes itself, surfacing matches and submerging the rest with semantic understanding.
-**FRs:** FR13-FR24, FR43
+**FRs:** FR14-FR25, FR40
 **UX-DRs:** UX-DR11
 
-### Epic 6: The Pond Keeper
-User has a guided first experience hatching their trash lizard, a safety net for deleted todos, and automatic archiving of old items.
-**FRs:** FR33-FR36
-**ARs:** AR10, AR12
-**UX-DRs:** UX-DR7, UX-DR13
-
 ### Epic 7: The Living Ecosystem
-The pond teems with life — creatures scale with user activity, completions hatch random creatures with rarity tiers, and casino-inspired surprises keep the experience delightful.
-**FRs:** FR26, FR27
+The pond teems with life — creatures scale with user activity, popup Complete actions spawn random creatures with rarity tiers, and casino-inspired surprises keep the experience delightful.
+**FRs:** FR27, FR28
 **UX-DRs:** UX-DR8, UX-DR18
 
 ### Epic 8: The Soundscape
 The pond has an ambient soundscape that breathes with the ecosystem, and every interaction has audio feedback — the final layer of immersion. Last feature implemented.
-**FRs:** FR44, FR45, FR46
+**FRs:** FR41, FR42, FR43
 **UX-DRs:** UX-DR19
 
 ## Epic 1: The Living Pond
@@ -294,76 +290,85 @@ So that adding a thought feels like depositing something alive into the water.
 **And** pressing Escape during input cancels without creating a todo
 **And** the todo is persisted to the backend via optimistic update (pad appears before server confirms)
 
-### Story 2.3: Completion Egg — Hatch to Complete
+### Story 2.3: In-Scene Neon Wireframe Action Popup
+
+> **Renumbered on 2026-04-16** to satisfy build-order sequencing: this primitive must land before the popup-dependent Complete (2.4) and Delete (2.5) stories. The prior Story 2.3 (Completion Egg — Hatch to Complete) is superseded; see `2-3-completion-egg-hatch-to-complete.superseded.md` for history.
 
 As a user,
-I want to click the egg on a lily pad and watch a creature hatch to mark my todo as complete,
-So that completing a task feels rewarding and adds life to my pond.
+I want to click a lily pad and see the camera focus on it with a neon wireframe action popup rendered in the 3D scene beside it,
+So that every pad interaction (complete, delete, set color, group) flows through one consistent primitive.
 
 **Acceptance Criteria:**
 
-**Given** an active todo with a whole pulsing egg on its lily pad
-**When** I hover the lily pad and click the egg
-**Then** the egg cracks with a wobble animation
-**And** a creature emerges (randomly selected — initially common creatures only: firefly or water strider)
-**And** the hatched creature joins the pond ecosystem
-**And** the egg shell remains on the pad (visual marker of completion)
-**And** the pad desaturates to 40% of its assigned color intensity
-**And** the pad sits lower in the water than active pads
-**And** the backend is updated with completed=true and a creature record is created (todo_id, creature_type, rarity)
+**Given** an active lily pad on the pond
+**When** I click the pad
+**Then** the camera smoothly glides to frame the pad (300-500ms eased)
+**And** a neon wireframe popup materializes in the 3D scene anchored to the pad's upper-right in camera space, auto-repositioned to stay within the viewport
+**And** the popup renders action buttons as neon wireframe elements: Complete, Delete, Set Color, Group/Ungroup (Ungroup shown only when pad is part of a cluster)
+**And** the popup is rendered with the neon aesthetic (wireframe geometry, glow via Bloom, monospace retro labels)
 
-**Given** a completed todo with a hatched shell on its lily pad
-**When** I hover and click the hatched shell
-**Then** the shell reforms into a whole egg
-**And** the creature spawned by this specific egg despawns from the ecosystem with a fade dissolve
-**And** the pad re-saturates and rises to active water level
-**And** the backend is updated with completed=false and the creature record is deleted
+**Given** the popup is open
+**When** I click outside the pad's hit area OR press Escape
+**Then** the popup dismisses with a brief materialize-out animation
+**And** the camera returns to its prior position (300-500ms eased)
 
-### Story 2.4: Delete Aphid — Interruptible Eating
+**Given** the todo count is high and pads are at progressive density (>10 pads, shrunken/minimap state)
+**When** I click a pad
+**Then** the camera focuses enlarges the pad to readable size before the popup appears
+**And** the popup is sized for legibility regardless of pad density state
+
+**Technical notes:**
+- New component: `ActionPopup.tsx` (+ `PopupActionButton.tsx`, `PopupColorSwatch.tsx` — the latter used by 4.1)
+- Camera focus state managed by existing `PondCamera.tsx` / camera store
+- Only one popup open at a time; clicking a different pad closes the prior popup before opening the new one
+- Progressive density logic (formerly scoped under the old "Todo State Visualization" story) folded here: pads still shrink as count grows, hover/focus still expands to full readable size
+
+### Story 2.4: Completion via Popup — Green Flash + Dissolve
+
+> **Supersedes** the prior "Completion Egg — Hatch to Complete" story (marked done on 2026-04-15, code now obsolete). This story replaces the egg-hatch mechanic entirely; its implementation work includes removing `CompletionEgg.tsx`, the hatched-shell state, and the uncomplete path. Depends on Story 2.3 (Action Popup primitive).
 
 As a user,
-I want to click the sleeping aphid on a lily pad to start an interruptible deletion,
-So that I have a visual safety net before a todo is permanently removed.
+I want to click Complete on a focused pad's popup and watch the pad flash green and dissolve as a creature emerges into the ecosystem,
+So that completing a task feels rewarding without relying on a fragile egg-hatch animation.
 
 **Acceptance Criteria:**
 
-**Given** a lily pad with a sleeping aphid (floating Z's animation) visible on hover
-**When** I click the aphid
-**Then** the aphid wakes up and starts eating the lily pad from the edge
-**And** a progress bar appears below the pad showing consumption progress (~3 seconds)
-**And** the pad visibly shrinks/decays from the bite point
+**Given** an active todo's popup is open (see Story 2.3)
+**When** I click the Complete action
+**Then** the pad pulses green for ~200ms
+**And** a creature emerges from the pad during the flash — creature type selected by rarity tier (common ~50%, uncommon ~35%, rare ~12%, legendary ~3%) and joins the ecosystem
+**And** the pad dissolves into the water surface over 600-900ms with a fade and subtle ripple
+**And** the popup closes and the camera returns to its prior position
+**And** the backend is updated via `PATCH /api/todos/{id}` with `completed=true, completed_at=NOW()` and a creature record is created (todo_id, creature_type, rarity)
+**And** the completed todo no longer renders in the pond and is excluded from search results
 
-**Given** the aphid is eating and the progress bar has not completed
-**When** I click the lily pad itself
-**Then** the aphid stops eating, yawns, and falls back asleep
-**And** the pad regenerates to full size
-**And** the deletion is aborted — no backend call made
+**Technical notes:**
+- Remove `CompletionEgg.tsx`, hatched shell state, and uncomplete code paths as part of this story
+- Rarity selection logic moves from `useCreatureHatch.ts` into a `usePopupComplete.ts` handler (or equivalent)
+- No "completed pad" visual state is needed — the record is hidden post-dissolve
 
-**Given** the aphid is eating and the progress bar completes
-**Then** the aphid consumes the entire pad with a burp animation
-**And** pad fragments drift toward the trash lizard (if it exists)
-**And** a final outward ripple appears where the pad was
-**And** the todo is soft-deleted via `DELETE /api/todos/{id}`
+### Story 2.5: Deletion via Popup — Red Flash + Dissolve
 
-### Story 2.5: Todo State Visualization & Progressive Density
+> **Replaces** the prior backlog story "Delete Aphid — Interruptible Eating." The aphid creature, interruptible eating mechanic, and abort-click are all removed; deletion is now immediate on click. Depends on Story 2.3 (Action Popup primitive).
 
 As a user,
-I want to distinguish active from completed todos at a glance and see pads scale as my todo count grows,
-So that the pond communicates status visually and handles high density gracefully.
+I want to click Delete on a focused pad's popup and watch the pad flash red and dissolve,
+So that deletion uses the same unified visual language as completion without an additional creature control.
 
 **Acceptance Criteria:**
 
-**Given** a mix of active and completed todos
-**When** I view the pond
-**Then** active todos have full-color pads with whole eggs, floating at normal water level
-**And** completed todos have desaturated pads with hatched shells, sitting lower in the water
-**And** each pad displays todo text via CSS2DRenderer HTML overlay
+**Given** an active todo's popup is open (see Story 2.3)
+**When** I click the Delete action
+**Then** the pad pulses red for ~200ms
+**And** the pad dissolves into the water surface over 600-900ms with a fade and subtle ripple (no creature emerges)
+**And** the popup closes and the camera returns to its prior position
+**And** the backend is updated via `DELETE /api/todos/{id}` which soft-deletes the record (`deleted=true, deleted_at=NOW()`)
+**And** the deleted todo no longer renders in the pond and is excluded from search results
 
-**Given** the todo count increases
-**When** more than ~10 pads exist
-**Then** pads progressively shrink to fit the pond space
-**And** text gets smaller (full → medium → small → rendered colored lines at minimap density)
-**And** hover on any pad always expands it to full readable size regardless of density
+**Technical notes:**
+- Remove `DeleteAphid.tsx` (and any aphid-related code paths) as part of this story — the component never shipped in a done story but exists as a scaffold
+- No confirmation dialog; the popup-as-gate provides sufficient intent
+- Pad fragments no longer drift toward a trash lizard — the lizard was removed with Epic 6 deletion
 
 ### Story 2.6: Loading & Error States
 
@@ -437,21 +442,28 @@ So that I can control the mood of my entire pond environment.
 
 User can assign neon colors to todos and group lily pads into labeled clusters, creating a personal visual organization system.
 
-### Story 4.1: Color Chameleon & Neon Picker
+### Story 4.1: Popup Color Swatch — Neon Selector
+
+> **Replaces** the prior "Color Chameleon & Neon Picker" story. The chameleon creature is removed; color assignment is now a sub-panel within the Action Popup (see Story 2.5).
 
 As a user,
-I want to click a chameleon on my lily pad and assign a neon color from a picker ring,
-So that I can visually organize my todos by color for personal categorization.
+I want to click Set Color on a pad's popup and pick a neon color from an inline swatch ring,
+So that I can visually organize my todos without a separate creature interaction.
 
 **Acceptance Criteria:**
 
-**Given** a lily pad is hovered/focused
-**When** I click the chameleon creature near the pad
-**Then** the chameleon perks up and a ring of neon color dots appears around it (pink, cyan, orange, green, gold)
-**And** hovering a color option previews it in real-time (chameleon skin changes, pad glow shifts)
-**And** clicking a color selects it — pad permanently changes, chameleon settles, picker closes, subtle ripple
-**And** pressing Escape closes the picker without changing color
+**Given** a lily pad's Action Popup is open (Story 2.5)
+**When** I click the Set Color action
+**Then** the popup expands a sub-panel showing a ring of neon swatches (pink #ff10f0, cyan #00eeff, orange #ff6600, green #39ff14, gold #ffd700)
+**And** hovering a swatch previews the color on the pad's glow in real-time
+**And** clicking a swatch commits the color — pad glow updates, sub-panel collapses, subtle ripple emanates from the pad
+**And** pressing Escape OR clicking Set Color again collapses the sub-panel without changing the color
 **And** the selected color is persisted via `PATCH /api/todos/{id}` with the new color value
+
+**Technical notes:**
+- Remove `ColorChameleon.tsx` and the ring-of-sprites `ColorPicker.tsx` as part of this story
+- New component: `PopupColorSwatch.tsx` — sub-component of `ActionPopup.tsx`
+- Swatches render as neon wireframe elements consistent with the popup aesthetic
 
 ### Story 4.2: Lily Pad Clustering & Groups
 
@@ -573,85 +585,6 @@ So that finding todos feels like speaking to the pond and watching it respond.
 **And** Backspace edits the search text
 **And** full-text results appear first (fast), vector results refine ranking progressively
 
-## Epic 6: The Pond Keeper
-
-User has a guided first experience hatching their trash lizard, a safety net for deleted todos, and automatic archiving of old items.
-
-### Story 6.1: Trash Lizard & Belly Recovery
-
-As a user,
-I want a friendly lizard at the pond's edge that collects my deleted todos and lets me recover them,
-So that I have a safety net and deleted items aren't permanently lost.
-
-**Acceptance Criteria:**
-
-**Given** the trash lizard exists (created during tutorial)
-**Then** the lizard wanders slowly around the pond edge, repositioning occasionally
-**And** the lizard's belly size visually scales with the number of consumed todos
-
-**Given** a todo is deleted (aphid finishes eating)
-**When** the pad fragments drift toward the lizard
-**Then** the lizard gulps them down and its belly grows slightly
-
-**Given** I click the lizard
-**When** the belly list opens
-**Then** a neon-styled panel shows all consumed todos (text, color dot, date consumed, source: deleted/archived)
-**And** the panel uses NeonScrollbar (ported from rag-csv-crew) for scrolling
-**And** each row has a restore action
-
-**When** I click restore on a todo
-**Then** the lizard performs a comedic regurgitate animation
-**And** a new lily pad spits out into the pond with a ripple
-**And** a fresh egg appears on the restored pad
-**And** the todo is restored via `POST /api/todos/{id}/restore`
-
-**And** pressing Escape closes the belly list
-
-### Story 6.2: Auto-Archive System
-
-As a user,
-I want old completed todos to gradually drift toward the lizard and be archived,
-So that my active pond stays uncluttered without manual cleanup.
-
-**Acceptance Criteria:**
-
-**Given** the archive threshold is configured (default 30 days, configurable via env var)
-**When** a completed todo exceeds the threshold age
-**Then** the lily pad shows subtle aging: edges browning, slight wilt, dimming glow
-**And** the pad slowly drifts toward the lizard over several render cycles
-**And** the lizard gently consumes the aging pad
-**And** the todo is marked archived=true, archived_at=now in the database
-
-**And** archived todos appear in the lizard belly list with source "archived"
-**And** archived todos can be restored the same way as deleted todos
-
-### Story 6.3: First-Run Tutorial
-
-As a new user,
-I want a guided first experience where I hatch my pond keeper from a special egg,
-So that I learn the core mechanics through the pond's own interaction language.
-
-**Acceptance Criteria:**
-
-**Given** no resident creature exists in the creatures table (first visit)
-**When** the app loads
-**Then** a single large glowing egg floats on the dark pond surface
-**And** faint ripple text appears: "click the egg"
-
-**When** I click the egg
-**Then** the egg cracks dramatically with a special neon burst animation
-**And** the trash lizard emerges, stretches, yawns, and waddles to the pond edge
-**And** ripple text: "this is your pond keeper — it holds anything you discard"
-**And** a resident creature record is created via `POST /api/creatures` (creature_type='trash_lizard', rarity='resident', todo_id=null)
-
-**Then** the tutorial continues with guided prompts:
-**And** "type something and press Enter" → guides first todo creation
-**And** "click the egg on your lily pad" → guides first completion/hatch
-**And** "just start typing to find anything" → hints at search
-
-**And** pressing Escape at any step skips remaining tutorial (lizard still spawned)
-**And** on subsequent visits, the lizard exists in the DB so the tutorial is skipped
-
 ## Epic 7: The Living Ecosystem
 
 The pond teems with life — creatures scale with user activity, completions hatch random creatures with rarity tiers, and casino-inspired surprises keep the experience delightful.
@@ -675,23 +608,29 @@ So that the pond feels alive and my activity visibly enriches the environment.
 
 ### Story 7.2: Creature Rarity & Casino Celebrations
 
+> Rarity logic retained from the prior version but triggered by the popup Complete action (Story 2.3) rather than an egg hatch. The "resident" tier (trash lizard) is removed along with Epic 6.
+
 As a user,
-I want egg hatches to produce creatures of varying rarity with occasional spectacular events,
+I want popup completions to produce creatures of varying rarity with occasional spectacular events,
 So that every completion has an element of surprise and discovery.
 
 **Acceptance Criteria:**
 
-**Given** a user clicks an egg to complete a todo
+**Given** a user clicks Complete on a pad's popup (Story 2.3)
 **When** the creature type is randomly selected
 **Then** the rarity distribution is: common ~50% (firefly, water strider), uncommon ~35% (frog, dragonfly, butterfly), rare ~12% (fish, turtle), legendary ~3% (golden koi, neon phoenix, glowing jellyfish)
 
-**And** common hatches have a standard emergence animation
-**And** uncommon hatches have a slightly more elaborate animation
-**And** rare hatches trigger a brief celebration (particle burst, extra ripple)
-**And** legendary hatches trigger a major visual event (cascade of neon particles, water surge, ecosystem reaction)
+**And** common emergences have a standard creature-emerges-from-pad animation during the pad's green flash
+**And** uncommon emergences have a slightly more elaborate animation
+**And** rare emergences trigger a brief celebration (particle burst, secondary ripple on adjacent pads)
+**And** legendary emergences trigger a major visual event (cascade of neon particles, water surge, ecosystem creatures react)
 
 **And** ~20% of all completions (regardless of rarity) trigger a bonus ambient animation (extra fireflies, fish jump, frog croak)
 **And** the randomness creates "did you see that?" moments — no two sessions feel identical
+
+**Technical notes:**
+- Rarity roll logic moves from `useCreatureHatch.ts` (to be removed with Story 2.3) into `usePopupComplete.ts` or an equivalent handler invoked by the popup Complete action
+- Remove "resident" rarity tier code paths and creature-type filters; rarity enum in the creatures table becomes common/uncommon/rare/legendary only
 
 ## Epic 8: The Soundscape
 

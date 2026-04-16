@@ -1,11 +1,15 @@
 ---
-stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain-skipped', 'step-06-innovation-skipped', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete']
-lastEdited: '2026-04-14'
+stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain-skipped', 'step-06-innovation-skipped', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete', 'step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
+lastEdited: '2026-04-16'
 editHistory:
   - date: '2026-04-14'
     changes: 'Added search user journey (Journey 4), updated requirements table, fixed subjective FR language, removed implementation leakage from FRs/NFRs, fixed NFR metrics'
   - date: '2026-04-14'
     changes: 'Major reconciliation with UX spec: desktop-only (removed mobile), 3D pond interface, creature-based controls (egg/aphid/chameleon/lizard), grouping/clustering, trash/archive, atmosphere modes, interactive camera, type-anywhere search, ecosystem, sound design. FRs expanded from 31 to 49.'
+  - date: '2026-04-16'
+    changes: 'Simplified interaction model: removed egg-hatch completion, aphid-eat deletion, chameleon color picker, and trash/archive lizard with recovery. Replaced with neon wireframe action popup rendered in-scene on pad focus. Unified dissolve-and-fade visual for both complete (green flash + creature spawn) and delete (red flash). Both are soft state transitions — records persist in DB with completed=true or deleted=true, but no longer render in the pond or appear in search. FRs 49 → 46.'
+  - date: '2026-04-16'
+    changes: 'Post-validation polish: tightened FR10 ("multiple" → "two or more"), specified popup anchor position in FR3 (upper-right in camera space, viewport-bounded), dropped "fast" descriptor from Reliability NFR.'
 inputDocuments: []
 workflowType: 'prd'
 documentCounts:
@@ -27,7 +31,7 @@ classification:
 
 ## Executive Summary
 
-A full-stack Todo application built as a Nearform demo and BMad method learning project. The product delivers core task management — create, view, complete, and delete todos — through an immersive 3D neon pond interface where todos exist as luminescent lily pads floating on a dark water surface. Creature-based controls handle all interactions: eggs hatch into random creatures on completion, aphids eat pads for deletion, chameleons enable color assignment. The todo domain is deliberately minimal; the application's purpose is to showcase modern full-stack craft and serve as a reference implementation, not to solve a novel productivity problem. Target users are developers and stakeholders evaluating the tech stack, design quality, and development methodology.
+A full-stack Todo application built as a Nearform demo and BMad method learning project. The product delivers core task management — create, view, complete, and delete todos — through an immersive 3D neon pond interface where todos exist as luminescent lily pads floating on a dark water surface. Clicking a pad brings the camera into focus on it and materializes a neon wireframe action popup in-scene, offering Complete, Delete, Set Color, and Group actions. Both completion and deletion resolve through a unified visual — a green or red flash followed by the pad slowly dissolving into the water — with completed pads contributing a creature to the living ecosystem. The todo domain is deliberately minimal; the application's purpose is to showcase modern full-stack craft and serve as a reference implementation, not to solve a novel productivity problem. Target users are developers and stakeholders evaluating the tech stack, design quality, and development methodology.
 
 The backend exposes a small CRUD API built on Python 3.13+ with a focus on clean separation, data consistency, and an architecture that does not preclude future authentication or multi-user capabilities. The frontend is a desktop-only (Chrome) Three.js 3D scene with interactive camera (orbit, zoom, pan), type-anywhere search that causes matching pads to surface while non-matches submerge, and a living ecosystem of neon creatures whose density scales with user activity. Success is measured by visual impact, interaction quality, session stability, and zero-guidance usability.
 
@@ -80,13 +84,13 @@ The differentiator is experience quality over feature quantity. Inspired by the 
 
 **Opening Scene:** Liam opens the link expecting another standard CRUD demo. The page loads and immediately he notices something different — a dark interface pulses with neon light, 3D elements float with subtle depth, and the whole thing feels alive. He pauses. This isn't what he expected.
 
-**Rising Action:** He types "Review Q2 roadmap" and hits enter. A lily pad forms above the water and drops in with a neon ripple. He adds a few more — "Update team wiki," "Prep sprint demo." Each pad settles among the others, the ecosystem stirs — a firefly appears. He clicks an egg on one pad and watches it crack open, hatching a tiny frog that hops off into the pond. The todo is complete. He moves his mouse and a neon snake cursor trail follows.
+**Rising Action:** He types "Review Q2 roadmap" and hits enter. A lily pad forms above the water and drops in with a neon ripple. He adds a few more — "Update team wiki," "Prep sprint demo." Each pad settles among the others, the ecosystem stirs — a firefly appears. He clicks a pad. The camera glides in to frame it and a neon wireframe popup materializes in the scene alongside, floating above the water with Complete, Delete, and Set Color actions. He clicks Complete — the pad pulses green, a dragonfly emerges in a burst of light and joins the ecosystem, and the pad slowly dissolves into the water. He moves his mouse and a neon snake cursor trail follows.
 
-**Climax:** Liam clicks the sleeping aphid on a todo he doesn't need. It wakes up and starts eating the lily pad — he watches a progress bar, fascinated. He refreshes the page — everything is still there, the pond exactly as he left it. He tries to break it: rapid adds, quick deletes, toggling completions. It handles everything smoothly. He zooms out to see the whole pond, then zooms into a single pad. He thinks: "This is actually really well built."
+**Climax:** Liam clicks a todo he doesn't need, opens the popup, and clicks Delete. The pad pulses red and dissolves into the water. He refreshes the page — everything is still there, the pond exactly as he left it. He tries to break it: rapid adds, quick deletes, quick completes. It handles everything smoothly. He zooms out to see the whole pond, then zooms into a single pad. He thinks: "This is actually really well built."
 
 **Resolution:** Liam shares the link in the engineering channel with "have you seen this?" He's not impressed by what it does — it's a todo app. He's impressed by *how* it does it. The craft is obvious.
 
-**Reveals:** Instant visual impact, 3D pond immersion, creature-based interactions, camera controls, data persistence, graceful handling of rapid interactions, shareability.
+**Reveals:** Instant visual impact, 3D pond immersion, in-scene wireframe popup interactions, unified dissolve visuals, creature spawning from completions, camera controls, data persistence, graceful handling of rapid interactions, shareability.
 
 ### Journey 2: The Demo Presenter — High-Stakes Showcase
 
@@ -94,13 +98,13 @@ The differentiator is experience quality over feature quantity. Inspired by the 
 
 **Opening Scene:** Michael opens the app on the projected screen. The neon glow fills the room's display. He has a clean slate — no existing todos — and the empty state is designed for this moment: an inviting visual that says "add something" without looking broken or bare.
 
-**Rising Action:** Michael narrates as he adds todos live: "Let me show you the core flow." He adds three tasks — each lily pad drops into the pond with a ripple. He assigns different neon colors via the chameleon. He clicks an egg — it hatches a dragonfly that joins the ecosystem. He groups two todos into a cluster. The audience watches creatures appear as the pond comes alive.
+**Rising Action:** Michael narrates as he adds todos live: "Let me show you the core flow." He adds three tasks — each lily pad drops into the pond with a ripple. He clicks one — the camera focuses and a neon wireframe popup materializes beside it. He selects Set Color and picks electric cyan; the pad's glow shifts. He does the same on another pad in magenta. He clicks Complete on a third — green flash, a firefly bursts out of the pad, joins the ecosystem, the pad dissolves. He groups two todos into a cluster through the popup's Group action.
 
 **Climax:** Michael types a search query. The pond reorganizes — matching pads surface while others submerge with neon ripple effects. The camera auto-frames the results. He toggles the atmosphere from zen to cyberpunk — the entire environment transforms. He zooms out to show the full pond overview, then zooms into a single pad. The room reacts.
 
 **Resolution:** The demo lands. Management sees an immersive, living product — not a prototype. The conversation shifts from "nice demo" to "what else can we build with this approach?" Michael has demonstrated both the tech and the methodology.
 
-**Reveals:** Empty state design, live demo reliability, creature interactions, atmosphere toggle, camera controls, search spectacle, data consistency across sessions, presenter confidence through flawless UX.
+**Reveals:** Empty state design, live demo reliability, in-scene wireframe popup, color assignment, completion creature burst, grouping, atmosphere toggle, camera controls, search spectacle, data consistency across sessions, presenter confidence through flawless UX.
 
 ### Journey 3: The Future Developer — Extending the Foundation
 
@@ -135,11 +139,11 @@ The differentiator is experience quality over feature quantity. Inspired by the 
 | Capability | Revealed By |
 |---|---|
 | 3D neon pond as primary interface | Journey 1, 2 |
-| Lily pad todos with creature-based controls | Journey 1, 2 |
-| Completion egg hatching random creatures | Journey 1, 2 |
-| Delete aphid with interruptible eating | Journey 1 |
-| Color chameleon for neon color assignment | Journey 2 |
-| Interactive camera (orbit, zoom, pan) | Journey 1, 2 |
+| Lily pad todos with in-scene wireframe action popup | Journey 1, 2 |
+| Completion with green flash, creature spawn, and pad dissolve | Journey 1, 2 |
+| Deletion with red flash and pad dissolve | Journey 1 |
+| Color assignment via popup action | Journey 2 |
+| Interactive camera (orbit, zoom, pan) with auto-focus on pad click | Journey 1, 2 |
 | Custom neon snake cursor trail | Journey 1 |
 | Pond ecosystem scaling with activity | Journey 1, 2 |
 | Lily pad clustering/grouping | Journey 2 |
@@ -230,15 +234,16 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 
 **Must-Have Capabilities:**
 - 3D neon pond interface with floating lily pad todos
-- Completion egg mechanic with random creature hatching
-- Delete aphid with interruptible eating animation
-- Color chameleon for neon color assignment
+- Click pad to focus camera and materialize neon wireframe action popup in-scene
+- Popup actions: Complete, Delete, Set Color, Group/Ungroup
+- Completion: green flash → creature emerges (rarity tier) → pad dissolves
+- Deletion: red flash → pad dissolves
+- Soft state persistence — completed and deleted records retained, excluded from pond and search
 - Custom neon snake cursor trail (ported from rag-csv-crew)
 - Interactive camera with orbit, zoom, pan
 - Type-anywhere search with pad surface/submerge animations
 - Pond ecosystem creatures scaling with todo count and completions
 - Lily pad grouping/clustering with shared glow aura
-- Trash/archive lizard with recoverable belly view
 - Persistent storage in PostgreSQL 17 with pgvector
 - LLM-generated embeddings (Google API) on todo creation
 - Hybrid full-text + vector search
@@ -281,81 +286,75 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 ### Task Management
 
 - FR1: User can create a new todo by entering a text description, which materializes as a lily pad dropping into the 3D pond with ripple effects
-- FR2: User can view all existing todos as lily pads floating on the pond surface
-- FR3: User can mark a todo as complete by clicking its egg, which hatches into a random ecosystem creature
-- FR4: User can mark a completed todo as active again by clicking the hatched egg shell, which reforms and despawns the associated creature
-- FR5: User can delete a todo by clicking its sleeping aphid, which wakes and eats the lily pad over ~3 seconds with an interruptible progress bar
-- FR6: User can abort a deletion by clicking the lily pad before the aphid finishes eating
-- FR7: User can distinguish completed todos from active todos by egg state (whole vs. hatched shell), pad color desaturation, and water-level position
+- FR2: User can view all active todos as lily pads floating on the pond surface — todos with completed=true or deleted=true do not render
+- FR3: User can click a lily pad to bring the camera into focus on it and materialize a neon wireframe action popup in-scene, anchored to the pad's upper-right in camera space and auto-repositioned to stay within the viewport
+- FR4: Popup presents action buttons as neon wireframe elements: Complete, Delete, Set Color, Group/Ungroup
+- FR5: User can dismiss the popup by clicking outside the pad or pressing Escape, returning the camera to its prior position
+- FR6: User can mark a todo as complete via the popup Complete action, which flashes the pad green, spawns a creature that emerges from the pad into the ecosystem, then dissolves the pad into the water over 600-900ms
+- FR7: User can delete a todo via the popup Delete action, which flashes the pad red then dissolves the pad into the water over 600-900ms
+- FR8: System persists completed and deleted todos with state flags (completed=true or deleted=true) — records are retained for ecosystem creature counts and are excluded from the default pond view and search results
 
 ### Task Organization
 
-- FR8: User can assign a neon color to a todo by clicking its chameleon and selecting from a color picker
-- FR9: User can group multiple lily pads into a cluster that floats as a unit with a shared glow aura
-- FR10: User can ungroup a cluster, releasing pads to float independently with outward ripple effects
-- FR11: User can assign an optional label to a cluster that floats above it
-- FR12: User can drag individual lily pads to reposition them or drag them into/out of clusters
+- FR9: User can assign a neon color to a todo via the popup Set Color action, which presents a neon color swatch selector inline in the wireframe popup
+- FR10: User can group two or more lily pads into a cluster that floats as a unit with a shared glow aura, initiated via the popup Group action
+- FR11: User can ungroup a cluster via the popup Ungroup action, releasing pads to float independently with outward ripple effects
+- FR12: User can assign an optional label to a cluster that floats above it
+- FR13: User can drag individual lily pads to reposition them or drag them into/out of clusters
 
 ### Task Discovery
 
-- FR13: User can search todos by typing anywhere outside a focused element — no visible search bar
-- FR14: System matches search input against todos using full-text search
-- FR15: System matches search input against todos using vector similarity search
-- FR16: System ranks filtered results by combined full-text and vector relevance
-- FR17: System updates filtered results in real-time as the user types with 300ms debounce
-- FR18: Matching lily pads surface and glow while non-matching pads submerge and fade during search
-- FR19: Matching clusters surface as units with matching members highlighted and non-matching siblings faded
-- FR20: Camera auto-frames to center on search results
-- FR21: User can clear search by pressing Escape, restoring all pads and resetting camera
+- FR14: User can search active todos by typing anywhere outside a focused element — no visible search bar; completed and deleted todos are excluded from results
+- FR15: System matches search input against todos using full-text search
+- FR16: System matches search input against todos using vector similarity search
+- FR17: System ranks filtered results by combined full-text and vector relevance
+- FR18: System updates filtered results in real-time as the user types with 300ms debounce
+- FR19: Matching lily pads surface and glow while non-matching pads submerge and fade during search
+- FR20: Matching clusters surface as units with matching members highlighted and non-matching siblings faded
+- FR21: Camera auto-frames to center on search results
+- FR22: User can clear search by pressing Escape, restoring all pads and resetting camera
 
 ### Embedding Generation
 
-- FR22: System generates a vector embedding for each todo's text content upon creation
-- FR23: System generates embeddings asynchronously without blocking the user from interacting with the todo
-- FR24: System generates a vector embedding for search input to enable similarity matching
+- FR23: System generates a vector embedding for each todo's text content upon creation
+- FR24: System generates embeddings asynchronously without blocking the user from interacting with the todo
+- FR25: System generates a vector embedding for search input to enable similarity matching
 
 ### Pond Environment
 
-- FR25: User sees a 3D neon pond as the primary interface — dark blue-green water surface with ripple physics and ambient neon reflections
-- FR26: User sees pond ecosystem creatures (fireflies, frogs, fish, dragonflies, water striders) whose density and variety scale with todo count and completion count
-- FR27: Completed todos contribute creatures to the ecosystem via egg hatching with rarity tiers (common ~50%, uncommon ~35%, rare ~12%, legendary ~3%)
-- FR28: User sees a custom neon snake cursor trail replacing the system cursor
-- FR29: User can orbit, zoom, and pan the camera to explore the pond spatially
-- FR30: User can double-click empty water to reset camera to default position
-- FR31: User can toggle between zen atmosphere (calm, muted, slow) and cyberpunk atmosphere (electric, bright, fast)
-- FR32: User sees animations completing within 300-500ms with easing transitions when todos are added, completed, or deleted
-
-### Trash & Archive
-
-- FR33: A trash/archive lizard wanders the pond edge, consuming deleted and auto-archived todos
-- FR34: User can click the lizard to open a neon-styled list of consumed todos (deleted and archived)
-- FR35: User can recover a consumed todo from the lizard's belly, which spits out a new lily pad into the pond
-- FR36: System auto-archives todos older than a configurable threshold by drifting them toward the lizard with visual aging (browning edges, wilt)
+- FR26: User sees a 3D neon pond as the primary interface — dark blue-green water surface with ripple physics and ambient neon reflections
+- FR27: User sees pond ecosystem creatures (fireflies, frogs, fish, dragonflies, water striders) whose density and variety scale with cumulative todo count and completion count
+- FR28: Completed todos contribute a creature to the ecosystem on completion, selected by rarity tier (common ~50%, uncommon ~35%, rare ~12%, legendary ~3%) — the creature emerges from the pad during the green-flash beat before the pad dissolves
+- FR29: User sees a custom neon snake cursor trail replacing the system cursor
+- FR30: User can orbit, zoom, and pan the camera to explore the pond spatially
+- FR31: User can double-click empty water to reset camera to default position
+- FR32: User can toggle between zen atmosphere (calm, muted, slow) and cyberpunk atmosphere (electric, bright, fast)
+- FR33: User sees animations completing within 300-500ms with easing transitions when todos are added, completed, or deleted
 
 ### Application States
 
-- FR37: User sees an inviting empty pond with subtle water movement, ambient glow, and a hint ("just start typing...") when no todos exist
-- FR38: User sees a loading state with staggered lily pad materialization on initial pond load
-- FR39: User sees error states through biological decay on affected pads (bite marks, wilt, texture degradation) and ecosystem creature reactions (scatter, flee)
-- FR40: System returns to a functional state without page refresh after an error occurs — decay marks heal on recovery
+- FR34: User sees an inviting empty pond with subtle water movement, ambient glow, and a hint ("just start typing...") when no active todos exist
+- FR35: User sees a loading state with staggered lily pad materialization on initial pond load
+- FR36: User sees error states through biological decay on affected pads (bite marks, wilt, texture degradation)
+- FR37: System returns to a functional state without page refresh after an error occurs — decay marks heal on recovery
 
 ### Data Persistence
 
-- FR41: System persists all todos in a relational database across browser sessions
-- FR42: System preserves todo state (text, completion status, color, group membership, timestamps) across page refreshes
-- FR43: System stores vector embeddings alongside todo records in a vector-capable database
+- FR38: System persists all todos in a relational database across browser sessions, including records marked completed=true or deleted=true
+- FR39: System preserves todo state (text, completion flag, deletion flag, color, group membership, timestamps) across page refreshes
+- FR40: System stores vector embeddings alongside todo records in a vector-capable database
 
 ### Sound Design
 
-- FR44: System provides ambient audio (water, crickets, frog croaks) scaling with ecosystem density — implemented as the last feature
-- FR45: System provides interaction audio (splash on add, chime on complete, crunch on delete) — implemented as the last feature
-- FR46: User can toggle sound on/off via an in-theme control — sound starts muted by default
+- FR41: System provides ambient audio (water, crickets, frog croaks) scaling with ecosystem density — implemented as the last feature
+- FR42: System provides interaction audio (splash on add, chime on complete, soft pad-dissolve on delete) — implemented as the last feature
+- FR43: User can toggle sound on/off via an in-theme control — sound starts muted by default
 
 ### Development Infrastructure
 
-- FR47: Developer can start the full application stack locally using a single command
-- FR48: Developer can run linting, type checking, and formatting via CLI commands
-- FR49: System runs automated CI checks on every push and pull request
+- FR44: Developer can start the full application stack locally using a single command
+- FR45: Developer can run linting, type checking, and formatting via CLI commands
+- FR46: System runs automated CI checks on every push and pull request
 
 ## Non-Functional Requirements
 
@@ -372,7 +371,7 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 
 - Application maintains full functionality across browser refresh, tab close, and session restart
 - No data loss under any normal usage scenario
-- Application handles rapid sequential user actions (fast adds, deletes, toggles) without errors or race conditions
+- Application handles rapid sequential user actions (adds, deletes, completions) without errors or race conditions
 - Application remains functional when Google API is temporarily unavailable — CRUD operations are unaffected, search degrades to full-text only
 - Error states are recoverable without page refresh
 

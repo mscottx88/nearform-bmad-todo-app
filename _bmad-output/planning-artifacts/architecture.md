@@ -57,8 +57,8 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - **3D Performance** — every feature must be evaluated for GPU impact. Lily pad count, creature count, Bloom resolution, ripple physics all compete for frame budget. LOD, frustum culling, and instanced rendering are architectural requirements, not optimizations.
 - **Async Embedding Pipeline** — affects todo creation flow, search accuracy, error handling. Embedding state (pending/complete/failed) is a first-class data concern.
-- **Creature State Management** — 1:1 mapping between completed todos and ecosystem creatures. Requires a creature registry on the frontend that syncs with todo completion state. Despawn on uncomplete.
-- **Custom UI Primitives** — the neon snake cursor means every native browser element must be custom-rendered. This affects every UI surface: inputs, scrollbars, color pickers, the lizard belly list.
+- **Creature State Management** — 1:1 mapping between completed todos and ecosystem creatures. Creature records are inserted during the popup Complete action; completed todos remain soft-persisted and their creature records are retained indefinitely (no uncomplete in v1).
+- **Custom UI Primitives** — the neon snake cursor means every native browser element must be custom-rendered. This affects every UI surface: todo input, the in-scene Action Popup, and any future overlay components.
 - **State Persistence Scope** — todo text, completion, color, group membership, position, timestamps all persist. Groups/clusters have their own state (member list, label, position). This is a wider persistence surface than typical todo apps.
 
 ## Starter Template Evaluation
@@ -138,7 +138,7 @@ npm install -D @types/three vitest @testing-library/react
 
 **Styling Solution:**
 - CSS custom properties for neon design tokens (ported from rag-csv-crew index.css)
-- CSS Modules or plain CSS for non-3D overlay components (lizard belly list, todo input)
+- CSS Modules or plain CSS for non-3D overlay components (todo input)
 - Three.js materials and shaders for all 3D elements
 - No Tailwind/CSS framework — incompatible with Three.js-dominant UI
 
@@ -160,8 +160,8 @@ nearform-bmad-todo-app/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── pond/            # PondScene, LilyPad, water, ripples
-│   │   │   ├── creatures/       # Egg, Aphid, Chameleon, Lizard, ecosystem
-│   │   │   ├── ui/              # TodoInput, ColorPicker, LizardBelly
+│   │   │   ├── creatures/       # Ecosystem creatures (Firefly, Frog, Dragonfly, etc.)
+│   │   │   ├── ui/              # TodoInput, ActionPopup, PopupActionButton, PopupColorSwatch
 │   │   │   ├── effects/         # CursorSnake, LightningBorder (ported)
 │   │   │   └── atmosphere/      # AtmosphereController, SoundManager
 │   │   ├── hooks/               # usePond, useSearch, useCreatures, useAtmosphere
@@ -230,8 +230,8 @@ todos (
   position_y    FLOAT,
   embedding     VECTOR(768),                    -- Google embedding dimension
   embedding_status ENUM('pending','complete','failed') DEFAULT 'pending',
-  archived      BOOLEAN DEFAULT FALSE,
-  archived_at   TIMESTAMP,
+  archived      BOOLEAN DEFAULT FALSE,  -- DEPRECATED: auto-archive removed in v1 simplification
+  archived_at   TIMESTAMP,              -- DEPRECATED: auto-archive removed in v1 simplification
   deleted       BOOLEAN DEFAULT FALSE,
   deleted_at    TIMESTAMP,
   created_at    TIMESTAMP DEFAULT NOW(),
@@ -266,7 +266,7 @@ creatures (
 
 **Indexes:**
 - `todos.embedding` — IVFFlat or HNSW index for vector similarity search
-- `todos(deleted, archived)` — partial index for active todos
+- `todos(completed, deleted)` — partial index for active todos (pads that render in the pond)
 - Full-text search — GIN index on `todos.text` using `tsvector`
 
 **Migration strategy:** Alembic with auto-generation from SQLAlchemy models. Initial migration creates all tables. Future migrations for schema evolution.
@@ -291,10 +291,7 @@ creatures (
 POST   /api/todos              # Create todo → returns todo, triggers async embedding
 GET    /api/todos              # List all active todos (with positions, colors, groups, creatures)
 PATCH  /api/todos/:id          # Update (completion, color, position)
-DELETE /api/todos/:id          # Soft-delete → moves to trash
-
-POST   /api/todos/:id/restore  # Restore from trash → new lily pad
-GET    /api/trash               # List trashed/archived todos (lizard belly)
+DELETE /api/todos/:id          # Soft-delete (sets deleted=true, deleted_at=NOW())
 
 PATCH  /api/todos/positions    # Batch position update [{id, x, y}, ...]
 
@@ -329,10 +326,7 @@ GET    /api/search?q=...       # Hybrid search (full-text + vector, ranked resul
 }
 ```
 
-**Auto-archive logic:**
-- Background task or scheduled check: find todos where `completed = true AND updated_at < NOW() - archive_threshold`
-- Set `archived = true, archived_at = NOW()`
-- Archive threshold configurable via environment variable (default: 30 days, or disabled)
+**Auto-archive:** Removed in v1. Completed todos remain in the DB indefinitely (with `completed=true`) but are excluded from the pond render and search results.
 
 ### Frontend Architecture
 
@@ -342,14 +336,12 @@ GET    /api/search?q=...       # Hybrid search (full-text + vector, ranked resul
 |---|---|---|
 | Water surface | Three.js mesh + custom shader | GPU ripple physics |
 | Lily pads | Three.js instanced meshes | Performance at 30+ |
-| Creature controls (egg, aphid, chameleon) | Three.js sprite/mesh per instance | Individual animation control |
 | Ecosystem wildlife | Instanced meshes + particle system | Many small objects |
-| Trash lizard | Three.js animated mesh | Single complex character |
 | Pad text | CSS2DRenderer HTML overlay | Sharp text at all zoom levels |
 | Cluster labels | CSS2DRenderer HTML overlay | Same rationale |
 | Search text on water | CSS2DRenderer with opacity | Feels "on the water" |
 | Todo input | React HTML portal | Standard text input behavior |
-| Lizard belly list | React HTML portal | NeonScrollbar, standard list |
+| Action Popup | Three.js wireframe geometry + CSS2DRenderer labels | Anchored to focused pad, one instance at a time, Bloom-lit neon aesthetic |
 | Color picker ring | Three.js sprites | Stays in 3D space near pad |
 | Cursor snake | Separate canvas overlay | Proven approach from rag-csv-crew |
 | Bloom/glow | @react-three/postprocessing | Full-scene postprocessing |
@@ -368,7 +360,7 @@ GET    /api/search?q=...       # Hybrid search (full-text + vector, ranked resul
 - Copy source files to `frontend/src/components/effects/`
 - Adapt imports/types for new project structure
 - CursorSnake: direct port, minimal changes
-- NeonScrollbar: used in lizard belly list only
+- NeonScrollbar: not currently used (removed along with lizard belly list); keep available in reference port if a future need arises
 - CSS variables: port to `frontend/src/styles/neon-tokens.css`
 - LightningBorder: adapt for cluster glow aura
 
@@ -390,7 +382,7 @@ services:
 
 **Environment variables:**
 - `.env` at project root (gitignored), `.env.example` committed
-- `DATABASE_URL`, `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, `CORS_ORIGINS`, `ARCHIVE_THRESHOLD_DAYS`
+- `DATABASE_URL`, `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, `CORS_ORIGINS`
 - FastAPI: Pydantic Settings with `.env` support
 - Frontend: `VITE_API_URL` for API base URL
 
@@ -413,19 +405,21 @@ make dev  # docker-compose up -d && uvicorn src.main:app --reload & cd frontend 
 2. FastAPI CRUD endpoints + Pydantic schemas
 3. Frontend Vite project init + Three.js pond scene (water only)
 4. Lily pads rendering + CRUD integration
-5. Creature controls (egg, aphid, chameleon)
-6. Search endpoint + embedding pipeline + type-anywhere UX
-7. Groups/clusters
-8. Trash lizard + archive
-9. Ecosystem manager + creature registry
-10. Atmosphere modes + camera polish
-11. Rag-csv-crew component ports (CursorSnake, NeonScrollbar)
-12. Sound design (last)
+5. Action Popup primitive (in-scene wireframe, pad-anchored)
+6. Popup Complete action with rarity tier creature burst + unified dissolve
+7. Popup Delete action with unified dissolve (soft delete)
+8. Popup Color Swatch sub-panel
+9. Popup Group/Ungroup actions
+10. Search endpoint + embedding pipeline + type-anywhere UX
+11. Groups/clusters
+12. Ecosystem manager + creature registry
+13. Atmosphere modes + camera polish
+14. Rag-csv-crew component ports (CursorSnake, NeonScrollbar)
+15. Sound design (last)
 
 **Cross-component dependencies:**
 - Embedding pipeline must exist before search works (but CRUD works without it)
-- Creature registry depends on completion mechanic (egg must work first)
-- Trash lizard depends on soft-delete API
+- Action Popup is the core interaction primitive — Complete/Delete/Color/Group actions all depend on it landing first
 - Ecosystem manager depends on both todo count (ambient creatures) and creature registry (hatched creatures)
 - Atmosphere mode affects every visual component — implement as global Zustand state early, wire into components progressively
 
@@ -441,7 +435,7 @@ make dev  # docker-compose up -d && uvicorn src.main:app --reload & cd frontend 
 - Enums: `snake_case` values — `'pending'`, `'complete'`, `'failed'`
 
 **API Naming (REST):**
-- Endpoints: `snake_case`, plural nouns — `/api/todos`, `/api/groups`, `/api/trash`
+- Endpoints: `snake_case`, plural nouns — `/api/todos`, `/api/groups`, `/api/search`
 - Route parameters: `snake_case` — `/api/todos/{todo_id}`
 - Query parameters: `snake_case` — `/api/search?q=...&limit=20`
 - JSON fields: `snake_case` throughout — `{ "todo_id": "...", "created_at": "..." }`
@@ -457,8 +451,8 @@ make dev  # docker-compose up -d && uvicorn src.main:app --reload & cd frontend 
 **Frontend Code (TypeScript):**
 - Files: `PascalCase.tsx` for components — `LilyPad.tsx`, `PondScene.tsx`
 - Files: `camelCase.ts` for non-components — `usePond.ts`, `todoApi.ts`
-- Components: `PascalCase` — `<LilyPad />`, `<DeleteAphid />`
-- Functions/hooks: `camelCase` — `useTodoStore()`, `handleEggClick()`
+- Components: `PascalCase` — `<LilyPad />`, `<ActionPopup />`
+- Functions/hooks: `camelCase` — `useTodoStore()`, `handlePadClick()`
 - Variables: `camelCase` — `todoId`, `embeddingStatus`
 - Types/interfaces: `PascalCase` — `Todo`, `CreatureType`, `PondState`
 - Constants: `UPPER_SNAKE_CASE` — `NEON_COLORS`, `DEBOUNCE_MS`
@@ -482,8 +476,7 @@ src/
 │   ├── __init__.py
 │   ├── todos.py          # Todo route handlers
 │   ├── groups.py         # Group route handlers
-│   ├── search.py         # Search route handler
-│   └── trash.py          # Trash/archive route handlers
+│   └── search.py         # Search route handler
 ├── models/
 │   ├── __init__.py
 │   ├── todo.py           # SQLAlchemy Todo model
@@ -498,8 +491,7 @@ src/
 │   ├── __init__.py
 │   ├── todo_service.py   # Todo business logic
 │   ├── search_service.py # Hybrid search logic
-│   ├── embedding_service.py # Google API embedding generation
-│   └── archive_service.py   # Auto-archive logic
+│   └── embedding_service.py # Google API embedding generation
 ├── config.py             # Pydantic Settings
 ├── database.py           # SQLAlchemy async engine + session
 └── main.py               # FastAPI app creation + middleware
@@ -514,16 +506,13 @@ src/
 │   │   ├── WaterSurface.tsx
 │   │   ├── LilyPad.tsx
 │   │   └── PondCamera.tsx
-│   ├── creatures/        # Creature-control components
-│   │   ├── CompletionEgg.tsx
-│   │   ├── DeleteAphid.tsx
-│   │   ├── ColorChameleon.tsx
-│   │   ├── TrashLizard.tsx
+│   ├── creatures/        # Ecosystem creature components
 │   │   └── EcosystemManager.tsx
 │   ├── ui/               # HTML overlay components
 │   │   ├── TodoInput.tsx
-│   │   ├── ColorPicker.tsx
-│   │   ├── LizardBellyList.tsx
+│   │   ├── ActionPopup.tsx
+│   │   ├── PopupActionButton.tsx
+│   │   ├── PopupColorSwatch.tsx
 │   │   └── SearchOverlay.tsx
 │   ├── effects/          # Ported rag-csv-crew components
 │   │   ├── CursorSnake.tsx
@@ -536,7 +525,9 @@ src/
 ├── hooks/                # Custom React hooks
 │   ├── usePondInteraction.ts
 │   ├── useSearch.ts
-│   ├── useCreatureHatch.ts
+│   ├── useActionPopup.ts
+│   ├── usePopupComplete.ts
+│   ├── usePopupDelete.ts
 │   └── useKeyboardShortcuts.ts
 ├── stores/               # Zustand stores
 │   ├── usePondStore.ts
@@ -600,11 +591,10 @@ src/
 queryKey: ['todos', 'list']
 queryKey: ['todos', 'detail', todoId]
 queryKey: ['search', 'results', queryText]
-queryKey: ['trash', 'list']
 
 // Mutation naming: use{Action}{Entity}
 useMutation: useCreateTodo, useUpdateTodo, useDeleteTodo
-useMutation: useCreateGroup, useRestoreTodo
+useMutation: useCreateGroup
 ```
 
 **Zustand update pattern — always immutable:**
@@ -652,7 +642,7 @@ export function LilyPad({ todo, onHover, onClick }: LilyPadProps) {
 - React Query provides `isLoading`, `isFetching` per query — use directly
 - Initial pond load: staggered pad materialization (not spinner)
 - Search in progress: water surface shift animation
-- Embedding pending: egg shimmer on affected pad
+- Embedding pending: subtle pad shimmer (outline pulse) on affected pad
 
 **Optimistic updates:**
 ```typescript
@@ -707,10 +697,6 @@ nearform-bmad-todo-app/
 │   │   │   │   ├── LilyPadCluster.tsx     # Group of pads with shared aura
 │   │   │   │   └── PondCamera.tsx         # OrbitControls + auto-framing logic
 │   │   │   ├── creatures/
-│   │   │   │   ├── CompletionEgg.tsx       # Egg on pad: whole → hatch → shell states
-│   │   │   │   ├── DeleteAphid.tsx         # Sleeping → eating → burp lifecycle
-│   │   │   │   ├── ColorChameleon.tsx      # Chameleon + color picker ring
-│   │   │   │   ├── TrashLizard.tsx         # Wandering resident lizard
 │   │   │   │   ├── EcosystemManager.tsx    # Spawns/manages ambient + hatched creatures
 │   │   │   │   └── creatures/              # Individual creature meshes/sprites
 │   │   │   │       ├── Firefly.tsx
@@ -721,10 +707,10 @@ nearform-bmad-todo-app/
 │   │   │   │       └── LegendaryCreatures.tsx
 │   │   │   ├── ui/
 │   │   │   │   ├── TodoInput.tsx           # Neon text input (React portal)
-│   │   │   │   ├── ColorPicker.tsx         # Color ring around chameleon (3D sprites)
-│   │   │   │   ├── LizardBellyList.tsx     # Neon list panel (React portal + NeonScrollbar)
-│   │   │   │   ├── SearchOverlay.tsx       # Search text on water (CSS2DRenderer)
-│   │   │   │   └── Tutorial.tsx            # First-run tutorial flow
+│   │   │   │   ├── ActionPopup.tsx         # In-scene neon wireframe popup anchored to focused pad
+│   │   │   │   ├── PopupActionButton.tsx   # Neon wireframe action button (Complete, Delete, Set Color, Group/Ungroup)
+│   │   │   │   ├── PopupColorSwatch.tsx    # Color swatch sub-panel inside ActionPopup
+│   │   │   │   └── SearchOverlay.tsx       # Search text on water (CSS2DRenderer)
 │   │   │   ├── effects/
 │   │   │   │   ├── CursorSnake.tsx         # Ported from rag-csv-crew
 │   │   │   │   ├── CursorSnake.css
@@ -737,10 +723,11 @@ nearform-bmad-todo-app/
 │   │   ├── hooks/
 │   │   │   ├── usePondInteraction.ts       # Hover, click, drag pad logic
 │   │   │   ├── useSearch.ts                # Type-anywhere + debounce + surface/submerge
-│   │   │   ├── useCreatureHatch.ts         # Egg click → random creature selection + spawn
+│   │   │   ├── useActionPopup.ts           # Popup open/close/position state for focused pad
+│   │   │   ├── usePopupComplete.ts         # Complete action: rarity roll, creature spawn, pad dissolve orchestration
+│   │   │   ├── usePopupDelete.ts           # Delete action: pad dissolve + soft-delete API call
 │   │   │   ├── useKeyboardShortcuts.ts     # Global keyboard event routing
-│   │   │   ├── useAutoFrame.ts             # Camera auto-framing for search results
-│   │   │   └── useTutorial.ts              # First-run tutorial state + flow
+│   │   │   └── useAutoFrame.ts             # Camera auto-framing for search results
 │   │   ├── stores/
 │   │   │   ├── usePondStore.ts             # Camera, atmosphere, viewport
 │   │   │   ├── useTodoStore.ts             # Local cache, optimistic updates
@@ -751,8 +738,7 @@ nearform-bmad-todo-app/
 │   │   │   ├── client.ts                   # Axios instance + snake/camel interceptors
 │   │   │   ├── todoApi.ts                  # useCreateTodo, useUpdateTodo, useDeleteTodo, useTodos
 │   │   │   ├── groupApi.ts                 # useCreateGroup, useUpdateGroup, useDeleteGroup
-│   │   │   ├── searchApi.ts                # useSearch (debounced)
-│   │   │   └── trashApi.ts                 # useTrash, useRestoreTodo
+│   │   │   └── searchApi.ts                # useSearch (debounced)
 │   │   ├── styles/
 │   │   │   ├── neon-tokens.css             # CSS custom properties (ported)
 │   │   │   └── global.css                  # Global styles, font imports, cursor:none
@@ -770,8 +756,7 @@ nearform-bmad-todo-app/
 │   │   ├── __init__.py
 │   │   ├── todos.py                         # CRUD + batch position update
 │   │   ├── groups.py                        # Group CRUD
-│   │   ├── search.py                        # Hybrid search endpoint
-│   │   └── trash.py                         # Trash list + restore
+│   │   └── search.py                        # Hybrid search endpoint
 │   ├── models/
 │   │   ├── __init__.py
 │   │   ├── todo.py                          # Todo SQLAlchemy model
@@ -789,7 +774,6 @@ nearform-bmad-todo-app/
 │   │   ├── group_service.py                 # Group business logic
 │   │   ├── search_service.py                # Full-text + vector ranking
 │   │   ├── embedding_service.py             # Google API integration + retry
-│   │   ├── archive_service.py               # Auto-archive threshold check
 │   │   └── creature_service.py              # Creature spawning, rarity, resident management
 │   ├── config.py                            # Pydantic Settings
 │   ├── database.py                          # Async SQLAlchemy engine + session factory
@@ -804,8 +788,7 @@ nearform-bmad-todo-app/
 │   ├── api/
 │   │   ├── test_todos.py
 │   │   ├── test_groups.py
-│   │   ├── test_search.py
-│   │   └── test_trash.py
+│   │   └── test_search.py
 │   └── services/
 │       ├── test_todo_service.py
 │       ├── test_search_service.py
@@ -830,7 +813,6 @@ nearform-bmad-todo-app/
 | Uncommon | Egg hatch (~35%) | Frog, dragonfly, butterfly | Scales with completions |
 | Rare | Egg hatch (~12%) | Fish, turtle | Scales with completions |
 | Legendary | Egg hatch (~3%) | Golden koi, neon phoenix, glowing jellyfish | Scales with completions |
-| Resident | System-spawned | Trash lizard | Always 1 |
 
 **Creatures table supports all tiers:**
 ```sql
@@ -846,27 +828,11 @@ creatures (
 - Hatched creatures: `todo_id` links to the completed todo (1:1). Despawns on uncomplete.
 - Resident creatures: `todo_id = NULL`. System-managed. Not tied to any todo.
 
-**Tutorial-complete flag:** `SELECT COUNT(*) FROM creatures WHERE rarity = 'resident' AND creature_type = 'trash_lizard'`. If 0, show first-run tutorial. If 1, go straight to pond.
+**First-run experience:** Empty-pond hint ("just start typing...") from Story 1.4 covers onboarding. No tutorial-complete flag needed; the pond's empty state is self-explanatory.
 
-### First-Run Tutorial
+### First-Run Experience
 
-**Purpose:** Onboarding through the pond's own mechanics — no external UI, no modal, no tooltip overlay.
-
-**Flow:**
-
-| Step | Pond State | Prompt | User Action | Result |
-|---|---|---|---|---|
-| 1. Load | Dark pond, single large glowing egg on water | — | Cursor snake activates on mouse move | Immediate "this is different" moment |
-| 2. Hatch lizard | Egg pulses brighter | Ripple text: "click the egg" | Click the egg | Dramatic hatch — trash lizard emerges with neon burst. Lizard stretches, yawns, waddles to edge. |
-| 3. Introduce lizard | Lizard settles at pond edge | Ripple text: "this is your pond keeper — it holds anything you discard" | Watch | Text fades after 3 seconds |
-| 4. First todo | Empty pond + lizard | Ripple text: "type something and press Enter" | User types + Enter | First lily pad drops with ripple |
-| 5. First complete | One lily pad with egg | Ripple text: "click the egg on your lily pad" | Click egg | First creature hatches — user sees the mechanic |
-| 6. Search hint | Pond with one completed pad | Ripple text: "just start typing to find anything" | Optional — user can skip | Demonstrates type-anywhere |
-| Complete | Full pond state | Tutorial prompts stop | — | Lizard exists in DB = tutorial done |
-
-**Skip:** Press Escape at any tutorial step to skip remaining steps. Lizard is spawned immediately (still inserted into creatures table).
-
-**Technical:** Tutorial state managed by `useTutorial.ts` hook. Checks creature table on load. Steps are sequential with Escape-to-skip. Lizard creation is a `POST /api/creatures` with `rarity: 'resident'`.
+**Onboarding:** The empty-pond state (Story 1.4) shows subtle water movement, ambient glow, and the hint text "just start typing..." — sufficient for a zero-guidance first interaction.
 
 ### Architectural Boundaries
 
@@ -897,13 +863,12 @@ creatures (
 
 | FR Category | Backend | Frontend |
 |---|---|---|
-| Task Management (FR1-FR7) | `api/todos.py`, `services/todo_service.py`, `models/todo.py` | `pond/LilyPad.tsx`, `creatures/CompletionEgg.tsx`, `creatures/DeleteAphid.tsx` |
-| Task Organization (FR8-FR12) | `api/groups.py`, `services/group_service.py`, `models/group.py` | `pond/LilyPadCluster.tsx`, `creatures/ColorChameleon.tsx` |
+| Task Management (FR1-FR8) | `api/todos.py`, `services/todo_service.py`, `models/todo.py` | `pond/LilyPad.tsx`, `ui/ActionPopup.tsx`, `ui/PopupActionButton.tsx` |
+| Task Organization (FR9-FR13) | `api/groups.py`, `services/group_service.py`, `models/group.py` | `pond/LilyPadCluster.tsx`, `ui/PopupColorSwatch.tsx` |
 | Task Discovery (FR13-FR21) | `api/search.py`, `services/search_service.py` | `hooks/useSearch.ts`, `ui/SearchOverlay.tsx`, `hooks/useAutoFrame.ts` |
 | Embedding Generation (FR22-FR24) | `services/embedding_service.py` | (transparent — backend only) |
 | Pond Environment (FR25-FR32) | `services/creature_service.py` | `pond/PondScene.tsx`, `pond/WaterSurface.tsx`, `pond/PondCamera.tsx`, `atmosphere/`, `effects/CursorSnake.tsx` |
-| Trash & Archive (FR33-FR36) | `api/trash.py`, `services/archive_service.py` | `creatures/TrashLizard.tsx`, `ui/LizardBellyList.tsx` |
-| Application States (FR37-FR40) | Error responses from all endpoints | `pond/PondScene.tsx` (empty/loading), `pond/LilyPad.tsx` (error decay), `ui/Tutorial.tsx` (first-run) |
+| Application States (FR37-FR40) | Error responses from all endpoints | `pond/PondScene.tsx` (empty/loading), `pond/LilyPad.tsx` (error decay) |
 | Data Persistence (FR41-FR43) | `models/`, `database.py`, `migrations/` | (transparent — backend only) |
 | Sound Design (FR44-FR46) | — | `atmosphere/SoundManager.tsx`, `public/sounds/` |
 | Dev Infrastructure (FR47-FR49) | `docker-compose.yml`, `Makefile`, `.github/workflows/` | `vite.config.ts`, `package.json` |
@@ -951,7 +916,7 @@ User Interaction → React Event Handler → Hook (useSearch, usePondInteraction
 **Critical Gaps:** 0
 
 **Important Gaps Resolved:**
-1. Creature API endpoint — `POST /api/creatures` added for resident creature creation (tutorial). Handled by `creature_service.py`.
+1. Creature records are created server-side during the popup Complete action (no separate `POST /api/creatures` endpoint needed in v1). Handled by `creature_service.py` within the todo update flow.
 2. Position persistence trigger — batch save debounced 2 seconds after drag settles, plus `beforeunload` save.
 
 ### Architecture Completeness Checklist
@@ -966,7 +931,7 @@ User Interaction → React Event Handler → Hook (useSearch, usePondInteraction
 - [x] Error handling patterns for backend and frontend
 - [x] Complete directory structure with file-to-FR mapping
 - [x] Creature rarity system with resident tier
-- [x] First-run tutorial architecture
+- [x] First-run experience (zero-guidance empty pond)
 - [x] Data flow documented end-to-end
 - [x] Implementation sequence defined (12 steps)
 - [x] Cross-component dependencies mapped
@@ -981,12 +946,16 @@ User Interaction → React Event Handler → Hook (useSearch, usePondInteraction
 - Proven tech stack matching rag-csv-crew (portability)
 - Clear separation between 3D rendering and data management
 - Creature table unifies hatched + resident creatures cleanly
-- Tutorial uses the product's own mechanics (egg hatch) for onboarding
+- Onboarding is zero-guidance: empty-pond state + type-anywhere input
 
 **First Implementation Priority:**
 1. docker-compose + database schema + Alembic migrations
 2. FastAPI CRUD endpoints + Pydantic schemas
 3. Frontend Vite project init + Three.js pond scene (water only)
 4. Lily pad rendering + CRUD integration
-5. Creature controls (egg, aphid, chameleon) + tutorial
-6. Search endpoint + embedding pipeline + type-anywhere UX
+5. Action Popup primitive (in-scene wireframe, pad-anchored)
+6. Popup Complete action with rarity tier creature burst + unified dissolve
+7. Popup Delete action with unified dissolve (soft delete)
+8. Popup Color Swatch sub-panel
+9. Popup Group/Ungroup actions
+10. Search endpoint + embedding pipeline + type-anywhere UX

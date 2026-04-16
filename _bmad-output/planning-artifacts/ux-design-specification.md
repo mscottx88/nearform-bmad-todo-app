@@ -66,9 +66,9 @@ The primary action — adding a todo — must feel like depositing something ali
 
 - **Adding a todo** — a text input appears contextually (keyboard shortcut or dedicated trigger), user types, presses enter, and a new lily pad drops into the pond with a ripple. No modal, no form, no fields beyond the text itself.
 - **Finding a todo** — type anywhere outside a focused element. No search bar to locate, no button to click. The pond responds immediately: matching pads surface, non-matches submerge. Clear the input and the pond restores.
-- **Completing a todo** — hover a lily pad to focus it, single click to toggle completion. The pad visually transforms (color shift, partial submersion, glow change) without leaving the pond.
-- **Deleting a todo** — hover to focus, explicit delete action (not accidental). The pad dissolves into the water with a final ripple.
-- **Color assignment** — quick interaction on a focused lily pad to assign a neon color for personal organization.
+- **Completing a todo** — click the pad, the Action Popup materializes, click Complete. The pad flashes green, a creature emerges into the ecosystem, and the pad dissolves into the water.
+- **Deleting a todo** — click the pad, the Action Popup materializes, click Delete. The pad flashes red and dissolves into the water.
+- **Color assignment** — click the pad, the Action Popup materializes, click Set Color, pick a neon swatch from the expanded ring. The pad glow transitions to match.
 
 ### Critical Success Moments
 
@@ -105,8 +105,8 @@ The primary action — adding a todo — must feel like depositing something ali
 | **Exploring (hover/browse)** | Curiosity + discovery | Pads respond to hover, revealing content, shifting focus |
 | **First search** | Surprise + intelligence | Typing transforms the entire pond — "this is smarter than I expected" |
 | **Dense pond (20+ todos)** | Mastery + confidence | The minimap-density view feels intentional, search feels essential |
-| **Error occurs** | Unease + fascination | A lily pad shows bite marks, aphids/caterpillars appear — biological decay rather than UI error banners |
-| **Error resolves** | Relief + resilience | The pad heals, insects disappear, the pond restores itself |
+| **Error occurs** | Unease + fascination | A lily pad shows biological decay — browning edges, glitching glow, distorted water — rather than UI error banners |
+| **Error resolves** | Relief + resilience | The pad heals, decay fades, the pond restores itself |
 | **Mood switch** | Control + playfulness | Toggling between zen and cyberpunk atmospheres transforms the entire environment |
 | **Returning** | Familiarity + warmth | The pond remembers — their colored pads are exactly where they left them |
 
@@ -131,7 +131,7 @@ The primary action — adding a todo — must feel like depositing something ali
 | Curiosity → discovery | Every element responds to hover/interaction — no dead zones |
 | Delight | Ripple physics, pad drop animation, cursor trail, bloom effects |
 | Confidence | Lily pad materialization IS the save confirmation — no toasts or modals |
-| Fascination in errors | Biological decay metaphor — aphids/caterpillars on failing pads instead of error banners |
+| Fascination in errors | Biological decay metaphor — wilting/browning/glitching pads instead of error banners |
 | Control + playfulness | Configurable atmosphere — zen (calm, soft ripples, muted glow) vs. cyberpunk (pulsing, bright, active waves) |
 | Mastery | Progressive density that rewards search-driven navigation |
 | Ownership | User-assigned neon colors create a unique visual fingerprint per person |
@@ -200,7 +200,16 @@ VS Code command palette, Raycast, Spotlight — applications where typing anywhe
 - Environmental responses to user actions (ripples, creature reactions) rather than UI state indicators
 
 **Randomized delight (from casino mechanics):**
-- Variable-intensity feedback — most todo completions get a standard glow; some randomly get particle bursts, creature reactions, or bonus animations
+- Variable-intensity feedback — most popup Complete actions produce a standard green flash and creature emerge; some randomly escalate to particle bursts, creature reactions, or bonus animations
+- Rarity tier distribution for the creature that emerges from the pad during the green flash (not from a cracked egg):
+
+| Rarity | Creatures | Chance | Visual Impact |
+|---|---|---|---|
+| Common | Firefly, water strider | ~50% | Subtle ambient addition |
+| Uncommon | Frog, dragonfly, butterfly | ~35% | Noticeable, fun to watch |
+| Rare | Fish (splashes off pad into water), turtle | ~12% | Exciting, brief celebration |
+| Legendary | Golden koi, neon phoenix, glowing jellyfish | ~3% | Major visual event, particle burst |
+
 - Emergent ecosystem moments — unpredictable creature behaviors create "did you see that?" micro-events
 - Anticipation pacing — actions have brief build-up animations before resolution, creating satisfying rhythm
 
@@ -211,7 +220,7 @@ VS Code command palette, Raycast, Spotlight — applications where typing anywhe
 
 **Ambient soundscape (from casino/game environments):**
 - Layered ambient audio that scales with ecosystem density (water, crickets, frogs)
-- Discrete interaction sounds (splash on add, chime on complete, whoosh on delete)
+- Discrete interaction sounds (splash on add, chime on complete, soft pad-dissolve on delete)
 - Slightly synthetic/processed natural sounds to match neon aesthetic
 - Sound is the last-implemented feature — additive polish, not a dependency
 
@@ -278,7 +287,7 @@ VS Code command palette, Raycast, Spotlight — applications where typing anywhe
 |---|---|---|
 | Splash/drop | Todo added | Water drop with slight synthetic reverb |
 | Completion chime | Todo completed | Tonal chime, occasionally enhanced with bonus particles |
-| Dissolve/sink | Todo deleted | Reverse splash or soft underwater whoosh |
+| Pad dissolve | Todo deleted | Soft synthesized dissolve — subtle, matching the visual |
 | Ripple wash | Search filtering | Soft water movement, panning with results |
 | Surface break | Search result surfacing | Gentle water break sound |
 
@@ -413,31 +422,49 @@ This product is almost entirely novel interaction design. No established pattern
 | Focus | Hover a surfaced result | Pad expands to full readability. Cursor snake glows in the pad's color. | 150ms |
 | Clear | Press Escape | All pads restore to resting state. Water smooths. Search text dissolves. | 400ms |
 
-**3. Completing a Todo (The Transform)**
+**3. The Action Popup (Pad-Level Actions)**
+
+Every pad-level interaction — completion, deletion, color assignment, grouping — flows through one primitive: an in-scene neon wireframe popup that materializes when a pad is clicked.
 
 | Phase | User Action | Pond Response | Duration |
 |---|---|---|---|
-| Focus | Hover the lily pad | Pad rises, expands, glows brighter — interactive state | 150ms |
-| Toggle | Click to complete | Pad's color shifts (desaturated or dimmed glow). Pad partially submerges — lower in the water than active pads. Occasional bonus: particle burst, frog croak, firefly swarm. | 400ms |
-| Uncomplete | Click again | Pad re-saturates, rises back to active level. Gentle ripple. | 300ms |
+| Focus | Click the lily pad | Camera focuses on the pad. ActionPopup wireframe draws in from anchor point at upper-right (or flipped to stay on-screen). | 300ms |
+| Dwell | — | Popup holds steady with action buttons: Complete, Delete, Set Color, Group, Ungroup (contextual) | User-paced |
+| Set Color expand | Click Set Color | Swatch ring unfolds inside the popup. Hovering a swatch previews the color on the pad's glow in real-time. Clicking a swatch commits. | 250ms expand, instant preview |
+| Dismiss | Click outside, Escape, or action committed | Popup collapses back to anchor point, camera returns to prior position | 300ms |
 
-**4. Deleting a Todo (The Dissolve)**
+**4. Completing a Todo (The Green Flash)**
+
+Completion is a soft-state transition — the record persists in the database with `completed=true`, but the pad no longer renders in the pond and no longer appears in search.
 
 | Phase | User Action | Pond Response | Duration |
 |---|---|---|---|
-| Focus | Hover the lily pad | Pad rises to interactive state | 150ms |
-| Trigger | Explicit delete action (button/key on focused pad) | — | Instant |
-| Dissolve | — | Pad breaks apart, fragments sink below surface. Final outward ripple. Nearby creatures react. | 600ms |
+| Trigger | Click Complete in the ActionPopup | Popup dismisses | 200ms |
+| Flash | — | Pad flashes bright neon green, full bloom. Occasional bonus: particle burst, frog croak, firefly swarm. | 300ms |
+| Emerge | — | A creature spawned from this pad emerges from the flash and joins the ecosystem | 300ms |
+| Dissolve | — | Pad dissolves into the water with outward ripple. Nearby creatures react. | 500ms |
 | Settle | — | Water smooths where pad was. Surrounding pads drift slightly to fill the space. | 400ms |
 
-**5. Grouping Todos (The Cluster)**
+**5. Deleting a Todo (The Red Flash)**
+
+Deletion uses the same dissolve gesture as completion, differentiated only by flash color. The record persists in the database with `deleted=true`, but the pad no longer renders and no longer appears in search.
 
 | Phase | User Action | Pond Response | Duration |
 |---|---|---|---|
-| Select | Multi-select pads (keyboard modifier + hover/click) | Selected pads glow with a shared pulse | Per-selection |
-| Group | Trigger group action | Selected pads drift magnetically toward each other, overlapping into a tight cluster. Shared glow aura forms around the cluster. | 500ms |
+| Trigger | Click Delete in the ActionPopup | Popup dismisses | 200ms |
+| Flash | — | Pad flashes bright neon red, full bloom | 300ms |
+| Dissolve | — | Pad dissolves into the water with outward ripple. Nearby creatures react. | 500ms |
+| Settle | — | Water smooths where pad was. Surrounding pads drift slightly to fill the space. | 400ms |
+
+**6. Grouping Todos (The Cluster)**
+
+| Phase | User Action | Pond Response | Duration |
+|---|---|---|---|
+| Initiate | Click a pad → click Group in the popup | Pad enters selection mode, pulses with shared glow | Instant |
+| Select | Click additional pads to add to selection | Each selected pad joins the shared pulse | Per-selection |
+| Group | Confirm | Selected pads drift magnetically toward each other, overlapping into a tight cluster. Shared glow aura forms around the cluster. | 500ms |
 | Label | Optional: type a cluster label | Label text floats above the cluster in neon | User-paced |
-| Ungroup | Trigger ungroup on a cluster | Pads release, drift apart with outward ripples. Aura dissolves. | 500ms |
+| Ungroup | Click a pad in the cluster → click Ungroup in the popup | Pads release, drift apart with outward ripples. Aura dissolves. | 500ms |
 
 ## Visual Design Foundation
 
@@ -601,23 +628,24 @@ Default camera sits at ~30-40 degrees looking across the pond surface toward a s
 flowchart TD
     A[User opens URL] --> B[Pond loads — dark water, ambient glow]
     B --> C{Todos exist?}
-    C -->|No| D[Empty pond — subtle ripples, lone firefly]
+    C -->|No| D[Empty pond — subtle water movement, ambient glow]
     C -->|Yes| E[Pond populated — pads floating, ecosystem active]
-    D --> F[Faint rippling text on water: 'just start typing...']
+    D --> F[Faint rippling hint on water: 'just start typing...']
     F --> G[User moves mouse — cursor snake trail activates]
     G --> H{User types?}
-    H -->|Yes| I[Todo input appears — first pad drops into pond]
+    H -->|Yes| I[First typed character creates the first lily pad]
     H -->|No — hovers| J[Nearby water ripples follow cursor]
     J --> H
-    I --> K[Ripple + ecosystem response — delight moment]
+    I --> K[Pad drops with ripple, ecosystem stirs — delight moment]
     K --> L[User is now in the core loop]
     E --> G
 ```
 
 **Key design decisions:**
-- No onboarding overlay, no tutorial, no welcome modal
-- The empty pond itself IS the onboarding — ambient movement invites interaction
+- No onboarding overlay, no tutorial, no welcome modal, no tutorial egg, no guided prompts
+- The empty pond itself IS the onboarding — subtle water movement and ambient glow invite interaction
 - "Just start typing..." ripple text is the only explicit hint
+- The user's first typed character creates their first lily pad — that IS the onboarding
 - Cursor snake activates immediately — first moment of "this is different"
 
 ### Flow 2: Adding a Todo (The Drop)
@@ -679,28 +707,31 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[User holds modifier key — Shift or Ctrl] --> B[Selection mode activated — subtle visual indicator]
-    B --> C[User hovers + clicks pads to select]
-    C --> D[Selected pads pulse with shared glow]
-    D --> E{More to select?}
-    E -->|Yes| C
-    E -->|No — trigger group| F[Selected pads drift magnetically toward center point]
-    F --> G[Pads overlap into tight cluster formation]
-    G --> H[Shared glow aura forms around cluster]
-    H --> I{User types label?}
-    I -->|Yes| J[Label floats above cluster in monospace retro neon]
-    I -->|Skip| K[Unlabeled cluster]
-    J --> L[Cluster complete — behaves as single unit]
-    K --> L
-    L --> M{Later: ungroup?}
-    M -->|Yes| N[Pads release — drift apart with outward ripples]
-    N --> O[Aura dissolves, pads return to independent floating]
+    A[User clicks first pad] --> B[Camera focuses — ActionPopup materializes]
+    B --> C[User clicks Group in the popup]
+    C --> D[Pad enters selection mode — pulses with shared glow]
+    D --> E[User clicks additional pads to add to selection]
+    E --> F{More to select?}
+    F -->|Yes| E
+    F -->|No — confirm| G[Selected pads drift magnetically toward center point]
+    G --> H[Pads overlap into tight cluster formation]
+    H --> I[Shared glow aura forms around cluster]
+    I --> J{User types label?}
+    J -->|Yes| K[Label floats above cluster in monospace retro neon]
+    J -->|Skip| L[Unlabeled cluster]
+    K --> M[Cluster complete — behaves as single unit]
+    L --> M
+    M --> N{Later: ungroup?}
+    N -->|Yes — click pad in cluster| O[Popup materializes — click Ungroup]
+    O --> P[Pads release — drift apart with outward ripples]
+    P --> Q[Aura dissolves, pads return to independent floating]
 ```
 
 **Key design decisions:**
-- Modifier key for selection avoids conflicting with type-to-search
+- Grouping is initiated through the ActionPopup, consistent with every other pad-level action
 - Magnetic drift animation makes grouping feel physical, not digital
-- Clusters are visual units — they drift together, surface together in search
+- Clusters are visual units — they drift together, surface together in search, drag as a unit
+- Ungroup is also invoked through the popup (on any pad inside the cluster)
 
 ### Flow 5: Live Demo Walkthrough
 
@@ -708,23 +739,28 @@ flowchart TD
 flowchart TD
     A[Presenter opens app on projected screen] --> B[Empty pond — ambient glow fills room display]
     B --> C[Cursor snake trail visible on projection — immediate wow]
-    C --> D[Presenter adds first todo — pad drops with ripple]
+    C --> D[Presenter types — first pad drops with ripple]
     D --> E[Adds 3-4 more todos — pond comes alive]
     E --> F[Ecosystem awakens — fireflies appear]
-    F --> G[Presenter assigns different colors — visual variety]
-    G --> H[Presenter groups 2 todos — magnetic cluster demo]
-    H --> I[Presenter types search query — pond reorganizes dramatically]
-    I --> J[Camera auto-frames results — visual spectacle]
-    J --> K[Presenter toggles atmosphere — zen to cyberpunk]
-    K --> L[Entire environment transforms — crowd reaction]
-    L --> M[Presenter zooms out — shows full pond overview]
-    M --> N[Zooms into a specific pad — detail visible]
-    N --> O[Demo complete — Q&A]
+    F --> G[Presenter clicks a pad — camera focuses, neon wireframe popup materializes]
+    G --> H[Clicks Set Color — swatch ring expands — clicks a color — pad glow transitions]
+    H --> I[Clicks another pad — popup — clicks Group — selects a second pad — magnetic cluster demo]
+    I --> J[Clicks a pad — popup — clicks Complete — pad flashes green, creature emerges into ecosystem, pad dissolves]
+    J --> K[Clicks a pad — popup — clicks Delete — pad flashes red, dissolves into water]
+    K --> L[Presenter types search query — pond reorganizes dramatically]
+    L --> M[Camera auto-frames results — visual spectacle]
+    M --> N[Presenter toggles atmosphere — zen to cyberpunk]
+    N --> O[Entire environment transforms — crowd reaction]
+    O --> P[Presenter zooms out — shows full pond overview]
+    P --> Q[Zooms into a specific pad — detail visible]
+    Q --> R[Demo complete — Q&A]
 ```
 
 **Key design decisions:**
-- Demo flow is designed to escalate visual impressions: cursor → drop → ecosystem → search → atmosphere → camera
+- Demo flow is designed to escalate visual impressions: cursor → drop → popup → completion burst → search → atmosphere → camera
 - Each step introduces a new capability AND a new visual moment
+- The popup is the central interaction surface — every pad-level action flows through it
+- Completion and deletion share the same dissolve gesture, differentiated only by flash color (green vs red)
 - The atmosphere toggle is the climax — the entire world changes
 
 ### Journey Patterns
@@ -753,9 +789,9 @@ flowchart TD
 | **NeonScene** | `Dashboard3D/NeonScene.tsx` | Adapted — canvas wrapper reconfigured for pond scene with OrbitControls |
 | **LightningBorder** | `LightningBorder/` | Adapted — used for cluster glow aura and focused pad highlight |
 | **CSS Variables** | `index.css` | Direct port — full neon color palette |
-| **NeonScrollbar** | `NeonScrollbar/` | Used in lizard belly list view |
+| **NeonScrollbar** | `NeonScrollbar/` | Available for any scrolling overlays (not required by core pond flow) |
 
-*Note: NeonCheckbox from rag-csv-crew is NOT used — replaced by the egg hatching mechanic.*
+*Note: NeonCheckbox from rag-csv-crew is NOT used — completion is performed through the ActionPopup's Complete button (pad flash + dissolve).*
 
 ### Custom Components — Pond Environment
 
@@ -773,119 +809,79 @@ flowchart TD
 #### LilyPad
 
 **Purpose:** Individual todo element — a floating 3D pad on the water surface displaying todo text.
-**Content:** Todo text (sans-serif), neon glow border in assigned color, egg, and creature-controls on hover.
+**Content:** Todo text (sans-serif), neon glow border in assigned color.
 **States:**
-- Resting — floating at water level, partial opacity, assigned neon color, egg visible
-- Hovered — rises above surface, expands, full opacity, text fully readable. Creature controls appear (aphid, chameleon).
-- Completed — desaturated to 40% color intensity, sits lower in water. Hatched shell visible instead of whole egg.
-- Error — biological decay: bite marks appear, textures degrade
+- Resting — floating at water level, partial opacity, assigned neon color
+- Hovered — pad rises slightly, glow amplifies (pre-click affordance only — no action committed on hover)
+- Focused (popup open) — camera focuses on the pad, ActionPopup wireframe anchored to upper-right
+- Completing — flashes neon green, a creature emerges, pad dissolves (terminal animation; record soft-marked `completed=true`)
+- Deleting — flashes neon red, pad dissolves (terminal animation; record soft-marked `deleted=true`)
+- Error — biological decay: wilt, browning, glitching glow, textures degrade
 - Searching (match) — rises, glows at full intensity, foregrounded
 - Searching (no match) — sinks below surface, fades to translucent
-- Aging — pad edges browning, slight wilt, dimming glow (approaching auto-archive threshold)
 - Minimap density — pad shrinks, text becomes rendered colored lines
-**Interaction:** Hover to focus. Drag to move or drag into/out of clusters. Click egg to complete. Click aphid to delete. Click chameleon to pick color.
+**Interaction:** Click to open the ActionPopup. Drag to move or drag into/out of clusters. All terminal actions (Complete, Delete) and stateful actions (Set Color, Group, Ungroup) are invoked through the popup.
 
-### Custom Components — Creature Controls
+### Custom Components — Action Popup
 
-Three creature-controls appear on/near a focused lily pad. They are inhabitants of the pond, not UI buttons.
+All pad-level actions are invoked through a single in-scene control surface: a neon wireframe Action Popup that materializes when a pad is clicked and dismisses when the user acts, clicks outside, or presses Escape.
 
-#### Completion Egg
+#### ActionPopup
 
-**Purpose:** Complete/uncomplete a todo through a creature-hatching lifecycle.
-**Position:** Sits on the lily pad surface, always visible (even at resting state).
-**Appearance:** Small luminescent egg, glowing in the pad's assigned neon color.
+**Purpose:** In-scene neon wireframe panel providing all pad-level actions in one place.
+**Position:** Anchored to the clicked pad's upper-right in camera space, auto-repositioned to stay fully within the viewport (flips to upper-left, below, or above as needed when the pad is near a screen edge).
+**Appearance:** Neon wireframe rectangle with thin glowing edges, slight parallax inside the 3D scene. Bloom postprocessing gives the frame and contents a soft outward glow. Monospace retro typography matches the rest of the environment.
 
-| State | Visual | User Action | Result |
-|---|---|---|---|
-| Active (whole egg) | Intact neon egg on pad, subtle pulse | Click egg | Egg cracks, wobbles, random creature hatches and joins ecosystem. Pad desaturates. |
-| Completed (hatched shell) | Cracked empty shell remains on pad | — | Visual marker that todo is done |
-| Uncomplete | — | Click hatched shell | Shell reforms into whole egg. Creature spawned by this egg despawns from ecosystem. Pad re-saturates. |
+| State | Visual | Trigger |
+|---|---|---|
+| Materializing | Wireframe edges draw in from corner points, contents fade in, camera focuses on the pad | Click on pad |
+| Active | Steady wireframe frame with action buttons visible; pad held in focused state | — |
+| Dismissing | Frame collapses back to its origin point, contents fade out, camera returns to prior position | Click outside, Escape, or action committed |
 
-**Hatch rarity tiers (casino mechanic):**
+**Behavior rules:**
+- Only one ActionPopup is open at a time — opening a popup on a new pad dismisses the previous one
+- The popup materializes in sync with the camera focus animation so the user's attention and the UI surface land together
+- Clicking inside the popup never dismisses it; only clicking empty water, pressing Escape, or committing an action closes it
 
-| Rarity | Creatures | Chance | Visual Impact |
-|---|---|---|---|
-| Common | Firefly, water strider | ~50% | Subtle ambient addition |
-| Uncommon | Frog, dragonfly, butterfly | ~35% | Noticeable, fun to watch |
-| Rare | Fish (splashes off pad into water), turtle | ~12% | Exciting, brief celebration |
-| Legendary | Golden koi, neon phoenix, glowing jellyfish | ~3% | Major visual event, particle burst |
+#### PopupActionButton
 
-**Creature despawn on uncomplete:** The specific creature born from that egg fades out of the ecosystem with a subtle dissolve — maintaining the 1:1 relationship between completed todos and ecosystem fauna.
+**Purpose:** Individual neon wireframe button representing one pad-level action.
+**Actions exposed:** Complete, Delete, Set Color, Group, Ungroup (Ungroup shown only when the pad belongs to a cluster; Group shown only when multi-select or clustering context applies).
+**Appearance:** Thin neon wireframe rectangle with a monospace retro label. Glow provided by Bloom postprocessing, matching the pad's assigned color where relevant.
 
-**Ecosystem implication:** Completed todos = ecosystem fauna count. The more you complete, the more biodiverse and alive the pond becomes. This creates a productivity → beauty feedback loop.
+| State | Visual | User Action |
+|---|---|---|
+| Rest | Wireframe edges at base glow | — |
+| Hover | Glow amplifies, edges brighten, label intensifies | Mouse enters button |
+| Press | Brief inward flash, then triggers the associated action | Click |
 
-#### Delete Aphid
+**Action outcomes:**
+- **Complete** — pad flashes green, a creature emerges from the pad and joins the ecosystem, pad dissolves into the water; record persists with `completed=true` but no longer renders or appears in search
+- **Delete** — pad flashes red, pad dissolves into the water; record persists with `deleted=true` but no longer renders or appears in search
+- **Set Color** — expands the PopupColorSwatch sub-panel inside the ActionPopup
+- **Group / Ungroup** — triggers cluster formation or dissolution (magnetic drift, shared glow aura, optional label, drag-as-unit mechanics)
 
-**Purpose:** Delete a todo through an interruptible creature-eating animation.
-**Position:** Near the lily pad, appears on hover.
-**Appearance:** Small sleeping aphid character — floating Z's, occasional grumbling belly animation.
+#### PopupColorSwatch
 
-| Phase | Visual | User Action | Duration |
-|---|---|---|---|
-| Idle | Aphid sleeping with floating Z's near pad | — | — |
-| Triggered | Aphid wakes up, eyes open, starts eating pad edge | Click aphid | Instant |
-| Eating | Pad visibly shrinks/decays from bite point. Progress bar below pad shows consumption. | Watch or interrupt | ~3 seconds |
-| Abort | Aphid stops eating, yawns, falls back asleep. Pad regenerates to full. | Click pad before progress completes | 300ms recovery |
-| Complete | Aphid consumes entire pad. Pad dissolves. Aphid burps. Fragments drift toward lizard. | Let progress bar finish | 500ms dissolve |
-
-**Sound (when implemented):** Crunching during eating, satisfied burp on completion, snoring during sleep.
-
-#### Color Chameleon
-
-**Purpose:** Assign or change the neon color of a lily pad.
-**Position:** Near the lily pad, appears on hover.
-**Appearance:** Small friendly chameleon, skin color matches pad's current assigned color.
+**Purpose:** Sub-panel expansion inside the ActionPopup for assigning or changing a pad's neon color.
+**Trigger:** Clicking the Set Color PopupActionButton.
+**Appearance:** Ring of 5 neon swatches — pink #ff10f0, cyan #00eeff, orange #ff6600, green #39ff14, gold #ffd700 — rendered as glowing wireframe discs inside the popup frame.
 
 | Phase | Visual | User Action |
 |---|---|---|
-| Idle | Chameleon sits near pad, skin matches pad color | — |
-| Triggered | Chameleon perks up, color picker ring opens around it | Click chameleon |
-| Picking | Neon color dots in a ring (pink, cyan, orange, green, gold). Chameleon previews hovered color in real-time. | Hover to preview |
-| Selected | Chameleon shifts to new color, pad glow transitions to match. Picker closes. Subtle ripple. | Click a color |
-| Cancelled | Picker closes, chameleon returns to original color | Escape or click away |
+| Expand | Swatch ring unfolds outward from the Set Color button | Click Set Color |
+| Preview | Hovered swatch lights up; the underlying pad's glow shifts to that color in real-time | Hover a swatch |
+| Commit | Swatch flashes, ring collapses, pad glow settles on the chosen color, subtle ripple | Click a swatch |
+| Collapse without change | Ring folds back, pad glow restores to its original color | Escape or click Set Color again |
 
 ### Custom Components — Pond Residents
 
-#### Trash/Archive Lizard
-
-**Purpose:** Permanent pond resident serving as trash bin and auto-archive. Recoverable storage for deleted and aged-out todos.
-**Position:** Wanders slowly around the pond edge, repositioning occasionally. Always visible.
-**Appearance:** Fat, content, sleepy lizard with visibly large belly. Neon-colored, matches atmosphere mode. Comic energy.
-
-**Belly size:** Scales visually with consumed todo count. Empty = slim. 50+ = comically rotund.
-
-**How todos enter the belly:**
-
-| Source | Trigger | Animation |
-|---|---|---|
-| Deleted todo | Aphid finishes eating pad | Pad fragments drift toward lizard, lizard gulps them down. Belly grows slightly. |
-| Auto-archived todo | Todo age exceeds configurable threshold | Pad slowly drifts toward lizard, edges browning/wilting. Lizard gently consumes it. |
-
-**Pre-archive visual warning:** Todos approaching archive threshold show subtle aging — browning edges, wilt, dimming glow. Threshold configurable (7/14/30 days, or never).
-
-**Belly view (recovery):**
-
-| Phase | Visual | User Action |
-|---|---|---|
-| Trigger | Lizard burps, neon-styled list panel opens | Click the lizard |
-| Browse | Scrollable neon list — text, color dot, date consumed, source (deleted/archived) | Scroll, search within list |
-| Recover | Lizard spits out new lily pad with comedic animation. Pad lands with ripple. Fresh egg appears. | Click restore on a row |
-| Close | List panel closes, lizard settles back down | Escape or click away |
-
-**Belly list styling:** Neon-bordered panel, NeonScrollbar, monospace retro headers, sans-serif todo text. Search/filter within list.
-
-**Lizard behavior:**
-- Wanders slowly around pond perimeter, pausing in different spots
-- Reacts to nearby interactions — blinks when pads drop nearby, watches aphids with interest
-- Zen mode: mostly sleeping, slow movement
-- Cyberpunk mode: more alert, tongue flicks, eyes tracking cursor
-
 #### EcosystemManager
 
-**Purpose:** Spawns and manages ambient wildlife. Creature population is the sum of: baseline ambient creatures + hatched creatures from completed todos.
+**Purpose:** Spawns and manages ambient wildlife (fireflies, frogs, dragonflies, water striders, fish). Creature population is the sum of: baseline ambient creatures + creatures that emerge from pads on completion.
 **Creature sources:**
 - Ambient creatures: scale with todo count (the flora feeds baseline fauna)
-- Hatched creatures: 1:1 with completed todos (tracked individually for despawn on uncomplete)
+- Emerged creatures: 1:1 with completed todos, spawned from the pad's green completion flash before the pad dissolves
 **Behavior:** Randomized autonomous movement, reactions to user actions, emergent micro-events (frog catches firefly, fish leap), LOD scaling with zoom distance.
 
 ### Custom Components — UI Overlays
@@ -921,37 +917,35 @@ Three creature-controls appear on/near a focused lily pad. They are inhabitants 
 2. LilyPad — todo element with text, color, hover/focus states
 3. CursorSnake — ported from rag-csv-crew
 4. TodoInput — create todos
-5. Completion Egg — hatch to complete (common creatures only initially)
+5. ActionPopup + PopupActionButton — click a pad to open neon wireframe popup with Complete and Delete actions (green/red flash + dissolve)
 6. PondSearch — type-to-search with surface/submerge
 
-**Phase 2 — Creature Controls & Ecosystem:**
-7. Delete Aphid — interruptible delete mechanic
-8. Trash/Archive Lizard — belly view with recovery
-9. Color Chameleon — color picker creature
-10. EcosystemManager — ambient wildlife + hatched creature tracking
-11. LilyPadCluster — grouping/ungrouping
-12. Hatch rarity tiers — uncommon, rare, legendary creatures
+**Phase 2 — Popup Expansion & Ecosystem:**
+7. PopupColorSwatch — Set Color sub-panel with 5-swatch ring
+8. LilyPadCluster — grouping/ungrouping via popup Group/Ungroup actions
+9. EcosystemManager — ambient wildlife + creature emergence on Complete
+10. Rarity tiers for emerged creatures — uncommon, rare, legendary
 
 **Phase 3 — Atmosphere & Polish:**
-13. AtmosphereController — zen/cyberpunk toggle
-14. Camera enhancements — auto-framing, idle drift, orbit constraints
-15. Auto-archive — configurable aging threshold, lizard consumption
-16. Randomized casino celebrations — bonus animations on actions
-17. SoundManager — ambient + interaction audio (last feature)
+11. AtmosphereController — zen/cyberpunk toggle
+12. Camera enhancements — auto-framing on popup open, idle drift, orbit constraints
+13. Randomized casino celebrations — bonus animations on popup Complete
+14. SoundManager — ambient + interaction audio (last feature)
 
 ## UX Consistency Patterns
 
-### Creature Interaction Pattern
+### Pad Interaction Pattern
 
-Every user action on a lily pad is performed through a creature. Creatures follow consistent behavior rules:
+All pad-level interactions flow through a single primitive: click the pad → camera focuses → neon wireframe Action Popup materializes in-scene → user clicks an action button → the popup closes and the camera returns. Completion uses a green flash + creature burst + dissolve; deletion uses a red flash + dissolve; color uses an inline swatch sub-panel; grouping invokes cluster formation. This replaces the prior creature-control pattern (separate egg/aphid/chameleon/lizard interactions) with one consistent interaction surface.
 
 | Rule | Description |
 |---|---|
-| **Appear on hover** | Creature controls (aphid, chameleon) appear when pad is focused. Egg is always visible. |
-| **Idle animation** | Every creature has a resting animation when not interacting (aphid sleeps, chameleon sways, egg pulses) |
-| **Feedback through character** | The creature's reaction IS the confirmation (aphid burps, chameleon shifts color, egg cracks) |
-| **Interruptible** | Destructive actions (delete) have a visible progress window for cancellation |
-| **Non-destructive default** | Hovering/focusing never triggers an action — only explicit clicks |
+| **Click to open** | Clicking any pad focuses the camera and materializes the ActionPopup anchored to that pad |
+| **One at a time** | Only one ActionPopup is open at a time; opening another dismisses the previous |
+| **Consistent dismissal** | Click outside, press Escape, or commit an action to close the popup and return the camera |
+| **Unified terminal gesture** | Complete (green flash) and Delete (red flash) both resolve in the same pad-dissolve animation |
+| **Inline expansion** | Set Color expands a swatch ring sub-panel inside the popup rather than opening a separate UI |
+| **Non-destructive default** | Hovering/focusing never triggers an action — only explicit popup button clicks commit changes |
 
 ### Environmental Feedback Pattern
 
@@ -960,27 +954,28 @@ The pond replaces all traditional feedback mechanisms (toasts, banners, modals) 
 | Traditional Pattern | Pond Equivalent |
 |---|---|
 | Success toast | Ripple effect + ecosystem reaction (fish jump, fireflies flicker) |
-| Error banner | Biological decay on affected pad (bite marks, wilt) + creature scatter |
+| Error banner | Biological decay on affected pad (wilt, browning, glitching glow) + creature scatter |
 | Loading spinner | Water surface shimmer where content is expected |
-| Confirmation modal | Interruptible animation (aphid eating progress bar) |
+| Confirmation modal | Direct popup action (Complete / Delete commits immediately via pad flash + dissolve) |
 | Empty state message | Calm pond with faint rippling text on water surface |
-| Progress indicator | Aphid eating progress bar (delete), egg wobble duration (complete) |
+| Progress indicator | Pad flash + dissolve animation duration is the only progress signal for terminal actions |
 
-**Rule:** If it can be communicated through the pond's physics or creatures, it must be. No overlaid UI feedback except the lizard belly list and search text on water.
+**Rule:** If it can be communicated through the pond's physics or creatures, it must be. No overlaid UI feedback except the in-scene ActionPopup and search text on water.
 
 ### State Communication Pattern
 
 Todo states are communicated through consistent visual language:
 
-| State | Egg | Pad Color | Pad Position | Glow | Additional |
-|---|---|---|---|---|---|
-| Active | Whole, pulsing | Full intensity, assigned neon | Floating at surface | Full bloom | — |
-| Completed | Hatched shell | 40% desaturated | Lower in water | Reduced bloom | Creature in ecosystem |
-| Searching (match) | Visible | Full intensity | Risen, foregrounded | Bright bloom | Camera frames it |
-| Searching (no match) | Hidden | Faded | Sunk below surface | No bloom | Translucent |
-| Error | Visible, dimmed | Unchanged | Unchanged | Flickering | Bite marks, decay, creatures flee |
-| Aging (near archive) | Visible, dusty | Browning edges | Drifting toward lizard | Dimming | Wilt effect |
-| In cluster | Visible | Shared with cluster | Tight overlap | Shared aura | Cluster label above |
+| State | Pad Color | Pad Position | Glow | Additional |
+|---|---|---|---|---|
+| Active | Full intensity, assigned neon | Floating at surface | Full bloom | — |
+| Focused (popup open) | Full intensity | Slightly elevated, camera-focused | Amplified bloom | ActionPopup anchored upper-right |
+| Completed (soft state) | — | Not rendered | — | Record persists with `completed=true`; creature present in ecosystem from the emerge animation |
+| Deleted (soft state) | — | Not rendered | — | Record persists with `deleted=true`; no longer appears in search |
+| Searching (match) | Full intensity | Risen, foregrounded | Bright bloom | Camera frames it |
+| Searching (no match) | Faded | Sunk below surface | No bloom | Translucent |
+| Error | Unchanged | Unchanged | Flickering | Decay, wilt, creatures flee |
+| In cluster | Shared with cluster | Tight overlap | Shared aura | Cluster label above |
 
 ### Keyboard Pattern
 
@@ -992,13 +987,11 @@ Consistent keyboard behavior across all contexts:
 | Escape | Reset camera to default | Unfocus pad | Cancel input/search |
 | Enter | — | — | Submit todo |
 | Backspace | Edit search text | — | Edit input text |
-| Delete | — | Triggers aphid on focused pad | — |
+| Delete | — | Triggers Delete action on the focused pad (via popup) | — |
 | N or / | Opens todo input | Opens todo input | — |
-| Shift/Ctrl + Click | — | Multi-select for grouping | — |
-| G | — | Group selected pads | — |
-| U | — | Ungroup focused cluster | — |
+| Click pad | Opens ActionPopup on clicked pad | Opens ActionPopup on the new pad (dismisses previous) | — |
 | Tab | Cycle focus between pads | Next pad | — |
-| Space | — | Toggle completion (click egg) | — |
+| Space | — | Toggle completion via popup Complete action | — |
 
 **Rule:** Escape always de-escalates — from search to unfocus to default. Never trapped.
 
@@ -1023,7 +1016,7 @@ All errors follow the biological decay metaphor:
 
 | Error Type | Visual | Recovery |
 |---|---|---|
-| Embedding generation fails | Pad exists but egg doesn't pulse (dormant). No creature will hatch until embedding succeeds. Search works via full-text only. | Auto-retry in background. Egg starts pulsing when embedding completes. |
+| Embedding generation fails | Pad exists but has a dormant, non-pulsing glow. Search works via full-text only until embedding succeeds. | Auto-retry in background. Pad glow resumes full pulse when embedding completes. |
 | API timeout | Water surface briefly distorts/glitches near affected area. Affected pad shows faint decay marks. | Auto-retry. Decay marks heal on success. |
 | Save failure | Pad that was dropping freezes mid-air, flickers. | Retry animation. If persistent, pad dissolves with error ripple and todo input reopens with text preserved. |
 | Search failure | Water surface goes unnaturally still (not calm — frozen). | Clears automatically, search text remains for retry. |
@@ -1035,11 +1028,11 @@ All errors follow the biological decay metaphor:
 | Scenario | Visual |
 |---|---|
 | Initial pond load | Dark water fades in, then pads materialize one by one (staggered, not all at once) with gentle drops |
-| Embedding generating | Egg on new pad has a faint shimmer/processing indicator until embedding completes |
+| Embedding generating | New pad's glow has a faint shimmer/processing indicator until embedding completes |
 | Search in progress | Water surface subtly shifts direction, indicating "thinking" |
-| Lizard belly loading | Neon loading pulse in the belly list panel |
+| Popup materializing | Wireframe edges draw in from the anchor point during camera focus animation |
 
-**Rule:** Loading states use environmental animation (water shimmer, egg glow, surface shifts), not spinners or skeleton screens.
+**Rule:** Loading states use environmental animation (water shimmer, pad glow, surface shifts), not spinners or skeleton screens.
 
 ## Responsive Design & Accessibility
 
@@ -1078,9 +1071,9 @@ All errors follow the biological decay metaphor:
 - Reduced motion — animations ARE the product
 
 **In scope (baseline usability):**
-- **Keyboard navigation** — Tab to cycle pads, Space to toggle completion, Delete for aphid, Escape to reset. Full keyboard access to all actions.
+- **Keyboard navigation** — Tab to cycle pads, Enter/Space to open the ActionPopup on the focused pad, arrow keys to move between popup buttons, Escape to dismiss. Full keyboard access to all actions.
 - **Readable text** — clean sans-serif for todo text, hover-to-focus expands pads to readable size at any density
-- **Color independence** — todo states are communicated through multiple channels (position, glow, egg state) not just color. A colorblind user can distinguish active from completed via pad position and egg state.
+- **Color independence** — todo states are communicated through multiple channels (position, glow, dissolve animation) not just color. Active pads render in the pond; completed/deleted pads are soft-removed and no longer rendered, which is unambiguous regardless of color perception.
 - **Neon contrast** — neon colors on black background naturally provide high contrast ratios (neon green #39ff14 on black = ~11:1)
 
 ### Testing Strategy

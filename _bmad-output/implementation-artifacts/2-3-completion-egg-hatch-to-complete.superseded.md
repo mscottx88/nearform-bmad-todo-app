@@ -1,6 +1,12 @@
-# Story 2.3: Completion Egg — Hatch to Complete
+# Story 2.3 (Superseded): Completion Egg — Hatch to Complete
 
-Status: done
+> **⚠️ SUPERSEDED on 2026-04-16.** The egg-hatch completion mechanic was removed from the PRD during a simplification edit that replaced creature-based controls (egg, aphid, chameleon, trash lizard) with an in-scene neon wireframe Action Popup. This story's implementation work (backend creature API, CompletionEgg component, creature hatch hook) is being replaced wholesale by:
+>
+> **Replacement story:** [2-4-completion-via-popup-green-flash-and-dissolve.md](./2-4-completion-via-popup-green-flash-and-dissolve.md) (renumbered from 2.3 to 2.4 on 2026-04-16 to follow the Action Popup primitive which now occupies slot 2.3)
+>
+> Git history for this story's original implementation is preserved (commits `339c2ec`, `12391f0`). The `CompletionEgg.tsx` and `useCreatureHatch.ts` introduced by this story will be deleted as part of the new Story 2.3 implementation.
+
+Status: superseded (was: done)
 
 ## Story
 

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-15 # story 1.2 created
+last_updated: 2026-04-16 # course correction after PRD simplification — egg/aphid/chameleon/trash-lizard removed, Action Popup introduced, Epic 6 deleted
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -51,13 +51,17 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Todo Life on the Pond
+  # Stories renumbered 2026-04-16 to resolve forward dependency — Action Popup primitive (2.3) now precedes
+  # the Complete (2.4) and Delete (2.5) stories that depend on it.
   epic-2: in-progress
   2-1-backend-todo-crud-api: done
   2-2-lily-pad-creation-the-drop: done
-  2-3-completion-egg-hatch-to-complete: done
-  2-4-delete-aphid-interruptible-eating: backlog
-  2-5-todo-state-visualization-and-progressive-density: backlog
+  2-3-in-scene-action-popup: backlog  # primitive — foundation for 2.4, 2.5, and 4.1
+  2-4-completion-via-popup-green-flash-and-dissolve: backlog  # supersedes the done-then-obsoleted egg-hatch story below
+  2-5-deletion-via-popup-red-flash-and-dissolve: backlog
   2-6-loading-and-error-states: backlog
+  # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
+  #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
   epic-2-retrospective: optional
 
   # Epic 3: Exploring the Pond
@@ -68,7 +72,7 @@ development_status:
 
   # Epic 4: Organizing the Pond
   epic-4: backlog
-  4-1-color-chameleon-and-neon-picker: backlog
+  4-1-popup-color-swatch-neon-selector: backlog  # replaces 4-1-color-chameleon-and-neon-picker
   4-2-lily-pad-clustering-and-groups: backlog
   4-3-position-persistence: backlog
   epic-4-retrospective: optional
@@ -80,12 +84,7 @@ development_status:
   5-3-type-anywhere-search-with-surface-submerge: backlog
   epic-5-retrospective: optional
 
-  # Epic 6: The Pond Keeper
-  epic-6: backlog
-  6-1-trash-lizard-and-belly-recovery: backlog
-  6-2-auto-archive-system: backlog
-  6-3-first-run-tutorial: backlog
-  epic-6-retrospective: optional
+  # Epic 6: REMOVED (2026-04-16) — trash lizard, auto-archive, and first-run tutorial dropped from scope per PRD simplification
 
   # Epic 7: The Living Ecosystem
   epic-7: backlog
