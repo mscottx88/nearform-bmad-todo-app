@@ -14,17 +14,19 @@ vi.mock('@react-three/drei', () => ({
 }));
 
 const completingTodosMock = new Map<string, unknown>();
+const deletingTodosMock = new Map<string, unknown>();
 
 vi.mock('../../stores/usePondStore', () => ({
   // Selector-aware stub: returns undefined for any hook selector call
-  // (covers `s.completingTodos.get(id)` which is the only selector this
-  // component uses today). `getState()` exposes the shape the component
-  // touches imperatively — `openPopup` + the `completingTodos` map read
-  // by the handlePadClick double-completion guard.
+  // (covers `s.completingTodos.get(id)` and `s.deletingTodos.get(id)` — the
+  // only selectors this component uses). `getState()` exposes the shape the
+  // component touches imperatively — `openPopup` + the two override maps
+  // read by the handlePadClick double-click guard.
   usePondStore: Object.assign(() => undefined, {
     getState: () => ({
       openPopup: openPopupMock,
       completingTodos: completingTodosMock,
+      deletingTodos: deletingTodosMock,
     }),
   }),
 }));

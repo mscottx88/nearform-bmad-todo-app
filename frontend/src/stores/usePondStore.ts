@@ -40,6 +40,14 @@ export interface CompletingEntry {
   startedAt: number;
 }
 
+// A todo mid-deletion-sequence. Parallel to CompletingEntry — the pad
+// stays rendered via this override through the full red-flash + dissolve
+// even after the backend refetch drops the todo from `useTodos`.
+export interface DeletingEntry {
+  todo: Todo;
+  startedAt: number;
+}
+
 interface PondState {
   atmosphereMode: AtmosphereMode | 'base';
   glowIntensity: number;
@@ -48,6 +56,7 @@ interface PondState {
   cameraFocus: FocusTarget | null;
   activePopupTodoId: string | null;
   completingTodos: Map<string, CompletingEntry>;
+  deletingTodos: Map<string, DeletingEntry>;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   triggerRipple: (x: number, z: number) => void;
@@ -56,6 +65,8 @@ interface PondState {
   closePopup: () => void;
   startCompletion: (todo: Todo, creatureType: string, rarity: string) => void;
   finishCompletion: (todoId: string) => void;
+  startDeletion: (todo: Todo) => void;
+  finishDeletion: (todoId: string) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -66,6 +77,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   cameraFocus: null,
   activePopupTodoId: null,
   completingTodos: new Map(),
+  deletingTodos: new Map(),
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -112,6 +124,25 @@ export const usePondStore = create<PondState>((set, get) => ({
     next.delete(todoId);
     set({ completingTodos: next });
   },
+
+  startDeletion: (todo: Todo) => {
+    const current = get().deletingTodos;
+    // Idempotent: a second dispatch for the same id is a no-op so a
+    // double-click (or double-mount race) doesn't replace the snapshot
+    // mid-sequence or re-fire the DELETE via the caller.
+    if (current.has(todo.id)) return;
+    const next = new Map(current);
+    next.set(todo.id, { todo, startedAt: 0 });
+    set({ deletingTodos: next });
+  },
+
+  finishDeletion: (todoId: string) => {
+    const current = get().deletingTodos;
+    if (!current.has(todoId)) return;
+    const next = new Map(current);
+    next.delete(todoId);
+    set({ deletingTodos: next });
+  },
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook
@@ -120,3 +151,10 @@ export const selectCompleting =
   (todoId: string) =>
   (s: PondState): CompletingEntry | undefined =>
     s.completingTodos.get(todoId);
+
+// Parallel selector for the deletion-sequence override. Same shape as
+// selectCompleting — consumers use `usePondStore(selectDeleting(id))`.
+export const selectDeleting =
+  (todoId: string) =>
+  (s: PondState): DeletingEntry | undefined =>
+    s.deletingTodos.get(todoId);

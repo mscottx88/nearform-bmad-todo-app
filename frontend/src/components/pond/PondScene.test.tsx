@@ -38,6 +38,10 @@ vi.mock('../../api/creatureApi', () => ({
   useCreateCreature: () => ({ mutate: vi.fn() }),
 }));
 
+vi.mock('../../hooks/usePopupDelete', () => ({
+  useDeleteTodoAction: () => vi.fn(),
+}));
+
 vi.mock('./LilyPad', () => ({
   LilyPad: ({ todo }: { todo: Todo }) => (
     <div data-testid={`lily-pad-${todo.id}`} />
@@ -68,6 +72,7 @@ describe('PondScene', () => {
       activePopupTodoId: null,
       cameraFocus: null,
       completingTodos: new Map(),
+      deletingTodos: new Map(),
     });
   });
 
@@ -93,5 +98,19 @@ describe('PondScene', () => {
     );
 
     expect(getByTestId('lily-pad-ghost-todo')).toBeInTheDocument();
+  });
+
+  it('renders a LilyPad for a todo that exists only in deletingTodos (story 2.5 override)', () => {
+    const ghost = makeTodo('ghost-delete');
+    usePondStore.getState().startDeletion(ghost);
+
+    const queryClient = new QueryClient();
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    expect(getByTestId('lily-pad-ghost-delete')).toBeInTheDocument();
   });
 });

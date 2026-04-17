@@ -28,6 +28,7 @@ describe('usePondStore', () => {
       cameraFocus: null,
       dropRipple: null,
       completingTodos: new Map(),
+      deletingTodos: new Map(),
     });
   });
 
@@ -121,6 +122,79 @@ describe('usePondStore', () => {
       expect(state.size).toBe(2);
       expect(state.get('a')?.rarity).toBe('common');
       expect(state.get('b')?.rarity).toBe('legendary');
+    });
+  });
+
+  describe('startDeletion / finishDeletion', () => {
+    it('startDeletion adds an entry keyed by todo id with the todo snapshot', () => {
+      const todo = makeTodo('todo-1', { text: 'delete me', color: '#ff1744' });
+      usePondStore.getState().startDeletion(todo);
+      const entry = usePondStore.getState().deletingTodos.get('todo-1');
+      expect(entry).toBeDefined();
+      expect(entry?.todo).toEqual(todo);
+      expect(entry?.startedAt).toBe(0);
+    });
+
+    it('finishDeletion removes the entry', () => {
+      const todo = makeTodo('todo-1');
+      usePondStore.getState().startDeletion(todo);
+      usePondStore.getState().finishDeletion('todo-1');
+      expect(usePondStore.getState().deletingTodos.has('todo-1')).toBe(false);
+    });
+
+    it('finishDeletion is a no-op when the id is not in the map', () => {
+      const sizeBefore = usePondStore.getState().deletingTodos.size;
+      usePondStore.getState().finishDeletion('nonexistent');
+      expect(usePondStore.getState().deletingTodos.size).toBe(sizeBefore);
+    });
+
+    it('startDeletion is idempotent when the id is already present', () => {
+      const todo = makeTodo('todo-1', { text: 'original' });
+      usePondStore.getState().startDeletion(todo);
+      const firstEntry = usePondStore.getState().deletingTodos.get('todo-1');
+      // Second call with a mutated snapshot should NOT replace the entry.
+      const mutated = makeTodo('todo-1', { text: 'mutated' });
+      usePondStore.getState().startDeletion(mutated);
+      const state = usePondStore.getState();
+      expect(state.deletingTodos.size).toBe(1);
+      expect(state.deletingTodos.get('todo-1')).toBe(firstEntry);
+    });
+
+    it('supports multiple concurrent deleting todos', () => {
+      const a = makeTodo('a');
+      const b = makeTodo('b');
+      usePondStore.getState().startDeletion(a);
+      usePondStore.getState().startDeletion(b);
+      const state = usePondStore.getState().deletingTodos;
+      expect(state.size).toBe(2);
+    });
+
+    it('completingTodos and deletingTodos coexist independently', () => {
+      const completing = makeTodo('c');
+      const deleting = makeTodo('d');
+      usePondStore.getState().startCompletion(completing, 'firefly', 'common');
+      usePondStore.getState().startDeletion(deleting);
+      const state = usePondStore.getState();
+      expect(state.completingTodos.has('c')).toBe(true);
+      expect(state.deletingTodos.has('d')).toBe(true);
+      expect(state.completingTodos.has('d')).toBe(false);
+      expect(state.deletingTodos.has('c')).toBe(false);
+    });
+  });
+
+  describe('selectDeleting selector', () => {
+    it('returns the entry when the id is present', async () => {
+      const { selectDeleting } = await import('./usePondStore');
+      const todo = makeTodo('todo-1');
+      usePondStore.getState().startDeletion(todo);
+      const state = usePondStore.getState();
+      expect(selectDeleting('todo-1')(state)?.todo).toEqual(todo);
+    });
+
+    it('returns undefined when the id is absent', async () => {
+      const { selectDeleting } = await import('./usePondStore');
+      const state = usePondStore.getState();
+      expect(selectDeleting('nope')(state)).toBeUndefined();
     });
   });
 });

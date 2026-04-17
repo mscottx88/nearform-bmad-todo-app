@@ -5,6 +5,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
 import { useTodos } from '../../api/todoApi';
 import { useCompleteTodo } from '../../hooks/usePopupComplete';
+import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
 import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
@@ -16,9 +17,11 @@ export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
   const completingTodos = usePondStore((s) => s.completingTodos);
+  const deletingTodos = usePondStore((s) => s.deletingTodos);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [] } = useTodos();
   const completeTodo = useCompleteTodo();
+  const deleteTodo = useDeleteTodoAction();
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -35,18 +38,27 @@ export function PondScene() {
     usePondStore.getState().triggerRipple(x, z);
   }, []);
 
-  // Merge the live todo list with any in-flight completion overrides so a
-  // pad mid-dissolve keeps rendering even after the backend refetch drops
-  // it from `todos`. Dedup by id; live todos take precedence.
+  // Merge the live todo list with any in-flight completion OR deletion
+  // overrides so a pad mid-dissolve keeps rendering even after the backend
+  // refetch drops it from `todos`. Dedup by id; live todos take precedence.
   const renderTodos = useMemo<Todo[]>(() => {
-    if (completingTodos.size === 0) return todos;
+    if (completingTodos.size === 0 && deletingTodos.size === 0) return todos;
     const ids = new Set(todos.map((t) => t.id));
     const extras: Todo[] = [];
     for (const entry of completingTodos.values()) {
-      if (!ids.has(entry.todo.id)) extras.push(entry.todo);
+      if (!ids.has(entry.todo.id)) {
+        extras.push(entry.todo);
+        ids.add(entry.todo.id);
+      }
+    }
+    for (const entry of deletingTodos.values()) {
+      if (!ids.has(entry.todo.id)) {
+        extras.push(entry.todo);
+        ids.add(entry.todo.id);
+      }
     }
     return extras.length > 0 ? [...todos, ...extras] : todos;
-  }, [todos, completingTodos]);
+  }, [todos, completingTodos, deletingTodos]);
 
   if (glError) {
     return (
@@ -71,6 +83,13 @@ export function PondScene() {
     if (!popupTodo) return;
     const { creatureType, rarity } = completeTodo(popupTodo.id);
     usePondStore.getState().startCompletion(popupTodo, creatureType, rarity);
+    usePondStore.getState().closePopup();
+  };
+
+  const handleDelete = () => {
+    if (!popupTodo) return;
+    deleteTodo(popupTodo.id);
+    usePondStore.getState().startDeletion(popupTodo);
     usePondStore.getState().closePopup();
   };
 
@@ -102,8 +121,7 @@ export function PondScene() {
           key={popupTodo.id}
           todo={popupTodo}
           onComplete={handleComplete}
-          // TODO(Story 2.5): wire Delete to red-flash + dissolve
-          onDelete={() => console.log('Delete', popupTodo.id)}
+          onDelete={handleDelete}
           // TODO(Story 4.1): open color swatch panel
           onSetColor={() => console.log('Set Color', popupTodo.id)}
           // TODO(Epic 4.2): open group/ungroup flow

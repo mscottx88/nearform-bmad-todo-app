@@ -7,9 +7,10 @@ import type { Todo } from '../../types';
 import { usePondStore } from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 
-// 'completed' is a terminal phase — the dissolve finished locally and the
-// pad is awaiting unmount. Distinct from 'completing' so we can distinguish
-// "happy-path finish" from "external cancel" in the recovery branch.
+// 'completed' / 'deleted' are terminal phases — the dissolve finished
+// locally and the pad is awaiting unmount. Distinct from 'completing' /
+// 'deleting' so we can distinguish "happy-path finish" from "external
+// cancel" in the recovery branch.
 type DropPhase =
   | 'forming'
   | 'dropping'
@@ -17,7 +18,9 @@ type DropPhase =
   | 'pulsing'
   | 'resting'
   | 'completing'
-  | 'completed';
+  | 'completed'
+  | 'deleting'
+  | 'deleted';
 
 const DROP_Y_START = 3;
 const DROP_Y_REST = 0.05;
@@ -42,12 +45,59 @@ const COMPLETING_DISSOLVE_END = 1.20;
 const COMPLETING_TOTAL = 1.60;
 const COMPLETE_FLASH_COLOR = new THREE.Vector3(0.224, 1.0, 0.078); // #39ff14
 
+// Deletion-sequence timings mirror completion but drop the Emerge phase —
+// no creature on delete. See story 2-5 for the single source of truth.
+const DELETING_FLASH_END = 0.30;
+const DELETING_DISSOLVE_START = 0.40;
+const DELETING_DISSOLVE_END = 1.20;
+const DELETING_TOTAL = 1.60;
+const DELETE_FLASH_COLOR = new THREE.Vector3(1.0, 0.09, 0.267); // #ff1744
+
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
 function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Shared dissolve/restore traversals used by both the completing and
+// deleting branches. `skipDissolve` opts subtrees out (EmergingCreature
+// tags itself so its emerge fade isn't clobbered during the overlap).
+function fadePadMaterials(group: THREE.Group, opacity: number): void {
+  group.traverse((obj) => {
+    if (obj.userData.skipDissolve) return;
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh || (obj as THREE.Line).isLine) {
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) {
+        for (const m of mat) {
+          m.transparent = true;
+          m.opacity = opacity;
+        }
+      } else if (mat) {
+        mat.transparent = true;
+        mat.opacity = opacity;
+      }
+    }
+  });
+}
+
+function restorePadMaterials(group: THREE.Group): void {
+  group.traverse((obj) => {
+    if (obj.userData.skipDissolve) return;
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh || (obj as THREE.Line).isLine) {
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) {
+        for (const m of mat) m.opacity = 1;
+      } else if (mat) {
+        // MeshBasicMaterial is used for the rim at 0.4 base opacity; every
+        // other material type renders at full opacity in the resting state.
+        mat.opacity = mat instanceof THREE.MeshBasicMaterial ? 0.4 : 1;
+      }
+    }
+  });
 }
 
 // Procedural vein shader for the lily pad surface
@@ -160,12 +210,18 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   const completingStartTimeRef = useRef<number | null>(null);
   const [completingStartTime, setCompletingStartTime] = useState<number | null>(null);
   const completingRippleFired = useRef(false);
+  // Deletion-sequence parallels: same ref + state-mirror split as completion.
+  const deletingStartTimeRef = useRef<number | null>(null);
+  const [deletingStartTime, setDeletingStartTime] = useState<number | null>(null);
+  const deletingRippleFired = useRef(false);
   const [textOpacity, setTextOpacity] = useState(isRecent ? 0 : 1);
 
   // Subscribe to the completion-sequence entry for this todo. When present,
   // the pad transitions into the `completing` phase and drives the flash →
   // emerge → dissolve → settle arc.
   const completing = usePondStore((s) => s.completingTodos.get(todo.id));
+  // Parallel subscription for the deletion-sequence entry.
+  const deleting = usePondStore((s) => s.deletingTodos.get(todo.id));
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
@@ -181,12 +237,14 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   const handlePadClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
-      // Ignore clicks on a pad mid-completion-sequence — the pad is still
-      // visibly present (scale/opacity > 0) through ~t=1.0s of the dissolve,
-      // so it remains hit-testable. A second popup + Complete would fire a
-      // duplicate POST /creatures that fails on the DB UniqueConstraint.
-      if (usePondStore.getState().completingTodos.has(todo.id)) return;
-      usePondStore.getState().openPopup(todo.id, posX, posZ);
+      // Ignore clicks on a pad mid-sequence (completion OR deletion) — the
+      // pad is still visibly present (scale/opacity > 0) through ~t=1.0s of
+      // the dissolve, so it remains hit-testable. A second Complete would
+      // fire a duplicate POST /creatures that fails on the DB
+      // UniqueConstraint; a second Delete would fire a duplicate DELETE.
+      const state = usePondStore.getState();
+      if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;
+      state.openPopup(todo.id, posX, posZ);
     },
     [todo.id, posX, posZ],
   );
@@ -281,18 +339,26 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
       completingRippleFired.current = false;
       setCompletingStartTime(null);
       group.scale.setScalar(1);
-      group.traverse((obj) => {
-        if (obj.userData.skipDissolve) return;
-        const mesh = obj as THREE.Mesh;
-        if (mesh.isMesh || (obj as THREE.Line).isLine) {
-          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-          if (Array.isArray(mat)) {
-            for (const m of mat) m.opacity = 1;
-          } else if (mat) {
-            mat.opacity = mat instanceof THREE.MeshBasicMaterial ? 0.4 : 1;
-          }
-        }
-      });
+      restorePadMaterials(group);
+      restStartTime.current = 0;
+    }
+
+    // Deletion-sequence entry — mirrors the completing transition.
+    if (deleting && phaseRef.current === 'resting') {
+      phaseRef.current = 'deleting';
+      deletingRippleFired.current = false;
+      deletingStartTimeRef.current = state.clock.elapsedTime;
+      setDeletingStartTime(state.clock.elapsedTime);
+    }
+
+    // External-cancel recovery for deletion (parallel to completion).
+    if (!deleting && phaseRef.current === 'deleting') {
+      phaseRef.current = 'resting';
+      deletingStartTimeRef.current = null;
+      deletingRippleFired.current = false;
+      setDeletingStartTime(null);
+      group.scale.setScalar(1);
+      restorePadMaterials(group);
       restStartTime.current = 0;
     }
 
@@ -300,7 +366,7 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
 
     // Terminal state: dissolve finished, awaiting unmount. Don't re-walk
     // descendants every frame, don't restore anything.
-    if (phase === 'completed') return;
+    if (phase === 'completed' || phase === 'deleted') return;
 
     if (phase === 'completing') {
       const startedAt = completingStartTimeRef.current;
@@ -350,23 +416,55 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
         );
         const eased = easeOut(dissolveT);
         group.scale.setScalar(1 - eased);
-        const opacity = 1 - eased;
-        group.traverse((obj) => {
-          if (obj.userData.skipDissolve) return;
-          const mesh = obj as THREE.Mesh;
-          if (mesh.isMesh || (obj as THREE.Line).isLine) {
-            const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-            if (Array.isArray(mat)) {
-              for (const m of mat) {
-                m.transparent = true;
-                m.opacity = opacity;
-              }
-            } else if (mat) {
-              mat.transparent = true;
-              mat.opacity = opacity;
-            }
+        fadePadMaterials(group, 1 - eased);
+      }
+      return;
+    }
+
+    if (phase === 'deleting') {
+      const startedAt = deletingStartTimeRef.current;
+      if (startedAt === null) return;
+      const t = state.clock.elapsedTime - startedAt;
+
+      // Once the sequence is done, mark terminal and release the store
+      // override. finishDeletion is idempotent (has-guard in the store).
+      if (t >= DELETING_TOTAL) {
+        phaseRef.current = 'deleted';
+        usePondStore.getState().finishDeletion(todo.id);
+        return;
+      }
+
+      // Flash: snap uColor to full-intensity neon red for the 300ms flash
+      // window (AC #2 — "at full intensity"), then restore to the pad's
+      // base color on flash-end. The dissolve's opacity fade hides whatever
+      // color is underneath.
+      if (padMeshRef.current) {
+        const mat = padMeshRef.current.material as THREE.ShaderMaterial;
+        if (mat.uniforms?.uColor) {
+          if (t < DELETING_FLASH_END) {
+            mat.uniforms.uColor.value.copy(DELETE_FLASH_COLOR);
+          } else {
+            mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
           }
-        });
+        }
+      }
+
+      // Ripple: fire exactly once at the dissolve start.
+      if (!deletingRippleFired.current && t >= DELETING_DISSOLVE_START) {
+        usePondStore.getState().triggerRipple(posX, posZ);
+        deletingRippleFired.current = true;
+      }
+
+      // Dissolve: no creature to keep visible — plain fade of the whole pad.
+      if (t >= DELETING_DISSOLVE_START) {
+        const dissolveT = Math.min(
+          (t - DELETING_DISSOLVE_START) /
+            (DELETING_DISSOLVE_END - DELETING_DISSOLVE_START),
+          1,
+        );
+        const eased = easeOut(dissolveT);
+        group.scale.setScalar(1 - eased);
+        fadePadMaterials(group, 1 - eased);
       }
       return;
     }
@@ -497,12 +595,12 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
         </bufferGeometry>
         <lineBasicMaterial color={color} linewidth={1} />
       </lineLoop>
-      {/* Text label — fades in on landing. Hidden during the completion
-          sequence (store override) AND the terminal-completed window before
-          unmount. `completingStartTime` persists across finishCompletion so
-          a one-frame label flash over a scale=0 pad is avoided. The
-          external-cancel recovery path nulls it again, restoring the label. */}
-      {!completing && completingStartTime === null && (
+      {/* Text label — fades in on landing. Hidden during the completion OR
+          deletion sequence (store override) AND the terminal-* window before
+          unmount. `*StartTime` state mirrors persist across `finish*` so a
+          one-frame label flash over a scale=0 pad is avoided. The
+          external-cancel recovery paths null them again, restoring the label. */}
+      {!completing && !deleting && completingStartTime === null && deletingStartTime === null && (
         <Html
           position={[0, 0.2, 0]}
           center
