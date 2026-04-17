@@ -119,7 +119,6 @@ export function ActionPopup({
               ) : (
                 <span
                   key={i}
-                  className="action-popup__rainbow-letter"
                   style={{ color: hue, textShadow: `0 0 4px ${hue}` }}
                   aria-hidden
                 >

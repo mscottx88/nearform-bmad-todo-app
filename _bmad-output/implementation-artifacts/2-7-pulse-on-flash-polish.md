@@ -1,6 +1,6 @@
 # Story 2.7: Pulse-on-Flash Polish (Completion + Deletion)
 
-Status: review
+Status: done
 
 > Follow-up polish after [Story 2.4](./2-4-completion-via-popup-green-flash-and-dissolve.md) and [Story 2.5](./2-5-deletion-via-popup-red-flash-and-dissolve.md). The current flash on complete/delete is a flat 300ms color override with no scale change. The creation sequence has a much more tactile feel because of its `pulsing` phase (scale oscillation + rim color-lerp). This story layers the same kind of scale pulse onto the flash window for both sequences so completing and deleting feel as physical as dropping.
 
@@ -20,11 +20,17 @@ so that the click lands with the same tactile feel as dropping a new pad into th
 
 3. **Given** the complete or delete sequence is playing, **When** the 1.2s pulse window ends, **Then** the group scale is exactly 1.0 at the moment the dissolve takes over (no discontinuity). The rim color snaps back to the pad's base color with opacity 0.4 at the same moment so the dissolve doesn't bleed a stuck-green or stuck-red rim.
 
-4. **Given** the complete or delete sequence is playing, **When** the 0.3s flash window is active, **Then** the whole pad surface lights up in the flash color (not just the veins/edges) via a shader-level `uFlashStrength` blend. The raised rim ALSO highlights during the full 1.2s pulse window — color lerps toward the action color (`#39ff14` for Complete, `#ff1744` for Delete) via `max(0, wave) · decay`, and opacity lerps `0.4 → 1.0` at each pulse crest — mirroring the creation-pulse's gold-rim glow with only the target color differing.
+4. **Given** the complete or delete sequence is playing, **When** the sequence runs across the full `2.0s`, **Then** the pad body color shifts toward the HDR action color (`COMPLETE_PAD_TINT` / `DELETE_PAD_TINT`) via a shader-level `uFlashStrength` blend that cubic-ease-ins from `0.0 → PAD_TINT_MAX = 0.6` over the entire `2.0s` — subtle during the pulse, strengthens through the dissolve, peaking as the pad disappears. The raised rim ALSO highlights during the `1.2s` pulse window — color lerps toward the rim action color (HDR `COMPLETE_RIM_COLOR ≈ #39ff14` for Complete, `DELETE_RIM_COLOR ≈ #ff1744` for Delete) via `max(0, wave) · decay`, and opacity lerps `0.4 → 1.0` at each pulse crest — mirroring the creation-pulse's rim glow with only the target color differing. _Amended 2026-04-17 per Michael's "gradual build" direction — replaces the original 0.3s flat-flash window._
 
-5. **Given** the timing budget, **When** the sequence ends, **Then** the total is exactly `COMPLETING_TOTAL = DELETING_TOTAL = 2.0s`: `0.0–0.3s` flash color + full-surface shader boost, `0.0–1.2s` creation-identical scale pulse + action-colored rim highlight, `1.2–2.0s` dissolve (0.8s, unchanged from 2.4/2.5). The ripple fires once at the dissolve boundary.
+5. **Given** the timing budget, **When** the sequence ends, **Then** the total is exactly `COMPLETING_TOTAL = DELETING_TOTAL = 2.0s`: `0.0–1.2s` creation-identical scale pulse + action-colored rim highlight, `0.0–2.0s` cubic-ease-in body tint (runs underneath both pulse and dissolve), `1.2–2.0s` dissolve (0.8s, unchanged from 2.4/2.5). The ripple fires once at the dissolve boundary. _Amended 2026-04-17 alongside AC #4 — the body tint is continuous across the full sequence rather than gated to a 0.3s window._
 
 6. **Given** I re-run the full test suite after this change, **When** all tests finish, **Then** every existing test remains green (no tests assert specific sequence durations today; the new constants replace the old in-place).
+
+7. **Given** the user clicks a resting pad to focus it (transitions `focused: false → true`), **When** the next `useFrame` resting-branch tick runs, **Then** the pad's rim plays a `0.4s` decaying white flash — color lerps toward `FOCUS_RIM_COLOR = (3.0, 3.0, 3.0)` HDR white via `1 - flashT`, opacity lerps `0.4 → 1.0` at the crest — providing tactile click feedback before the popup animates in. Initial-mount `focused=true` does NOT trigger (flash is reserved for click-to-focus events mid-session). _Added 2026-04-17 during implementation — scope expanded per Michael's direction to give click-to-focus the same tactile feedback family as complete/delete._
+
+8. **Given** the popup is open, **When** the user looks at the button palette, **Then** the Delete button renders in neon red (`#ff1744` family) matching the delete-sequence rim HDR target, and the Set Color button renders each letter in a distinct ROYGBIV hue (7-stop rainbow, wrapping `% 7` for labels >7 chars) with an in-hue neon glow via `text-shadow`. Popup click-events are absorbed at the panel root (`onPointerDown` / `onPointerUp` / `onClick` stopPropagation) so popup clicks never reach the water-surface raycaster underneath. _Added 2026-04-17 — popup color alignment + ripple-guard was discovered necessary during complete/delete polish._
+
+9. **Given** the creation-pulse (`phase === 'pulsing'`) plays after a drop, **When** its rim lerps toward `CREATION_RIM_COLOR`, **Then** the target is HDR-range `(2.5, 1.8, 0.2)` (LDR ≈ `#ffd700` neon yellow) so the Bloom pass at `luminanceThreshold 0.2` picks it up as a bright neon spike — matching the brightness family of the new HDR complete/delete rim targets. _Added 2026-04-17 — ensures all three pulse-rim highlights (creation/complete/delete) share one visual brightness family and don't differ by LDR-vs-HDR treatment._
 
 ## Tasks / Subtasks
 
@@ -59,6 +65,26 @@ so that the click lands with the same tactile feel as dropping a new pad into th
   - [x] No new unit tests added. Per the story's own Testing Standards and the shared `deferred-work.md` entry covering 2.4/2.5/2.6/2.7, useFrame-driven scale assertions need the deferred clock-advancing scaffolding that hasn't been built. The pulse is a pure visual addition layered inside an already-tested state machine — timing tests in 2.4/2.5 assert `finishCompletion` / `finishDeletion` fire at `COMPLETING_TOTAL` / `DELETING_TOTAL` and the ripple fires at the dissolve boundary; all remain green.
   - [x] A rendered-DOM scale assertion was NOT added — `LilyPad.test.tsx` mocks `useFrame` as a no-op (matching 2.4/2.5/2.6 patterns), so `group.scale` is never mutated from JSDOM's perspective. Inventing a test-only data attribute just to assert the pulse was rejected per the story's spec guidance.
   - [x] Manual browser verification pending by Michael — complete a todo and delete a todo; both should read as a "thump + dissolve". Tuning guidance: if the pulse reads as a stutter, drop FREQ toward `Math.PI * 3`; if it feels rushed, drop AMPLITUDE toward 0.08.
+
+### Review Findings
+
+_Code review 2026-04-17 — Blind Hunter + Edge Case Hunter + Acceptance Auditor (adversarial parallel review)._
+
+- [x] [Review][Decision → Resolved] AC #4 amended — body tint runs full 2.0s cubic ease-in (matching implementation per Michael's "gradual build" direction). Spec updated 2026-04-17.
+- [x] [Review][Decision → Resolved] Project Structure + new ACs #7/#8/#9 added to cover focus-flash, popup color/rainbow/ripple-guard, and `CREATION_RIM_COLOR` HDR rewrite. Spec updated 2026-04-17.
+- [x] [Review][Patch] React ref read during render — fixed 2026-04-17. `textOpacity` lazy initializer now derives from `isRecent` / `initialDelayMs` directly instead of reading `phaseRef.current`.
+- [x] [Review][Patch] Dead `else if` scale-snap branches — removed from both completing and deleting. The dissolve's `scale = 1 - eased` at `eased=0` picks up seamlessly from the pulse tail.
+- [x] [Review][Patch] Dead CSS rainbow selectors — removed the entire `[style*="--i:N"]` block, `--hue-*` vars, and `--rainbow-color` fallback from ActionPopup.css. Dropped `className="action-popup__rainbow-letter"` from the per-letter spans in ActionPopup.tsx (inline `color`/`textShadow` already do the paint). Layout `.action-popup__button--set-color` rule kept.
+- [x] [Review][Patch] Dead `rimMat.opacity = 0.4` snaps — removed the opacity lines inside both dissolve branches; comment clarified that `fadePadMaterials` drives the opacity ramp.
+- [x] [Review][Patch] External-cancel recovery blocks now restore rim color, clear `focusFlashPendingRef`, and reset `uFlashColor` alongside the existing `uFlashStrength` reset.
+- [x] [Review][Patch] Happy-path terminal transitions (`completing → completed`, `deleting → deleted`) now zero `uFlashStrength` and `uFlashColor` before releasing the store overrides.
+
+**Quality gates after patches:** `npx tsc -b` clean, `npx vitest run` 69/69 green.
+- [x] [Review][Defer] `prefers-reduced-motion` not honored — scale pulses, rim glows, body tint, focus flash ignore the OS preference. Project-wide accessibility gap, not a 2.7 regression. Deferred to a dedicated accessibility sweep.
+- [x] [Review][Defer] Popup has no keyboard handling — no focus trap, no Escape-to-close, no `role="dialog"`/`aria-modal`; Tab falls through to canvas. Predates story 2.7 (ActionPopup shipped in 2.3). Deferred to a popup-a11y story.
+- [x] [Review][Defer] Pre-existing ref-during-render / hook-value-mutation errors outside 2.7 scope — [PondCamera.tsx:108](frontend/src/components/pond/PondCamera.tsx#L108) mutates `camera.position` (a hook-returned value) and [PondScene.tsx:147](frontend/src/components/pond/PondScene.tsx#L147) reads a ref during render. Both predate 2.7 (not in this diff). Noted here so they don't get lost, but belong in a React-strict-compliance pass, not a 2.7 patch.
+
+_Dismissed (~12): HDR uniforms into `MeshBasicMaterial` / shader `uColor` (intentional — project uses Bloom with luminanceThreshold 0.2, established pattern by stories 1-2), `aria-hidden` letters (button `aria-label="Set Color"` covers AT), `'Set Color'.split('')` Unicode safety (ASCII-only literal), speculative clock-wrap / reverse-time concerns (R3F clock monotonic in practice), speculative click-outside-close blockage (no such handler exists), cosmetic GPU cost of body-tint during dissolve (intentional per comment), prevFocusedRef initial-mount behavior (intentional per comment), exact Change Log HDR magnitudes vs code (narrative; ACs only require "HDR-range"), other minor._
 
 ## Implementation Notes
 
@@ -108,18 +134,31 @@ Net: the `completing` and `deleting` branches have been stable since `bf9ecfc` (
 
 ## Project Structure — Files to Create / Modify / Delete
 
+_Amended 2026-04-17 during implementation — original scope was LilyPad.tsx only; Michael's iteration expanded it to include the popup color palette, click-event ripple guard, focus-flash feedback, and HDR alignment of the creation rim._
+
 **New:** none.
 
 **Modified:**
-- `frontend/src/components/pond/LilyPad.tsx` — add `FLASH_PULSE_AMPLITUDE` / `FLASH_PULSE_FREQ` constants; layer scale-pulse inside `if (t < COMPLETING_FLASH_END)` and `if (t < DELETING_FLASH_END)` blocks; clean-up `group.scale.setScalar(1)` on flash-end before the dissolve takes over.
+- `frontend/src/components/pond/LilyPad.tsx` —
+  - Rebudget timings: `COMPLETING_PULSE_END = DELETING_PULSE_END = 1.20` (was inside a 0.3s flash window), `COMPLETING_DISSOLVE_START = DELETING_DISSOLVE_START = 1.20`, `COMPLETING_TOTAL = DELETING_TOTAL = 2.00` (was 1.60).
+  - Add `FLASH_PULSE_AMPLITUDE = 0.12` / `FLASH_PULSE_FREQ = Math.PI * 6` (creation-identical).
+  - Layer creation-identical scale pulse + action-colored rim highlight inside `phase === 'completing'` / `'deleting'` during `t < PULSE_END`.
+  - Add `uFlashColor` / `uFlashStrength` shader uniforms on the pad material; cubic-ease-in `uFlashStrength` toward `PAD_TINT_MAX = 0.6` across the full `2.0s` sequence.
+  - Define HDR rim + body tint targets: `COMPLETE_RIM_COLOR`, `DELETE_RIM_COLOR`, `COMPLETE_PAD_TINT`, `DELETE_PAD_TINT`.
+  - Rewrite `CREATION_RIM_COLOR` from LDR `#ffd700` to HDR `(2.5, 1.8, 0.2)` so all three pulse-rim highlights share one bloom family (AC #9).
+  - Add focus-flash: `FOCUS_FLASH_DURATION`, `FOCUS_RIM_COLOR`, `focusFlashPendingRef`, `focusFlashStartRef`, `prevFocusedRef`; `useEffect` detects `focused: false → true` and sets pending; `useFrame` resting-branch stamps clock + drives the 0.4s white rim flash (AC #7).
+  - External-cancel recovery blocks reset the new `uFlashStrength` uniform.
+- `frontend/src/components/ui/ActionPopup.tsx` — ROYGBIV per-letter palette for the Set Color button via the module-scope `SET_COLOR_LETTERS` table; `aria-label="Set Color"` preserves AT announcement; panel-root `onPointerDown`/`onPointerUp`/`onClick` stopPropagation so popup clicks never trigger the water ripple underneath (AC #8).
+- `frontend/src/components/ui/ActionPopup.css` — Delete button color set to `#ff1744` (matching delete-sequence HDR family); `--set-color` button uses inline per-letter paint; hover background tinted red. `.action-popup__rainbow-letter` styling for the ROYGBIV letters (AC #8).
 
 **Deleted:** none.
 
 **Untouched (keep):**
 - `backend/**` — no backend changes.
-- All other frontend files — this is a micro-polish story.
-- Existing timing constants (`COMPLETING_FLASH_END`, `COMPLETING_DISSOLVE_START`, `COMPLETING_TOTAL`, and their `DELETING_*` siblings) — the story lives inside the existing flash window.
-- Popup, store overrides, and ripple triggers — all out of scope.
+- `usePondStore` — no store-shape changes; the existing completing/deleting entries drive the new pulse/tint.
+- Existing completion/deletion state-machine structure (`completing` / `deleting` / `completed` / `deleted` phases) — only the per-phase visual bodies changed.
+- `WaterSurface.tsx` and ripple triggers — ripple still fires once at the dissolve boundary exactly as in 2.4/2.5.
+- Other popup buttons (Complete, Group) and the popup's overall structure.
 
 ## Testing Standards
 

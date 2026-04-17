@@ -55,3 +55,9 @@
 - Clicking Delete on a pad still in `forming`/`dropping`/`settling`/`pulsing` phase silently delays the deletion sequence up to ~2.1s while the pad finishes its drop (inherited from 2.4 — either widen the transition guard to accept any non-terminal phase, or block `handlePadClick` until `resting`)
 - `uDropCenter` ripple-uniform collision in `WaterSurface.tsx` — two rapid pad actions share a single ripple slot; story 2.5 aggravates frequency (both Complete and Delete fire through the popup) but the single-slot limit dates from story 1.2. Consider a short ripple queue or multiple uniform slots
 - Camera focus mid-lerp cut-off — when the user clicks Delete before `PondCamera`'s focus-zoom lerp completes (before `ARRIVE_THRESHOLD=0.1`), `closePopup()` nulls `cameraFocus` and the camera stops at a random intermediate position. Pre-existing consequence of the spec's camera-restore drop in 2.3/2.4/2.5 — accepted, but worth re-visiting if UX complains
+
+## Deferred from: code review of story 2-7-pulse-on-flash-polish (2026-04-17)
+
+- `prefers-reduced-motion` not honored by scale pulses, rim glows, body tint, or focus flash in LilyPad.tsx — project-wide accessibility gap, not a 2.7 regression. Warrants a dedicated a11y sweep.
+- Popup has no keyboard handling — no focus trap, no Escape-to-close, no `role="dialog"`/`aria-modal`; Tab falls through to canvas. Predates 2.7 (ActionPopup shipped in 2.3; already noted in 2-3 deferred list). Warrants a popup-a11y story.
+- Pre-existing React-strict runtime errors surfaced while reviewing 2.7 but NOT caused by the 2.7 diff: `PondCamera.tsx:108` mutates `camera.position` (hook-returned value); `PondScene.tsx:147` reads a ref during render. Belong in a React-strict-compliance sweep across the frontend — distinct from the LilyPad.tsx:354 variant that IS in 2.7's patch list.

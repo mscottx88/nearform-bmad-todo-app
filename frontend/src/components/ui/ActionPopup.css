@@ -86,46 +86,13 @@
 .action-popup__button--set-color { color: var(--neon-cyan); }
 .action-popup__button--group { color: var(--neon-gold); }
 
-/* Set Color — each letter gets a hue from the ROYGBIV rainbow based on
-   its position index (set via `--i` inline-style). 7 hue stops mapped
-   to CSS variables for easy tuning; characters past index 6 wrap around
-   (the "Set Color" string is 9 chars including the space, so the "o",
-   "r" at indices 7,8 reuse earlier hues — still reads rainbow). */
+/* Set Color — each letter is painted inline from the module-scope
+   SET_COLOR_LETTERS table in ActionPopup.tsx. The per-letter `color`
+   and `text-shadow` come from React's inline style; this block just
+   handles layout for the button container. */
 .action-popup__button--set-color {
-  /* Remove the flat `color` from the parent rule above — each letter
-     paints itself. Border stays neon cyan from the currentColor on the
-     button element. Use a tricked `color` value so currentColor on the
-     border is still cyan. */
   padding-left: 10px;
   padding-right: 10px;
   /* Ensure per-letter spans lay out horizontally without wrapping. */
   white-space: nowrap;
 }
-
-.action-popup__rainbow-letter {
-  /* 7-stop ROYGBIV with neon bias; modulo 7 so longer labels wrap
-     around rather than clipping. Each letter also carries a soft glow
-     in its own hue via text-shadow. */
-  --hue-0: #ff1744; /* R */
-  --hue-1: #ff9100; /* O */
-  --hue-2: #ffea00; /* Y */
-  --hue-3: #00e676; /* G */
-  --hue-4: #00b0ff; /* B */
-  --hue-5: #3d5afe; /* I */
-  --hue-6: #d500f9; /* V */
-  /* Clamp via mod 7. CSS doesn't mod at variable time, so we list the
-     first 9 positions explicitly using inheritance chain tricks.
-     Simpler: rely on the JSX to cap --i to 0..6 (it will for 9 chars
-     since we fall off by wrapping to 0 at index 7 manually below). */
-  color: var(--rainbow-color);
-  text-shadow: 0 0 4px var(--rainbow-color);
-}
-.action-popup__rainbow-letter[style*="--i:0"] { --rainbow-color: var(--hue-0); }
-.action-popup__rainbow-letter[style*="--i:1"] { --rainbow-color: var(--hue-1); }
-.action-popup__rainbow-letter[style*="--i:2"] { --rainbow-color: var(--hue-2); }
-.action-popup__rainbow-letter[style*="--i:3"] { --rainbow-color: var(--hue-3); }
-.action-popup__rainbow-letter[style*="--i:4"] { --rainbow-color: var(--hue-4); }
-.action-popup__rainbow-letter[style*="--i:5"] { --rainbow-color: var(--hue-5); }
-.action-popup__rainbow-letter[style*="--i:6"] { --rainbow-color: var(--hue-6); }
-.action-popup__rainbow-letter[style*="--i:7"] { --rainbow-color: var(--hue-0); }
-.action-popup__rainbow-letter[style*="--i:8"] { --rainbow-color: var(--hue-1); }

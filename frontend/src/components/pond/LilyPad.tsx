@@ -350,9 +350,11 @@ export function LilyPad({
   // Text fades in at the END of the arrival animation. Both creation
   // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
   // paths leave textOpacity=0 until the pad reaches rest; already-settled
-  // pads (no animation) start with text fully visible.
+  // pads (no animation) start with text fully visible. Derive from the
+  // same inputs that feed `phaseRef`'s initializer above — reading
+  // `phaseRef.current` here would violate the ref-during-render rule.
   const [textOpacity, setTextOpacity] = useState(() =>
-    phaseRef.current === 'resting' ? 1 : 0,
+    !isRecent && initialDelayMs === 0 ? 1 : 0,
   );
 
   // Subscribe to the completion-sequence entry for this todo. When present,
@@ -533,10 +535,24 @@ export function LilyPad({
       group.scale.setScalar(1);
       restorePadMaterials(group);
       restStartTime.current = 0;
-      // Clear any body tint accumulated during the cancelled sequence.
+      // Restore rim color — the pulse lerps it toward HDR red; if cancel
+      // lands mid-pulse the rim would otherwise stay frozen-red until
+      // the resting branch's slow lerp pulled it back (~400ms of stuck
+      // rim). `restorePadMaterials` only resets transparent/opacity.
+      if (rimRef.current) {
+        const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+        rimMat.color.set(color);
+      }
+      // A focus-flash queued just before the click-to-delete would
+      // otherwise land as a delayed flash when the pad returns to
+      // resting — drop the pending request.
+      focusFlashPendingRef.current = false;
+      // Clear the body tint uniforms accumulated during the cancelled
+      // sequence (both strength and the HDR color target).
       if (padMeshRef.current) {
         const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
         if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+        if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
       }
     }
 
@@ -568,9 +584,18 @@ export function LilyPad({
       group.scale.setScalar(1);
       restorePadMaterials(group);
       restStartTime.current = 0;
+      // Same post-cancel cleanup as the deleting recovery above:
+      // restore rim color, drop any queued focus-flash, and zero the
+      // body-tint uniforms so the pad returns to baseline.
+      if (rimRef.current) {
+        const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+        rimMat.color.set(color);
+      }
+      focusFlashPendingRef.current = false;
       if (padMeshRef.current) {
         const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
         if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+        if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
       }
     }
 
@@ -591,6 +616,14 @@ export function LilyPad({
       // populated both maps for this id.
       if (t >= COMPLETING_TOTAL) {
         phaseRef.current = 'completed';
+        // Hygiene: zero the body-tint uniforms so that any brief moment
+        // between 'completed' and unmount — or material reuse via HMR /
+        // Strict-Mode double-invocation — starts from a clean baseline.
+        if (padMeshRef.current) {
+          const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
+          if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+          if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
+        }
         const store = usePondStore.getState();
         store.finishCompletion(todo.id);
         store.finishDeletion(todo.id);
@@ -627,10 +660,10 @@ export function LilyPad({
           rimMat.color.set(color).lerp(COMPLETE_RIM_COLOR, glow);
           rimMat.opacity = 0.4 + glow * 0.6;
         }
-
-      } else if (t < COMPLETING_DISSOLVE_START) {
-        group.scale.setScalar(1);
       }
+      // No explicit "hold scale at 1" branch needed: PULSE_END equals
+      // DISSOLVE_START, so the dissolve's `scale = 1 - eased` (starting
+      // at eased=0 → scale=1) picks up seamlessly from the pulse tail.
 
       // Body tint — cubic ease-in across the FULL 2.0s sequence so the
       // shift toward the HDR action color is subtle through the pulse,
@@ -656,12 +689,13 @@ export function LilyPad({
       // `userData.skipDissolve` opts subtrees out — <EmergingCreature>
       // tags itself so its emerge fade isn't clobbered during the overlap.
       if (t >= COMPLETING_DISSOLVE_START) {
-        // Snap rim back to base on dissolve-start so the pulse tail
-        // doesn't leave a stuck-green rim bleeding into the dissolve.
+        // Snap rim color back to base on dissolve-start so the pulse
+        // tail doesn't leave a stuck-green rim bleeding into the
+        // dissolve. Opacity is driven by `fadePadMaterials` below —
+        // no snap needed (the fade takes over on the same frame).
         if (rimRef.current) {
           const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
           rimMat.color.set(color);
-          rimMat.opacity = 0.4;
         }
         const dissolveT = Math.min(
           (t - COMPLETING_DISSOLVE_START) /
@@ -685,6 +719,13 @@ export function LilyPad({
       // defense against a stale cross-map entry.
       if (t >= DELETING_TOTAL) {
         phaseRef.current = 'deleted';
+        // Mirror the completing-branch hygiene — zero the body-tint
+        // uniforms before the pad unmounts.
+        if (padMeshRef.current) {
+          const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
+          if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+          if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
+        }
         const store = usePondStore.getState();
         store.finishDeletion(todo.id);
         store.finishCompletion(todo.id);
@@ -711,10 +752,8 @@ export function LilyPad({
           rimMat.color.set(color).lerp(DELETE_RIM_COLOR, glow);
           rimMat.opacity = 0.4 + glow * 0.6;
         }
-
-      } else if (t < DELETING_DISSOLVE_START) {
-        group.scale.setScalar(1);
       }
+      // See completing branch for the PULSE_END == DISSOLVE_START note.
 
       // Body tint — same full-2.0s cubic ease-in as the completing branch,
       // just with the delete HDR target.
@@ -732,10 +771,10 @@ export function LilyPad({
 
       // Dissolve: no creature to keep visible — plain fade of the whole pad.
       if (t >= DELETING_DISSOLVE_START) {
+        // Color-snap only; opacity is driven by `fadePadMaterials`.
         if (rimRef.current) {
           const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
           rimMat.color.set(color);
-          rimMat.opacity = 0.4;
         }
         const dissolveT = Math.min(
           (t - DELETING_DISSOLVE_START) /
