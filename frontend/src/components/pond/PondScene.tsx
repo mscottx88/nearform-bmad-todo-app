@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -28,15 +28,19 @@ export function PondScene() {
   const completeTodo = useCompleteTodo();
   const deleteTodo = useDeleteTodoAction();
 
-  // Story 2.6: stagger pads on the FIRST non-empty data arrival only.
-  // Subsequent refetches (after any mutation) render in place — we don't
-  // replay the cascade. A ref flips the moment we see the first todo, and
-  // stays flipped for the component's lifetime.
-  const hasSeenInitialLoadRef = useRef(false);
-  const isInitialLoad = !hasSeenInitialLoadRef.current && todos.length > 0;
-  if (isInitialLoad) {
-    hasSeenInitialLoadRef.current = true;
-  }
+  // Story 2.6 AC #1, #3: we always pass `index * STAGGER_STEP_MS` to each
+  // <LilyPad>. The stagger is applied only for pads that mount with a
+  // non-recent `todo.createdAt` — LilyPad itself captures `dropDelayMs`
+  // via a useState lazy initializer at mount time, so:
+  //   - Initial load (N existing todos): N pads mount, all non-recent, each
+  //     stagger delay is captured and honored → staggered cascade.
+  //   - Post-mutation refetch (existing pads stay mounted): LilyPad already
+  //     captured its delay at its own mount; new dropDelayMs props passed
+  //     by PondScene are ignored by the mount-time `useState` lazy init.
+  //   - Newly-created todo mid-session: LilyPad sees `isRecent=true` and
+  //     forces `initialDelayMs=0`, so the new pad forms immediately.
+  // This keeps PondScene stateless and avoids the React-purity pitfalls
+  // of tracking "have we completed the initial load" with a ref or effect.
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -140,7 +144,7 @@ export function PondScene() {
           todo={todo}
           onDropComplete={handleDropComplete}
           focused={activePopupTodoId === todo.id}
-          dropDelayMs={isInitialLoad ? index * STAGGER_STEP_MS : 0}
+          dropDelayMs={index * STAGGER_STEP_MS}
         />
       ))}
       {popupTodo && (

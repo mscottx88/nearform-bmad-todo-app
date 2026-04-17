@@ -150,7 +150,15 @@ describe('PondScene', () => {
     expect(getByTestId('lily-pad-c').getAttribute('data-drop-delay-ms')).toBe('200');
   });
 
-  it('does not re-stagger on subsequent re-renders after initial load (story 2.6 AC #3)', () => {
+  it('passes the same index-based stagger to each LilyPad on every render — anti-restagger is enforced by LilyPad mount-time capture (story 2.6 AC #3)', () => {
+    // PondScene is intentionally stateless about "have we completed the
+    // initial load". It always passes `index * STAGGER_STEP_MS`. The
+    // "don't re-stagger already-mounted pads" guarantee is enforced by
+    // LilyPad's own `useState(() => dropDelayMs)` lazy initializer,
+    // which captures the value at mount and ignores later prop changes.
+    // Mid-session-created pads (isRecent=true) override to 0 inside
+    // LilyPad, so even though PondScene passes a staggered delay for a
+    // new pad at index N, the pad itself forms immediately.
     mockUseTodosData = [makeTodo('a'), makeTodo('b')];
 
     const queryClient = makeTestClient();
@@ -160,19 +168,19 @@ describe('PondScene', () => {
       </QueryClientProvider>,
     );
 
-    // Initial load: staggered delays
     expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
     expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
 
-    // Simulate a post-mutation refetch: same data, re-render
     rerender(
       <QueryClientProvider client={queryClient}>
         <PondScene />
       </QueryClientProvider>,
     );
 
-    // No stagger on re-render — dropDelayMs is 0 for all pads
+    // PondScene keeps passing the index-based delay — the actual
+    // "ignore this value" behavior is proven by LilyPad.test.tsx and
+    // React's useState lazy-init semantics.
     expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
-    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('0');
+    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
   });
 });

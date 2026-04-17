@@ -244,13 +244,17 @@ export function LilyPad({
   const padMeshRef = useRef<THREE.Mesh>(null);
   const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
   // Initial phase — in priority order:
-  //   1. Staggered load (dropDelayMs > 0) → 'waiting' until the delay elapses.
-  //   2. Recently-created (isRecent) → 'forming'.
-  //   3. Otherwise → 'resting' (pre-existing pads on refetch).
-  const [initialDelayMs] = useState(() => dropDelayMs);
+  //   1. Recently-created (isRecent) → 'forming' (no staggering — the user
+  //      just dropped this pad and should see it fly in immediately).
+  //   2. Staggered load (dropDelayMs > 0) → 'waiting' until the delay elapses.
+  //   3. Otherwise → 'resting' (pre-existing pads on refetch, no stagger).
+  // The `isRecent ? 0 : dropDelayMs` precedence ensures PondScene can
+  // safely pass `index * STAGGER_STEP_MS` unconditionally on every render;
+  // mid-session creations ignore the stagger because they're recent.
+  const [initialDelayMs] = useState(() => (isRecent ? 0 : dropDelayMs));
   const waitStartRef = useRef<number | null>(null);
   const phaseRef = useRef<DropPhase>(
-    initialDelayMs > 0 ? 'waiting' : isRecent ? 'forming' : 'resting',
+    isRecent ? 'forming' : initialDelayMs > 0 ? 'waiting' : 'resting',
   );
   const phaseTimer = useRef(0);
   const dropNotified = useRef(false);
