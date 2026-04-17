@@ -64,8 +64,10 @@ interface PondState {
   openPopup: (todoId: string, x: number, z: number) => void;
   closePopup: () => void;
   startCompletion: (todo: Todo, creatureType: string, rarity: string) => void;
+  stampCompletionStart: (todoId: string, startedAt: number) => void;
   finishCompletion: (todoId: string) => void;
   startDeletion: (todo: Todo) => void;
+  stampDeletionStart: (todoId: string, startedAt: number) => void;
   finishDeletion: (todoId: string) => void;
 }
 
@@ -117,6 +119,19 @@ export const usePondStore = create<PondState>((set, get) => ({
     set({ completingTodos: next });
   },
 
+  // Called by LilyPad on the first active frame of the 'completing' phase to
+  // persist the R3F-clock start time in the store. Idempotent: only stamps
+  // when startedAt is still 0 so a component remount mid-sequence reads the
+  // existing value instead of re-stamping (which would replay flash+ripple).
+  stampCompletionStart: (todoId: string, startedAt: number) => {
+    const current = get().completingTodos;
+    const entry = current.get(todoId);
+    if (!entry || entry.startedAt !== 0) return;
+    const next = new Map(current);
+    next.set(todoId, { ...entry, startedAt });
+    set({ completingTodos: next });
+  },
+
   finishCompletion: (todoId: string) => {
     const current = get().completingTodos;
     if (!current.has(todoId)) return;
@@ -133,6 +148,18 @@ export const usePondStore = create<PondState>((set, get) => ({
     if (current.has(todo.id)) return;
     const next = new Map(current);
     next.set(todo.id, { todo, startedAt: 0 });
+    set({ deletingTodos: next });
+  },
+
+  // Parallel to stampCompletionStart — LilyPad calls this on first active
+  // frame of the 'deleting' phase so remount-mid-sequence doesn't replay
+  // the flash + ripple from zero.
+  stampDeletionStart: (todoId: string, startedAt: number) => {
+    const current = get().deletingTodos;
+    const entry = current.get(todoId);
+    if (!entry || entry.startedAt !== 0) return;
+    const next = new Map(current);
+    next.set(todoId, { ...entry, startedAt });
     set({ deletingTodos: next });
   },
 

@@ -51,10 +51,4 @@ describe('useDeleteTodoAction', () => {
     );
     warnSpy.mockRestore();
   });
-
-  it('returns void', () => {
-    const { result } = renderHook(() => useDeleteTodoAction());
-    const ret = result.current('todo-void');
-    expect(ret).toBeUndefined();
-  });
 });

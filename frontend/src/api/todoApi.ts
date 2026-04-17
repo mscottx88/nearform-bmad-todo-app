@@ -59,9 +59,11 @@ export function useUpdateTodo() {
 export function useDeleteTodo() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data } = await apiClient.delete<Todo>(`/todos/${id}`);
-      return data;
+    mutationFn: async (id: string): Promise<void> => {
+      // Backend currently returns the soft-deleted TodoResponse body, but the
+      // consumer (usePopupDelete) discards it. Typing as void keeps the hook
+      // honest if/when the endpoint switches to the canonical 204 No Content.
+      await apiClient.delete(`/todos/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });

@@ -81,16 +81,27 @@ export function PondScene() {
 
   const handleComplete = () => {
     if (!popupTodo) return;
+    // Guard the handler itself — store's `startCompletion` is idempotent
+    // but the POST /creatures network call fires regardless, and a rapid
+    // double-dispatch (synchronous re-click, touchstart+click pairing)
+    // would produce a duplicate that fails on the DB UniqueConstraint.
+    const store = usePondStore.getState();
+    if (store.completingTodos.has(popupTodo.id) || store.deletingTodos.has(popupTodo.id)) return;
     const { creatureType, rarity } = completeTodo(popupTodo.id);
-    usePondStore.getState().startCompletion(popupTodo, creatureType, rarity);
-    usePondStore.getState().closePopup();
+    store.startCompletion(popupTodo, creatureType, rarity);
+    store.closePopup();
   };
 
   const handleDelete = () => {
     if (!popupTodo) return;
+    // Guard the handler itself — store's `startDeletion` is idempotent but
+    // the DELETE network call fires regardless, and a duplicate DELETE can
+    // 404 silently since the first call soft-deletes the row.
+    const store = usePondStore.getState();
+    if (store.deletingTodos.has(popupTodo.id) || store.completingTodos.has(popupTodo.id)) return;
     deleteTodo(popupTodo.id);
-    usePondStore.getState().startDeletion(popupTodo);
-    usePondStore.getState().closePopup();
+    store.startDeletion(popupTodo);
+    store.closePopup();
   };
 
   return (

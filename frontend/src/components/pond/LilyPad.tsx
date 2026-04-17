@@ -4,7 +4,7 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
-import { usePondStore } from '../../stores/usePondStore';
+import { usePondStore, selectCompleting, selectDeleting } from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 
 // 'completed' / 'deleted' are terminal phases — the dissolve finished
@@ -83,6 +83,26 @@ function fadePadMaterials(group: THREE.Group, opacity: number): void {
   });
 }
 
+// Pad materials in their resting configuration:
+//   - ShaderMaterial (pad surface) — transparent=true, opacity=1 (driven by shader alpha)
+//   - MeshBasicMaterial (rim) — transparent=true, opacity=0.4
+//   - LineBasicMaterial (top edge) — transparent=false, opacity=1
+// The dissolve's `fadePadMaterials` flips transparent=true on everything;
+// this helper must restore the flag too or lineBasicMaterial is left in
+// transparent-blend mode, producing depth-sort flicker on external cancel.
+function restoreMaterial(m: THREE.Material): void {
+  if (m instanceof THREE.LineBasicMaterial) {
+    m.transparent = false;
+    m.opacity = 1;
+  } else if (m instanceof THREE.MeshBasicMaterial) {
+    m.transparent = true;
+    m.opacity = 0.4;
+  } else {
+    m.transparent = true;
+    m.opacity = 1;
+  }
+}
+
 function restorePadMaterials(group: THREE.Group): void {
   group.traverse((obj) => {
     if (obj.userData.skipDissolve) return;
@@ -90,11 +110,9 @@ function restorePadMaterials(group: THREE.Group): void {
     if (mesh.isMesh || (obj as THREE.Line).isLine) {
       const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
       if (Array.isArray(mat)) {
-        for (const m of mat) m.opacity = 1;
+        for (const m of mat) restoreMaterial(m);
       } else if (mat) {
-        // MeshBasicMaterial is used for the rim at 0.4 base opacity; every
-        // other material type renders at full opacity in the resting state.
-        mat.opacity = mat instanceof THREE.MeshBasicMaterial ? 0.4 : 1;
+        restoreMaterial(mat);
       }
     }
   });
@@ -219,9 +237,9 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   // Subscribe to the completion-sequence entry for this todo. When present,
   // the pad transitions into the `completing` phase and drives the flash →
   // emerge → dissolve → settle arc.
-  const completing = usePondStore((s) => s.completingTodos.get(todo.id));
+  const completing = usePondStore(selectCompleting(todo.id));
   // Parallel subscription for the deletion-sequence entry.
-  const deleting = usePondStore((s) => s.deletingTodos.get(todo.id));
+  const deleting = usePondStore(selectDeleting(todo.id));
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
@@ -318,45 +336,64 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
     const group = groupRef.current;
     if (!group) return;
 
-    // Transition into the completion sequence as soon as the store marks
-    // this todo as completing. Stamp the start time from the R3F clock on
-    // the first active frame (never `performance.now()` — different clock).
-    if (completing && phaseRef.current === 'resting') {
-      phaseRef.current = 'completing';
-      completingRippleFired.current = false;
-      completingStartTimeRef.current = state.clock.elapsedTime;
-      setCompletingStartTime(state.clock.elapsedTime);
-    }
-
-    // Recovery: if the completing override was cleared while we were still
-    // mid-sequence (external cancel path — NOT the happy-path terminal
-    // transition, which moves to 'completed' first), restore the pad to
-    // `resting` with full opacity/scale so it isn't an invisible unclickable
-    // ghost when the todo is still present in useTodos.
-    if (!completing && phaseRef.current === 'completing') {
-      phaseRef.current = 'resting';
-      completingStartTimeRef.current = null;
-      completingRippleFired.current = false;
-      setCompletingStartTime(null);
-      group.scale.setScalar(1);
-      restorePadMaterials(group);
-      restStartTime.current = 0;
-    }
-
-    // Deletion-sequence entry — mirrors the completing transition.
+    // Deletion-sequence entry. Ordered BEFORE the completing transition per
+    // spec — if state somehow contains both, deletion wins (terminal intent).
+    // Read startedAt from the store entry if already stamped (remount mid-
+    // sequence); otherwise stamp now from the R3F clock so subsequent mounts
+    // reuse the same anchor and don't replay flash+ripple.
     if (deleting && phaseRef.current === 'resting') {
       phaseRef.current = 'deleting';
       deletingRippleFired.current = false;
-      deletingStartTimeRef.current = state.clock.elapsedTime;
-      setDeletingStartTime(state.clock.elapsedTime);
+      const anchor =
+        deleting.startedAt !== 0 ? deleting.startedAt : state.clock.elapsedTime;
+      if (deleting.startedAt === 0) {
+        usePondStore.getState().stampDeletionStart(todo.id, anchor);
+      } else {
+        // On remount, the ripple was already fired by the previous instance.
+        deletingRippleFired.current = true;
+      }
+      deletingStartTimeRef.current = anchor;
+      setDeletingStartTime(anchor);
     }
 
-    // External-cancel recovery for deletion (parallel to completion).
+    // External-cancel recovery for deletion. Runs before completing-cancel so
+    // the spec ordering is preserved even though they are mutually exclusive
+    // in practice.
     if (!deleting && phaseRef.current === 'deleting') {
       phaseRef.current = 'resting';
       deletingStartTimeRef.current = null;
       deletingRippleFired.current = false;
       setDeletingStartTime(null);
+      group.scale.setScalar(1);
+      restorePadMaterials(group);
+      restStartTime.current = 0;
+    }
+
+    // Transition into the completion sequence. Same store-anchor pattern as
+    // deletion: reuse a persisted startedAt on remount rather than re-stamp.
+    if (completing && phaseRef.current === 'resting') {
+      phaseRef.current = 'completing';
+      completingRippleFired.current = false;
+      const anchor =
+        completing.startedAt !== 0 ? completing.startedAt : state.clock.elapsedTime;
+      if (completing.startedAt === 0) {
+        usePondStore.getState().stampCompletionStart(todo.id, anchor);
+      } else {
+        completingRippleFired.current = true;
+      }
+      completingStartTimeRef.current = anchor;
+      setCompletingStartTime(anchor);
+    }
+
+    // Recovery: if the completing override was cleared while we were still
+    // mid-sequence (external cancel — NOT the happy-path terminal transition,
+    // which moves to 'completed' first), restore the pad to `resting` with
+    // full opacity/scale so it isn't an invisible unclickable ghost.
+    if (!completing && phaseRef.current === 'completing') {
+      phaseRef.current = 'resting';
+      completingStartTimeRef.current = null;
+      completingRippleFired.current = false;
+      setCompletingStartTime(null);
       group.scale.setScalar(1);
       restorePadMaterials(group);
       restStartTime.current = 0;
@@ -374,10 +411,14 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
       const t = state.clock.elapsedTime - startedAt;
 
       // Once the sequence is done, mark terminal and release the store
-      // override. finishCompletion is idempotent (has-guard in the store).
+      // override. finish* actions are idempotent — calling both unconditionally
+      // defends against a cross-map stale entry if something upstream ever
+      // populated both maps for this id.
       if (t >= COMPLETING_TOTAL) {
         phaseRef.current = 'completed';
-        usePondStore.getState().finishCompletion(todo.id);
+        const store = usePondStore.getState();
+        store.finishCompletion(todo.id);
+        store.finishDeletion(todo.id);
         return;
       }
 
@@ -426,11 +467,14 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
       if (startedAt === null) return;
       const t = state.clock.elapsedTime - startedAt;
 
-      // Once the sequence is done, mark terminal and release the store
-      // override. finishDeletion is idempotent (has-guard in the store).
+      // Once the sequence is done, mark terminal and release BOTH store
+      // overrides — finish* are idempotent, so the cross-call is a safe
+      // defense against a stale cross-map entry.
       if (t >= DELETING_TOTAL) {
         phaseRef.current = 'deleted';
-        usePondStore.getState().finishDeletion(todo.id);
+        const store = usePondStore.getState();
+        store.finishDeletion(todo.id);
+        store.finishCompletion(todo.id);
         return;
       }
 

@@ -1,5 +1,5 @@
 import { render, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LilyPad } from './LilyPad';
 import type { Todo } from '../../types';
 
@@ -15,20 +15,39 @@ vi.mock('@react-three/drei', () => ({
 
 const completingTodosMock = new Map<string, unknown>();
 const deletingTodosMock = new Map<string, unknown>();
+const triggerRippleMock = vi.fn();
+const startCompletionMock = vi.fn();
+const stampCompletionStartMock = vi.fn();
+const finishCompletionMock = vi.fn();
+const startDeletionMock = vi.fn();
+const stampDeletionStartMock = vi.fn();
+const finishDeletionMock = vi.fn();
 
 vi.mock('../../stores/usePondStore', () => ({
   // Selector-aware stub: returns undefined for any hook selector call
   // (covers `s.completingTodos.get(id)` and `s.deletingTodos.get(id)` — the
   // only selectors this component uses). `getState()` exposes the shape the
-  // component touches imperatively — `openPopup` + the two override maps
-  // read by the handlePadClick double-click guard.
+  // component touches imperatively — `openPopup`, the two override maps,
+  // the triggerRipple action, and all the start/stamp/finish actions that
+  // the `useFrame` branches call. These are mocked defensively so that if a
+  // future test un-mocks `useFrame` for a phase-progression assertion, the
+  // store methods exist and the suite doesn't blow up with "not a function".
   usePondStore: Object.assign(() => undefined, {
     getState: () => ({
       openPopup: openPopupMock,
       completingTodos: completingTodosMock,
       deletingTodos: deletingTodosMock,
+      triggerRipple: triggerRippleMock,
+      startCompletion: startCompletionMock,
+      stampCompletionStart: stampCompletionStartMock,
+      finishCompletion: finishCompletionMock,
+      startDeletion: startDeletionMock,
+      stampDeletionStart: stampDeletionStartMock,
+      finishDeletion: finishDeletionMock,
     }),
   }),
+  selectCompleting: () => () => undefined,
+  selectDeleting: () => () => undefined,
 }));
 
 const mockTodo: Todo = {
@@ -48,17 +67,43 @@ const mockTodo: Todo = {
 };
 
 describe('LilyPad', () => {
+  beforeEach(() => {
+    openPopupMock.mockClear();
+    completingTodosMock.clear();
+    deletingTodosMock.clear();
+  });
+
   it('renders without errors', () => {
     const { container } = render(<LilyPad todo={mockTodo} />);
     expect(container).toBeTruthy();
   });
 
   it('calls openPopup with todo id and pad position when clicked', () => {
-    openPopupMock.mockClear();
     const { container } = render(<LilyPad todo={mockTodo} />);
     const padMesh = container.querySelector('mesh');
     expect(padMesh).toBeTruthy();
     if (padMesh) fireEvent.click(padMesh);
     expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+  });
+
+  it('does not open the popup when the todo is already in deletingTodos (double-click guard)', () => {
+    deletingTodosMock.set('123', { todo: mockTodo, startedAt: 0 });
+    const { container } = render(<LilyPad todo={mockTodo} />);
+    const padMesh = container.querySelector('mesh');
+    if (padMesh) fireEvent.click(padMesh);
+    expect(openPopupMock).not.toHaveBeenCalled();
+  });
+
+  it('does not open the popup when the todo is already in completingTodos (double-click guard)', () => {
+    completingTodosMock.set('123', {
+      todo: mockTodo,
+      creatureType: 'firefly',
+      rarity: 'common',
+      startedAt: 0,
+    });
+    const { container } = render(<LilyPad todo={mockTodo} />);
+    const padMesh = container.querySelector('mesh');
+    if (padMesh) fireEvent.click(padMesh);
+    expect(openPopupMock).not.toHaveBeenCalled();
   });
 });
