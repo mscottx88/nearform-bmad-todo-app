@@ -34,11 +34,17 @@ def create_todo(db: Session, data: TodoCreate) -> Todo:
 
 
 def list_todos(db: Session) -> list[Todo]:
+    # Completed todos are hidden from the pond — completion is terminal
+    # and there is no uncomplete path in the product (see story 2.4). The
+    # DB row is preserved (creatures reference it; future views may
+    # surface completed history) but the pond never re-renders it, so
+    # refreshing the page doesn't resurrect a pad the user already finished.
     return (
         db.query(Todo)
         .filter(
             Todo.deleted == False,  # noqa: E712
             Todo.archived == False,  # noqa: E712
+            Todo.completed == False,  # noqa: E712
         )
         .order_by(Todo.created_at.desc())
         .all()

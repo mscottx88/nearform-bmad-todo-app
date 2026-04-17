@@ -39,6 +39,29 @@ def test_list_todos_returns_active_only(db_session: Session) -> None:
     assert todos[0].text == "Active"
 
 
+def test_list_todos_excludes_completed(db_session: Session) -> None:
+    # Completed todos are terminal — they must not reappear in the pond on
+    # refresh (see story 2.4 / 2.6 follow-up). The DB row is preserved for
+    # creature FK and future views, but list_todos filters it out.
+    todo_service.create_todo(
+        db_session,
+        TodoCreate(text="Active"),
+    )
+    completed = todo_service.create_todo(
+        db_session,
+        TodoCreate(text="Completed"),
+    )
+    todo_service.update_todo(
+        db_session,
+        completed.id,
+        TodoUpdate(completed=True),
+    )
+
+    todos = todo_service.list_todos(db_session)
+    assert len(todos) == 1
+    assert todos[0].text == "Active"
+
+
 def test_list_todos_returns_multiple(db_session: Session) -> None:
     todo_service.create_todo(
         db_session,
