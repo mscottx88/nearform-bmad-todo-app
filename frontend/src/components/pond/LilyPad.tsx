@@ -86,6 +86,16 @@ const DELETING_TOTAL = 2.00;
 // Matching HDR treatment for the delete rim — LDR ~= #ff1744 (neon red).
 const DELETE_RIM_COLOR = new THREE.Color().setRGB(2.5, 0.3, 0.7);
 
+// Story 2.7 follow-up: HDR pad-body tint targets. Driven via the
+// `uFlashColor` + `uFlashStrength` shader uniforms. Per Michael's
+// direction the strength lerps across the ENTIRE 2.0s sequence (not
+// just the 1.2s pulse) with a cubic ease-in — subtle at the start so
+// the build doesn't read as "intense all at once", peaking at the
+// moment the dissolve finishes and the pad disappears.
+const COMPLETE_PAD_TINT = new THREE.Vector3(0.2, 2.0, 0.1);
+const DELETE_PAD_TINT = new THREE.Vector3(2.0, 0.2, 0.5);
+const PAD_TINT_MAX = 0.6;
+
 // Creation rim target — HDR neon yellow matching the complete/delete
 // treatment so all three pulse-rim highlights share the same brightness
 // "family". Replaces the prior LDR #ffd700 gold. LDR ~= #ffd700.
@@ -196,6 +206,8 @@ const padVertexShader = /* glsl */ `
 
 const padFragmentShader = /* glsl */ `
   uniform vec3 uColor;
+  uniform vec3 uFlashColor;
+  uniform float uFlashStrength;
   uniform float uSeed;
   varying vec2 vPos;
 
@@ -229,6 +241,13 @@ const padFragmentShader = /* glsl */ `
 
     // Slight radial gradient — lighter at edges
     finalColor += uColor * 0.015 * dist;
+
+    // Story 2.7 follow-up: gradual body tint toward the HDR action color
+    // during complete/delete. uFlashStrength lerps up during the pulse
+    // window in useFrame; uFlashColor is the HDR target. When strength = 0
+    // (resting, waiting, creation) this is a no-op.
+    float fs = clamp(uFlashStrength, 0.0, 1.0);
+    finalColor = mix(finalColor, uFlashColor, fs);
 
     // Slightly transparent so overlapping pads don't look harsh
     gl_FragColor = vec4(finalColor, 0.92);
@@ -450,6 +469,12 @@ export function LilyPad({
   const [padUniforms] = useState(() => ({
     uColor: { value: new THREE.Vector3(colorVec.r, colorVec.g, colorVec.b) },
     uSeed: { value: driftSeed },
+    // Story 2.7 follow-up: body tint target + blend strength. Strength is
+    // 0 everywhere except inside the 1.2s complete/delete pulse window,
+    // where it eases in cubically up to a soft cap so the body only
+    // gently gains action-color — the ridge remains the primary signal.
+    uFlashColor: { value: new THREE.Vector3(0, 0, 0) },
+    uFlashStrength: { value: 0 },
   }));
 
   useEffect(() => {
@@ -508,6 +533,11 @@ export function LilyPad({
       group.scale.setScalar(1);
       restorePadMaterials(group);
       restStartTime.current = 0;
+      // Clear any body tint accumulated during the cancelled sequence.
+      if (padMeshRef.current) {
+        const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
+        if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+      }
     }
 
     // Transition into the completion sequence. Same store-anchor pattern as
@@ -538,6 +568,10 @@ export function LilyPad({
       group.scale.setScalar(1);
       restorePadMaterials(group);
       restStartTime.current = 0;
+      if (padMeshRef.current) {
+        const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
+        if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
+      }
     }
 
     const phase = phaseRef.current;
@@ -564,12 +598,15 @@ export function LilyPad({
       }
 
       // Story 2.7: the complete sequence is now 2.0s total —
-      //   0.0–1.2s   scale pulse + rim highlight (creation-identical)
+      //   0.0–1.2s   scale pulse + rim highlight + gentle body tint
       //   1.2–2.0s   dissolve (ripple fires at 1.2s)
-      // Color feedback is carried entirely by the ridge (rim) — the pad
-      // body does NOT flash on complete/delete per the 2.7 iteration with
-      // Michael. Ridge-only highlight mirrors the creation pulse's
-      // gold-rim glow with action-specific color.
+      // Ridge carries the primary color signal (HDR-neon rim lerp). The
+      // pad BODY also drifts toward the HDR action color via shader
+      // uFlashStrength, but capped and eased so it reads as a gradual
+      // build rather than a hard flash.
+      const mat = padMeshRef.current
+        ? (padMeshRef.current.material as THREE.ShaderMaterial)
+        : null;
 
       // Pulse: identical math to creation's `pulsing` phase — three
       // damped oscillations over 1.2s. Scale snaps to 1.0 on pulse-end
@@ -590,8 +627,20 @@ export function LilyPad({
           rimMat.color.set(color).lerp(COMPLETE_RIM_COLOR, glow);
           rimMat.opacity = 0.4 + glow * 0.6;
         }
+
       } else if (t < COMPLETING_DISSOLVE_START) {
         group.scale.setScalar(1);
+      }
+
+      // Body tint — cubic ease-in across the FULL 2.0s sequence so the
+      // shift toward the HDR action color is subtle through the pulse,
+      // strengthens through the dissolve, and peaks just as the pad
+      // finishes disappearing. Runs regardless of phase sub-window
+      // because the lerp target changes gradually with t.
+      if (mat?.uniforms?.uFlashColor && mat.uniforms?.uFlashStrength) {
+        mat.uniforms.uFlashColor.value.copy(COMPLETE_PAD_TINT);
+        const totalT = Math.min(t / COMPLETING_TOTAL, 1);
+        mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
       }
 
       // Ripple: fire exactly once at the dissolve start.
@@ -644,8 +693,11 @@ export function LilyPad({
 
       // Story 2.7: delete mirrors the completion sequence 1:1 —
       //   0.0–1.2s   creation-identical scale pulse + red rim highlight
+      //              + gentle body tint toward HDR red
       //   1.2–2.0s   dissolve (ripple fires at 1.2s)
-      // Ridge-only highlight (pad body does not flash) per 2.7 iteration.
+      const mat = padMeshRef.current
+        ? (padMeshRef.current.material as THREE.ShaderMaterial)
+        : null;
 
       if (t < DELETING_PULSE_END) {
         const pulseT = t / DELETING_PULSE_END;
@@ -659,8 +711,17 @@ export function LilyPad({
           rimMat.color.set(color).lerp(DELETE_RIM_COLOR, glow);
           rimMat.opacity = 0.4 + glow * 0.6;
         }
+
       } else if (t < DELETING_DISSOLVE_START) {
         group.scale.setScalar(1);
+      }
+
+      // Body tint — same full-2.0s cubic ease-in as the completing branch,
+      // just with the delete HDR target.
+      if (mat?.uniforms?.uFlashColor && mat.uniforms?.uFlashStrength) {
+        mat.uniforms.uFlashColor.value.copy(DELETE_PAD_TINT);
+        const totalT = Math.min(t / DELETING_TOTAL, 1);
+        mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
       }
 
       // Ripple: fire exactly once at the dissolve start.

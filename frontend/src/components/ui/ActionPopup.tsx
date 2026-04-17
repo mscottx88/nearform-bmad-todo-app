@@ -2,6 +2,33 @@ import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
 import './ActionPopup.css';
 
+// ROYGBIV — 7 stops. Letters past index 6 wrap via `% 7`.
+const RAINBOW_HUES = [
+  '#ff1744', // R
+  '#ff9100', // O
+  '#ffea00', // Y
+  '#00e676', // G
+  '#00b0ff', // B
+  '#3d5afe', // I
+  '#d500f9', // V
+];
+
+// Precompute the "Set Color" letter → hue mapping at module load so
+// there is no mutable counter running during component render (which
+// React flags as `Cannot reassign variable after render completes`).
+// Spaces carry `hue = null` and render as a non-breaking space without
+// consuming a palette slot.
+const SET_COLOR_LETTERS: ReadonlyArray<{ ch: string; hue: string | null }> = (() => {
+  const chars = 'Set Color'.split('');
+  let hueIdx = 0;
+  return chars.map((ch) => {
+    if (ch === ' ') return { ch, hue: null };
+    const hue = RAINBOW_HUES[hueIdx % RAINBOW_HUES.length];
+    hueIdx += 1;
+    return { ch, hue };
+  });
+})();
+
 interface ActionPopupProps {
   todo: Todo;
   onComplete: () => void;
@@ -50,6 +77,17 @@ export function ActionPopup({
           style={{
             transform: `translate(${PANEL_OFFSET_X}px, -${PANEL_OFFSET_Y}px)`,
           }}
+          // Absorb ALL pointer events at the panel root so popup clicks
+          // never reach the water-surface raycaster underneath (which
+          // would fire its own ripple via the `onClick={handleWaterClick}`
+          // handler on the water mesh). stopPropagation on
+          // onPointerDown/onPointerUp is the R3F-compatible way to do this
+          // — it prevents the drei <Html> from forwarding the event to
+          // the canvas event system. onClick stop is defensive for any
+          // library that listens on click instead of pointerdown.
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
@@ -69,8 +107,26 @@ export function ActionPopup({
             type="button"
             className="action-popup__button action-popup__button--set-color"
             onClick={onSetColor}
+            aria-label="Set Color"
           >
-            Set Color
+            {/* Per-letter ROYGBIV — color + glow set inline from the
+                precomputed SET_COLOR_LETTERS table (module scope). */}
+            {SET_COLOR_LETTERS.map(({ ch, hue }, i) =>
+              hue === null ? (
+                <span key={i} aria-hidden>
+                  {'\u00a0'}
+                </span>
+              ) : (
+                <span
+                  key={i}
+                  className="action-popup__rainbow-letter"
+                  style={{ color: hue, textShadow: `0 0 4px ${hue}` }}
+                  aria-hidden
+                >
+                  {ch}
+                </span>
+              ),
+            )}
           </button>
           <button
             type="button"
