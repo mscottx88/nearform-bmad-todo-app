@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-17 # story 2.6 (Loading & Error States) code review complete — moved to done
+last_updated: 2026-04-17 # story 2.7 (Pulse-on-Flash Polish) implementation complete — moved to review
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -60,7 +60,7 @@ development_status:
   2-4-completion-via-popup-green-flash-and-dissolve: done  # supersedes the done-then-obsoleted egg-hatch story below
   2-5-deletion-via-popup-red-flash-and-dissolve: done
   2-6-loading-and-error-states: done
-  2-7-pulse-on-flash-polish: backlog  # tiny polish story — scale-pulse layered onto complete/delete flash windows
+  2-7-pulse-on-flash-polish: review  # tiny polish story — scale-pulse layered onto complete/delete flash windows
   # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
   #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
   epic-2-retrospective: optional

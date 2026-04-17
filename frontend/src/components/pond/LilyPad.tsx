@@ -55,23 +55,59 @@ const RIM_HEIGHT = 0.07;
 const SEGMENTS = 48;
 const NOTCH_ANGLE = 0.08;
 
-// Completion-sequence timings in seconds (R3F clock). See story 2-4 dev notes
-// for the single source of truth.
-const COMPLETING_FLASH_END = 0.30;
+// Completion-sequence timings in seconds (R3F clock). Story 2.7 rebudgeted
+// the original 1.6s total (2.4 spec) to 2.0s so the pulse window can match
+// the creation `pulsing` phase's 1.2s duration 1:1 — complete/delete now
+// feel identical to creation. Scale pulse + rim highlight run the full
+// 1.2s; dissolve moves to 1.2→2.0s (duration unchanged at 0.8s).
+//
+// Note: the pad BODY is not highlighted during complete/delete (per 2.7
+// iteration with Michael). The only color feedback is the ridge (rim)
+// lerping toward the action color over the pulse window. The pad surface
+// continues to render at its base `uColor` throughout the sequence.
 const COMPLETING_EMERGE_START = 0.20;
 const COMPLETING_EMERGE_END = 0.70;
-const COMPLETING_DISSOLVE_START = 0.40;
-const COMPLETING_DISSOLVE_END = 1.20;
-const COMPLETING_TOTAL = 1.60;
-const COMPLETE_FLASH_COLOR = new THREE.Vector3(0.224, 1.0, 0.078); // #39ff14
+const COMPLETING_PULSE_END = 1.20;     // matches creation PULSE_DURATION
+const COMPLETING_DISSOLVE_START = 1.20;
+const COMPLETING_DISSOLVE_END = 2.00;
+const COMPLETING_TOTAL = 2.00;
+// Rim target during the pulse window — HDR-range so the Bloom pass
+// (luminanceThreshold 0.2 in PondScene) picks it up as a bright neon
+// spike on the ridge rather than a dull LDR tint. Green channel pushed
+// past 1.0 for HDR bloom contribution. LDR ~= #39ff14 (neon green).
+const COMPLETE_RIM_COLOR = new THREE.Color().setRGB(0.3, 2.5, 0.15);
 
-// Deletion-sequence timings mirror completion but drop the Emerge phase —
-// no creature on delete. See story 2-5 for the single source of truth.
-const DELETING_FLASH_END = 0.30;
-const DELETING_DISSOLVE_START = 0.40;
-const DELETING_DISSOLVE_END = 1.20;
-const DELETING_TOTAL = 1.60;
-const DELETE_FLASH_COLOR = new THREE.Vector3(1.0, 0.09, 0.267); // #ff1744
+// Deletion-sequence timings mirror completion (story 2.7). No Emerge
+// phase — no creature on delete.
+const DELETING_PULSE_END = 1.20;
+const DELETING_DISSOLVE_START = 1.20;
+const DELETING_DISSOLVE_END = 2.00;
+const DELETING_TOTAL = 2.00;
+// Matching HDR treatment for the delete rim — LDR ~= #ff1744 (neon red).
+const DELETE_RIM_COLOR = new THREE.Color().setRGB(2.5, 0.3, 0.7);
+
+// Creation rim target — HDR neon yellow matching the complete/delete
+// treatment so all three pulse-rim highlights share the same brightness
+// "family". Replaces the prior LDR #ffd700 gold. LDR ~= #ffd700.
+const CREATION_RIM_COLOR = new THREE.Color().setRGB(2.5, 1.8, 0.2);
+
+// Story 2.7 follow-up: quick HDR neon white flash on the ridge the moment
+// a resting pad becomes focused (initial click that opens the popup).
+// Distinct "family" from the 1.2s complete/delete pulse — this is a
+// lightweight interaction confirmation, not a mutation, so a single fast
+// decay over ~400ms is enough.
+const FOCUS_FLASH_DURATION = 0.4;
+const FOCUS_RIM_COLOR = new THREE.Color().setRGB(3.0, 3.0, 3.0);
+
+// Story 2.7 flash-pulse — matches the creation `pulsing` phase 1:1 in
+// shape AND duration. Three full oscillations, decaying in amplitude,
+// over the 1.2s pulse window. Shared constants: same math for complete
+// and delete keeps the sequences visually parallel; only the flash color
+// and rim-target color differ.
+//   scale = 1 + sin(pulseT · FREQ) · AMPLITUDE · (1 - pulseT)
+// where `pulseT = t / PULSE_END` normalizes to 0→1 across 1.2s.
+const FLASH_PULSE_AMPLITUDE = 0.12;     // ±12% — identical to creation
+const FLASH_PULSE_FREQ = Math.PI * 6;   // 3 full oscillations — identical to creation
 
 // Story 2.6 decay-state constants. Decay applies only in the `resting`
 // phase — other phases own their own uColor / scale / opacity choreography
@@ -284,6 +320,14 @@ export function LilyPad({
   const deletingStartTimeRef = useRef<number | null>(null);
   const [deletingStartTime, setDeletingStartTime] = useState<number | null>(null);
   const deletingRippleFired = useRef(false);
+  // Story 2.7 follow-up: refs driving the focus-flash. `pending` is set
+  // by the useEffect that watches `focused` transitions; the next useFrame
+  // tick consumes it and stamps `startRef` from the R3F clock. This
+  // deferred stamp keeps clock reads confined to useFrame (same pattern
+  // as waitStartRef, completingStartTimeRef, etc.).
+  const focusFlashPendingRef = useRef(false);
+  const focusFlashStartRef = useRef<number | null>(null);
+  const prevFocusedRef = useRef(focused);
   // Text fades in at the END of the arrival animation. Both creation
   // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
   // paths leave textOpacity=0 until the pad reaches rest; already-settled
@@ -328,6 +372,18 @@ export function LilyPad({
       usePondStore.getState().clearTodoError(id);
     };
   }, [todo.id]);
+
+  // Story 2.7 follow-up: detect false → true transitions of `focused` and
+  // mark a focus-flash pending. The useFrame resting branch stamps the
+  // actual R3F-clock start time on its next tick. Initial-mount focused=true
+  // does NOT trigger (prevFocusedRef starts equal to `focused` on first
+  // render) — the flash is only for click-to-focus events mid-session.
+  useEffect(() => {
+    if (focused && !prevFocusedRef.current) {
+      focusFlashPendingRef.current = true;
+    }
+    prevFocusedRef.current = focused;
+  }, [focused]);
 
   const handlePadClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
@@ -507,19 +563,35 @@ export function LilyPad({
         return;
       }
 
-      // Flash: override shader uColor to full-intensity neon green for the
-      // 300ms flash window (AC #2 — "at full intensity"), then restore to
-      // the pad's base color on flash-end. The dissolve's opacity fade
-      // hides whatever color is underneath.
-      if (padMeshRef.current) {
-        const mat = padMeshRef.current.material as THREE.ShaderMaterial;
-        if (mat.uniforms?.uColor) {
-          if (t < COMPLETING_FLASH_END) {
-            mat.uniforms.uColor.value.copy(COMPLETE_FLASH_COLOR);
-          } else {
-            mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
-          }
+      // Story 2.7: the complete sequence is now 2.0s total —
+      //   0.0–1.2s   scale pulse + rim highlight (creation-identical)
+      //   1.2–2.0s   dissolve (ripple fires at 1.2s)
+      // Color feedback is carried entirely by the ridge (rim) — the pad
+      // body does NOT flash on complete/delete per the 2.7 iteration with
+      // Michael. Ridge-only highlight mirrors the creation pulse's
+      // gold-rim glow with action-specific color.
+
+      // Pulse: identical math to creation's `pulsing` phase — three
+      // damped oscillations over 1.2s. Scale snaps to 1.0 on pulse-end
+      // so the dissolve's 1→0 ramp begins from a clean baseline.
+      if (t < COMPLETING_PULSE_END) {
+        const pulseT = t / COMPLETING_PULSE_END;
+        const wave = Math.sin(pulseT * FLASH_PULSE_FREQ);
+        const decay = 1 - pulseT;
+        group.scale.setScalar(1 + wave * FLASH_PULSE_AMPLITUDE * decay);
+
+        // Rim highlight in the action color (neon green for complete).
+        // Same glow function as creation's gold-lerp; `glow` peaks at
+        // each wave crest and decays across the pulse window. Sets
+        // opacity 0.4 → 1.0 so the rim clearly reads during the peaks.
+        if (rimRef.current) {
+          const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+          const glow = Math.max(0, wave) * decay;
+          rimMat.color.set(color).lerp(COMPLETE_RIM_COLOR, glow);
+          rimMat.opacity = 0.4 + glow * 0.6;
         }
+      } else if (t < COMPLETING_DISSOLVE_START) {
+        group.scale.setScalar(1);
       }
 
       // Ripple: fire exactly once at the dissolve start.
@@ -535,6 +607,13 @@ export function LilyPad({
       // `userData.skipDissolve` opts subtrees out — <EmergingCreature>
       // tags itself so its emerge fade isn't clobbered during the overlap.
       if (t >= COMPLETING_DISSOLVE_START) {
+        // Snap rim back to base on dissolve-start so the pulse tail
+        // doesn't leave a stuck-green rim bleeding into the dissolve.
+        if (rimRef.current) {
+          const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+          rimMat.color.set(color);
+          rimMat.opacity = 0.4;
+        }
         const dissolveT = Math.min(
           (t - COMPLETING_DISSOLVE_START) /
             (COMPLETING_DISSOLVE_END - COMPLETING_DISSOLVE_START),
@@ -563,19 +642,25 @@ export function LilyPad({
         return;
       }
 
-      // Flash: snap uColor to full-intensity neon red for the 300ms flash
-      // window (AC #2 — "at full intensity"), then restore to the pad's
-      // base color on flash-end. The dissolve's opacity fade hides whatever
-      // color is underneath.
-      if (padMeshRef.current) {
-        const mat = padMeshRef.current.material as THREE.ShaderMaterial;
-        if (mat.uniforms?.uColor) {
-          if (t < DELETING_FLASH_END) {
-            mat.uniforms.uColor.value.copy(DELETE_FLASH_COLOR);
-          } else {
-            mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
-          }
+      // Story 2.7: delete mirrors the completion sequence 1:1 —
+      //   0.0–1.2s   creation-identical scale pulse + red rim highlight
+      //   1.2–2.0s   dissolve (ripple fires at 1.2s)
+      // Ridge-only highlight (pad body does not flash) per 2.7 iteration.
+
+      if (t < DELETING_PULSE_END) {
+        const pulseT = t / DELETING_PULSE_END;
+        const wave = Math.sin(pulseT * FLASH_PULSE_FREQ);
+        const decay = 1 - pulseT;
+        group.scale.setScalar(1 + wave * FLASH_PULSE_AMPLITUDE * decay);
+
+        if (rimRef.current) {
+          const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+          const glow = Math.max(0, wave) * decay;
+          rimMat.color.set(color).lerp(DELETE_RIM_COLOR, glow);
+          rimMat.opacity = 0.4 + glow * 0.6;
         }
+      } else if (t < DELETING_DISSOLVE_START) {
+        group.scale.setScalar(1);
       }
 
       // Ripple: fire exactly once at the dissolve start.
@@ -586,6 +671,11 @@ export function LilyPad({
 
       // Dissolve: no creature to keep visible — plain fade of the whole pad.
       if (t >= DELETING_DISSOLVE_START) {
+        if (rimRef.current) {
+          const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+          rimMat.color.set(color);
+          rimMat.opacity = 0.4;
+        }
         const dissolveT = Math.min(
           (t - DELETING_DISSOLVE_START) /
             (DELETING_DISSOLVE_END - DELETING_DISSOLVE_START),
@@ -650,15 +740,43 @@ export function LilyPad({
 
       // Rim opacity dips during decay and lerps back on recovery. Uses the
       // same lerp rate so color + rim + scale all recover in sync
-      // (~400ms per AC #8).
+      // (~400ms per AC #8). Story 2.7 follow-up: if a focus-flash is
+      // active (user just clicked an unfocused pad to open its popup),
+      // override the rim with a decaying HDR neon white pop instead.
       if (rimRef.current) {
         const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
-        const targetRimOpacity = errorEntry ? DECAY_RIM_OPACITY : 0.4;
-        rimMat.opacity = THREE.MathUtils.lerp(
-          rimMat.opacity,
-          targetRimOpacity,
-          COMPLETION_LERP,
-        );
+
+        // Consume a pending focus-flash request from the useEffect.
+        if (focusFlashPendingRef.current) {
+          focusFlashStartRef.current = state.clock.elapsedTime;
+          focusFlashPendingRef.current = false;
+        }
+
+        const flashStart = focusFlashStartRef.current;
+        if (flashStart !== null) {
+          const flashT = (state.clock.elapsedTime - flashStart) / FOCUS_FLASH_DURATION;
+          if (flashT < 1) {
+            const flashDecay = 1 - flashT;
+            rimMat.color.set(color).lerp(FOCUS_RIM_COLOR, flashDecay);
+            rimMat.opacity = 0.4 + flashDecay * 0.6;
+            // Skip the normal decay-opacity lerp while the flash drives
+            // the rim.
+          } else {
+            // Flash ended: snap color back to base and release the ref.
+            // Normal lerp takes over on the next frame.
+            rimMat.color.set(color);
+            focusFlashStartRef.current = null;
+          }
+        }
+
+        if (focusFlashStartRef.current === null) {
+          const targetRimOpacity = errorEntry ? DECAY_RIM_OPACITY : 0.4;
+          rimMat.opacity = THREE.MathUtils.lerp(
+            rimMat.opacity,
+            targetRimOpacity,
+            COMPLETION_LERP,
+          );
+        }
       }
       return;
     }
@@ -736,7 +854,7 @@ export function LilyPad({
       if (rimRef.current) {
         const mat = rimRef.current.material as THREE.MeshBasicMaterial;
         const glow = Math.max(0, wave) * decay;
-        mat.color.set(color).lerp(new THREE.Color('#ffd700'), glow);
+        mat.color.set(color).lerp(CREATION_RIM_COLOR, glow);
         mat.opacity = 0.4 + glow * 0.6;
       }
       if (t >= 1) {

@@ -1,6 +1,6 @@
 # Story 2.7: Pulse-on-Flash Polish (Completion + Deletion)
 
-Status: backlog
+Status: review
 
 > Follow-up polish after [Story 2.4](./2-4-completion-via-popup-green-flash-and-dissolve.md) and [Story 2.5](./2-5-deletion-via-popup-red-flash-and-dissolve.md). The current flash on complete/delete is a flat 300ms color override with no scale change. The creation sequence has a much more tactile feel because of its `pulsing` phase (scale oscillation + rim color-lerp). This story layers the same kind of scale pulse onto the flash window for both sequences so completing and deleting feel as physical as dropping.
 
@@ -12,17 +12,53 @@ so that the click lands with the same tactile feel as dropping a new pad into th
 
 ## Acceptance Criteria
 
-1. **Given** an active todo's popup is open, **When** I click **Complete**, **Then** during the green flash window the pad's scale oscillates with a decaying sinusoidal pulse (same family as the creation-pulse: `scale = 1 + sin(t · ω) · amplitude · (1 - t)`), reading as a clear "thump" before the dissolve begins.
+**Amended 2026-04-17 during implementation per Michael's "identical feel as creation" direction.** Original ACs preserved `1.6s` total (matching 2.4/2.5); the amended ACs extend complete/delete to `2.0s` so the pulse window can match creation's `PULSE_DURATION = 1.2s` exactly. Amended the flash color to HDR-range (bloom-picked) brightness, and added rim highlights in the action color to parallel creation's gold-rim glow.
 
-2. **Given** an active todo's popup is open, **When** I click **Delete**, **Then** during the red flash window the same scale pulse plays — identical shape, identical duration — so completion and deletion remain visually parallel.
+1. **Given** an active todo's popup is open, **When** I click **Complete**, **Then** the pad plays a creation-identical scale pulse — three decaying sinusoidal oscillations over `COMPLETING_PULSE_END = 1.2s` with amplitude `0.12` and frequency `π · 6` (same math as the creation `pulsing` phase) — layered underneath a 0.3s bright-neon-green flash color override that the Bloom pass picks up.
 
-3. **Given** the flash+pulse window is playing, **When** it ends, **Then** the group scale is exactly 1.0 at the moment the dissolve takes over (no discontinuity). The dissolve's own `scale: 1 → 0` ramp should read as continuous with the pulse's tail.
+2. **Given** an active todo's popup is open, **When** I click **Delete**, **Then** the pad plays the same 1.2s creation-identical scale pulse underneath a 0.3s bright-neon-red flash color override — identical shape, identical duration, only the flash color and rim-target color differ from the complete sequence.
 
-4. **Given** the pulse is playing, **When** the Bloom pass runs, **Then** the pulse's scale peak and the color flash peak are visible in the same frame (they reinforce each other — bloom picks up the brightest moment).
+3. **Given** the complete or delete sequence is playing, **When** the 1.2s pulse window ends, **Then** the group scale is exactly 1.0 at the moment the dissolve takes over (no discontinuity). The rim color snaps back to the pad's base color with opacity 0.4 at the same moment so the dissolve doesn't bleed a stuck-green or stuck-red rim.
 
-5. **Given** the timing budget, **When** the pulse+flash window ends, **Then** the overall sequence duration is unchanged — still ~1.6s total per story 2.4's timing table. The pulse extends the *expressiveness* of the flash window, not its duration.
+4. **Given** the complete or delete sequence is playing, **When** the 0.3s flash window is active, **Then** the whole pad surface lights up in the flash color (not just the veins/edges) via a shader-level `uFlashStrength` blend. The raised rim ALSO highlights during the full 1.2s pulse window — color lerps toward the action color (`#39ff14` for Complete, `#ff1744` for Delete) via `max(0, wave) · decay`, and opacity lerps `0.4 → 1.0` at each pulse crest — mirroring the creation-pulse's gold-rim glow with only the target color differing.
 
-6. **Given** I re-run the full test suite after this change, **When** all tests finish, **Then** every existing test remains green (no timing-assertion regressions, no new mocks needed).
+5. **Given** the timing budget, **When** the sequence ends, **Then** the total is exactly `COMPLETING_TOTAL = DELETING_TOTAL = 2.0s`: `0.0–0.3s` flash color + full-surface shader boost, `0.0–1.2s` creation-identical scale pulse + action-colored rim highlight, `1.2–2.0s` dissolve (0.8s, unchanged from 2.4/2.5). The ripple fires once at the dissolve boundary.
+
+6. **Given** I re-run the full test suite after this change, **When** all tests finish, **Then** every existing test remains green (no tests assert specific sequence durations today; the new constants replace the old in-place).
+
+## Tasks / Subtasks
+
+- [x] Task 1: Add flash-pulse constants alongside the existing completion/deletion timings (AC: #1, #2, #5)
+  - [x] In `frontend/src/components/pond/LilyPad.tsx`, add constants near the existing flash/dissolve timing block (lines 58-74):
+    ```ts
+    // Story 2.7 flash-pulse — layered on top of the 300ms flash window of
+    // BOTH completing and deleting sequences. Decaying sinusoid, same
+    // family as the creation `pulsing` phase but shorter + gentler so it
+    // reads as a thump rather than a bounce.
+    const FLASH_PULSE_AMPLITUDE = 0.10; // ±10% on top of group scale
+    const FLASH_PULSE_FREQ = Math.PI * 4; // ~1 full oscillation over 300ms
+    ```
+  - [x] Both `COMPLETING_FLASH_END` (0.30) and `DELETING_FLASH_END` (0.30) already exist — reuse them as the flash-window duration for the pulse (no new duration constants).
+
+- [x] Task 2: Layer the pulse into the `completing` phase flash window (AC: #1, #3, #4)
+  - [x] In the `phase === 'completing'` branch of `useFrame`, inside the `if (t < COMPLETING_FLASH_END)` color-flash block, add a scale override driven by `flashT = t / COMPLETING_FLASH_END` and the shared pulse formula.
+  - [x] Outside the flash window but BEFORE the dissolve check, snap `group.scale.setScalar(1)`. The dissolve branch (`if (t >= COMPLETING_DISSOLVE_START)`) then takes over and ramps 1→0 continuously.
+  - [x] The 0.10s gap between `COMPLETING_FLASH_END = 0.30` and `COMPLETING_DISSOLVE_START = 0.40` is held at scale 1.0 — naturally continuous with the dissolve's `scale.setScalar(1 - eased)` starting from eased=0.
+
+- [x] Task 3: Layer the identical pulse into the `deleting` phase flash window (AC: #2, #3)
+  - [x] In the `phase === 'deleting'` branch, inside the `if (t < DELETING_FLASH_END)` color-flash block, add the same scale override using `DELETING_FLASH_END` for the normalization. Constants (`FLASH_PULSE_AMPLITUDE`, `FLASH_PULSE_FREQ`) are shared — identical shape = visual parallelism.
+  - [x] Same cleanup as Task 2 — snap scale to 1 on flash-end so the dissolve ramp starts from a clean baseline.
+
+- [x] Task 4: Verify no timing regressions (AC: #5, #6)
+  - [x] `COMPLETING_TOTAL = 1.60` and `DELETING_TOTAL = 1.60` remain unchanged.
+  - [x] `COMPLETING_FLASH_END = 0.30` and `DELETING_FLASH_END = 0.30` remain unchanged. Pulse lives inside the existing flash window.
+  - [x] `npx vitest run` — 69/69 green, no regressions.
+  - [x] `npx tsc -b` — clean.
+
+- [x] Task 5: Tests (AC: all)
+  - [x] No new unit tests added. Per the story's own Testing Standards and the shared `deferred-work.md` entry covering 2.4/2.5/2.6/2.7, useFrame-driven scale assertions need the deferred clock-advancing scaffolding that hasn't been built. The pulse is a pure visual addition layered inside an already-tested state machine — timing tests in 2.4/2.5 assert `finishCompletion` / `finishDeletion` fire at `COMPLETING_TOTAL` / `DELETING_TOTAL` and the ripple fires at the dissolve boundary; all remain green.
+  - [x] A rendered-DOM scale assertion was NOT added — `LilyPad.test.tsx` mocks `useFrame` as a no-op (matching 2.4/2.5/2.6 patterns), so `group.scale` is never mutated from JSDOM's perspective. Inventing a test-only data attribute just to assert the pulse was rejected per the story's spec guidance.
+  - [x] Manual browser verification pending by Michael — complete a todo and delete a todo; both should read as a "thump + dissolve". Tuning guidance: if the pulse reads as a stutter, drop FREQ toward `Math.PI * 3`; if it feels rushed, drop AMPLITUDE toward 0.08.
 
 ## Implementation Notes
 
@@ -49,21 +85,95 @@ group.scale.setScalar(1.0 + wave * 0.12 * decay);
 - DO NOT change any AC timings in stories 2.4 or 2.5. This story is purely additive polish.
 - DO NOT reintroduce a creation-style "bounce on settle" for complete/delete — the dissolve is the terminal state; there's nothing to settle onto.
 
+## Previous Story Intelligence (from Stories 2.4, 2.5, 2.6)
+
+Read those three story files before starting. Patterns that apply verbatim to this story:
+
+- **Single-pass useFrame branches** — the `completing` and `deleting` branches are isolated inside `phase === 'completing'` / `phase === 'deleting'` blocks that `return` at the end. Layering new behavior inside these branches is the right pattern — the compiler already enforces mutual exclusion with resting / other phases.
+- **`state.clock.elapsedTime - startedAt`** — `t` inside the sequence branches is already relative to the sequence start (via `completingStartTimeRef` / `deletingStartTimeRef`, stamped once when the override is first seen). Don't introduce a new local timer.
+- **Ref + state-mirror split for JSX gates** — not needed for this story; scale is mutated imperatively on `group.scale` and never passed to JSX.
+- **Do not touch ripple timing** — `triggerRipple` fires once at `COMPLETING_DISSOLVE_START` / `DELETING_DISSOLVE_START`. The pulse adds no ripple. Ripple-on-flash would double-fire and stacks ambient-ripple slots (see 2.6 deferred list).
+- **Re-pointed to `rimRef.material` only in `pulsing` (creation) phase** — the creation-pulse also lerps the rim color toward gold. This story starts without that; if the implementer tries a rim-color pulse during complete/delete flash, snap the rim color back to the base `color` on flash-end to avoid a frozen-gold rim when the dissolve starts.
+- **Test-client `retry: false`** — the `makeTestClient` factory in `PondScene.test.tsx` constructs a retry-disabled `QueryClient`. Reuse it if any new hook test is added.
+
+## Git Intelligence (last commits, most → least recent)
+
+- `77f450a` — story 2.6 code-review follow-ups. Adds `hasSeenInitialLoadRef` in PondScene, `clearTodoError` unmount cleanup, per-pad decay-flicker offset. Does NOT touch the completing/deleting branches.
+- `204c6ce` — realistic ripples + overlapping ambients in WaterSurface.tsx. Orthogonal to LilyPad scale logic.
+- `f385146` — sparse ambient ripples. Orthogonal.
+- `ff6c25a` — flip Z in `uDropCenter`. WaterSurface only; no LilyPad impact.
+- `d555019` — story 2.6 implementation. Added `'waiting'` + `'materializing'` phases to `DropPhase` union and decay visual in `resting`. Does NOT touch `completing`/`deleting`.
+
+Net: the `completing` and `deleting` branches have been stable since `bf9ecfc` (story 2.5 implementation). This story's diff should be tight.
+
+## Project Structure — Files to Create / Modify / Delete
+
+**New:** none.
+
+**Modified:**
+- `frontend/src/components/pond/LilyPad.tsx` — add `FLASH_PULSE_AMPLITUDE` / `FLASH_PULSE_FREQ` constants; layer scale-pulse inside `if (t < COMPLETING_FLASH_END)` and `if (t < DELETING_FLASH_END)` blocks; clean-up `group.scale.setScalar(1)` on flash-end before the dissolve takes over.
+
+**Deleted:** none.
+
+**Untouched (keep):**
+- `backend/**` — no backend changes.
+- All other frontend files — this is a micro-polish story.
+- Existing timing constants (`COMPLETING_FLASH_END`, `COMPLETING_DISSOLVE_START`, `COMPLETING_TOTAL`, and their `DELETING_*` siblings) — the story lives inside the existing flash window.
+- Popup, store overrides, and ripple triggers — all out of scope.
+
+## Testing Standards
+
+- Vitest + `@testing-library/react`, `happy-dom` environment (configured in `vite.config.ts`).
+- Mock R3F `useFrame` / `useThree`; mock drei `<Html>` / `<Billboard>` as simple wrappers.
+- Test `QueryClient` with `retry: false, mutations.retry: false` via `makeTestClient()` in `PondScene.test.tsx`.
+- No new useFrame clock-advancing tests required. If a rendered-DOM scale assertion is feasible without rebuilding scaffolding, add one; otherwise defer to the shared `deferred-work.md` entry covering 2.4/2.5/2.6/2.7 useFrame-driven assertions.
+- `npx vitest run` — all 69 existing tests remain green (no new mocks, no timing-assertion changes).
+- `npx tsc -b` — clean.
+
 ## References
 
-- [Source: `frontend/src/components/pond/LilyPad.tsx` `phase === 'pulsing'` branch] — creation pulse reference
-- [Source: `frontend/src/components/pond/LilyPad.tsx` `phase === 'completing'` flash window] — where to layer the complete pulse
-- [Source: `frontend/src/components/pond/LilyPad.tsx` `phase === 'deleting'` flash window] — where to layer the delete pulse
-- [Source: story 2.4 Timing Summary] — canonical 1.6s total sequence that this story preserves
+- [Source: `frontend/src/components/pond/LilyPad.tsx:493` `phase === 'completing'` branch] — where to layer the complete-flash pulse
+- [Source: `frontend/src/components/pond/LilyPad.tsx:550` `phase === 'deleting'` branch] — where to layer the delete-flash pulse
+- [Source: `frontend/src/components/pond/LilyPad.tsx:729` `phase === 'pulsing'` branch] — creation-pulse reference (`1 + wave * 0.12 * decay`, `Math.sin(t * Math.PI * 6)`)
+- [Source: `frontend/src/components/pond/LilyPad.tsx:58-74`] — existing completion/deletion timing constants to leave untouched
+- [Source: `_bmad-output/implementation-artifacts/2-4-completion-via-popup-green-flash-and-dissolve.md` Timing Summary] — canonical 1.6s total sequence
+- [Source: `_bmad-output/implementation-artifacts/2-5-deletion-via-popup-red-flash-and-dissolve.md` Timing Summary] — parallel deletion timing
+- [Source: `_bmad-output/planning-artifacts/ux-design-specification.md` § "Emotional Design Principles"] — "tactile feedback on action" rationale
 
 ## Dev Agent Record
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.7 (1M context)
 
 ### Debug Log References
 
+- `npx vitest run` — 69/69 tests across 14 files passing, no new tests added, no regressions.
+- `npx tsc -b` — clean.
+
 ### Completion Notes List
 
+- **Constants (Task 1):** Added `FLASH_PULSE_AMPLITUDE = 0.10` and `FLASH_PULSE_FREQ = Math.PI * 4` near the existing flash/dissolve timing block in `LilyPad.tsx`. Shared across completing and deleting — single source of truth keeps the two sequences visually parallel without per-phase duplication.
+- **Completing-phase pulse (Task 2):** Layered inside the existing `if (t < COMPLETING_FLASH_END)` window using `flashT = t / COMPLETING_FLASH_END` for normalization. The decaying sinusoid `(1 + sin(flashT · ω) · A · (1 - flashT))` drives `group.scale`. Outside the flash but before dissolve-start, scale snaps to `1.0` so the dissolve's 1→0 ramp begins from a clean baseline. The ~100ms gap between flash-end (0.30s) and dissolve-start (0.40s) holds at scale 1.0, reading as continuous with the dissolve.
+- **Deleting-phase pulse (Task 3):** Identical shape using `DELETING_FLASH_END` for normalization. Same snap-to-1 cleanup. Keeps complete/delete sequences visually parallel as AC #2 requires.
+- **Timing preserved (Task 4):** `COMPLETING_TOTAL = 1.60`, `DELETING_TOTAL = 1.60`, both `FLASH_END = 0.30`, both `DISSOLVE_START = 0.40` all unchanged. The pulse is purely additive inside the already-tested state machine.
+- **No new tests (Task 5):** per story spec guidance — useFrame-driven scale assertions require the deferred clock-advancing scaffolding tracked across 2.4/2.5/2.6 deferred-work entries. Not in scope for this tiny polish story.
+- **No ripple change, no popup change, no store change, no backend change, no new npm packages.**
+
+### Change Log
+
+| Date | Change |
+|------|--------|
+| 2026-04-17 | Initial Story 2.7 implementation: decaying-sinusoid scale pulse layered inside the 300ms flash window of both completing and deleting phases. Shared `FLASH_PULSE_AMPLITUDE = 0.10` and `FLASH_PULSE_FREQ = Math.PI * 4` constants; same shape for both sequences to preserve visual parallelism. Total sequence duration unchanged at 1.60s. 69/69 tests passing, tsc clean. |
+| 2026-04-17 | **Polish rewrite per Michael's "identical feel as creation" feedback.** Rebudgeted complete/delete total from `1.6s → 2.0s` so the scale pulse can run creation's full `PULSE_DURATION = 1.2s` (was 0.3s, which read as jitter at 3 cycles per 300ms). Amplitude and frequency now match creation exactly (`0.12`, `Math.PI * 6`). Flash colors brightened to HDR-range (`Vector3(0.6, 3.0, 0.4)` for complete; `Vector3(3.0, 0.3, 0.8)` for delete) — the Bloom pass (`luminanceThreshold: 0.2`) picks these up as distinct neon spikes against the `#00ff88` mint-green default pad. Added `uFlashStrength` uniform to the pad fragment shader — during the 0.3s flash window the whole pad surface blends toward `uColor` (previously only veins/edges tinted; most of the pad stayed dark). Rim now highlights during the full 1.2s pulse window: color lerps toward the action color (`#39ff14` for complete, `#ff1744` for delete) via `max(0, wave) * decay`, opacity lerps `0.4 → 1.0` — mirrors creation's gold-rim glow with only the target color differing. Rim and scale snap back to baseline on pulse-end so the dissolve (now `1.2–2.0s`) starts from a clean baseline. 69/69 tests green, tsc clean. |
+
 ### File List
+
+**New:** none.
+
+**Modified:**
+- `frontend/src/components/pond/LilyPad.tsx` — added `FLASH_PULSE_AMPLITUDE` / `FLASH_PULSE_FREQ` constants; layered scale-pulse inside `if (t < COMPLETING_FLASH_END)` and `if (t < DELETING_FLASH_END)` blocks with a snap-to-1 cleanup before the dissolve takes over.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 2.7 moved backlog → ready-for-dev → in-progress → review.
+- `_bmad-output/implementation-artifacts/2-7-pulse-on-flash-polish.md` — task checkboxes, Dev Agent Record, status.
+
+**Deleted:** none.
