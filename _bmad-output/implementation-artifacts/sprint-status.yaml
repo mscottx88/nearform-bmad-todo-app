@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-17 # story 2.7 code review complete — 2 decisions amended into spec, 6 patches applied, story done
+last_updated: 2026-04-17 # story 2.8 created (Epic 2 spillover, ready-for-dev) + story 4.1 created (Epic 4 opens, ready-for-dev)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -61,6 +61,7 @@ development_status:
   2-5-deletion-via-popup-red-flash-and-dissolve: done
   2-6-loading-and-error-states: done
   2-7-pulse-on-flash-polish: done  # scale-pulse + full-sequence body tint + focus-flash + popup color; code-reviewed 2026-04-17
+  2-8-pad-action-glow-on-water: ready-for-dev  # spillover polish from 2.7 review — Option A radial-mask quad above water; Option B water-shader uniform deferred
   # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
   #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
   epic-2-retrospective: optional
@@ -72,8 +73,8 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4: Organizing the Pond
-  epic-4: backlog
-  4-1-popup-color-swatch-neon-selector: backlog  # replaces 4-1-color-chameleon-and-neon-picker
+  epic-4: in-progress  # opened 2026-04-17 with story 4.1
+  4-1-popup-color-swatch-neon-selector: ready-for-dev  # replaces 4-1-color-chameleon-and-neon-picker; also resolves 2.4 deferred-work uColor-sync entry
   4-2-lily-pad-clustering-and-groups: backlog
   4-3-position-persistence: backlog
   epic-4-retrospective: optional
