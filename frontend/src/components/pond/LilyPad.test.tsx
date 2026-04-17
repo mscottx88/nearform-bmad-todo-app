@@ -87,14 +87,6 @@ describe('LilyPad', () => {
     expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
   });
 
-  it('fires a water ripple on click for environmental feedback', () => {
-    triggerRippleMock.mockClear();
-    const { container } = render(<LilyPad todo={mockTodo} />);
-    const padMesh = container.querySelector('mesh');
-    if (padMesh) fireEvent.click(padMesh);
-    expect(triggerRippleMock).toHaveBeenCalledWith(5, 7);
-  });
-
   it('does not open the popup when the todo is already in deletingTodos (double-click guard)', () => {
     deletingTodosMock.set('123', { todo: mockTodo, startedAt: 0 });
     const { container } = render(<LilyPad todo={mockTodo} />);

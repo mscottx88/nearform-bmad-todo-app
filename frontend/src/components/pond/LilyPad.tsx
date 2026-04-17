@@ -325,10 +325,6 @@ export function LilyPad({
       // UniqueConstraint; a second Delete would fire a duplicate DELETE.
       const state = usePondStore.getState();
       if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;
-      // Environmental feedback: a click should make the water respond.
-      // Uses the same single-slot ripple uniform as creation drops — one
-      // ripple per click, overwrites any prior in-flight ripple.
-      state.triggerRipple(posX, posZ);
       state.openPopup(todo.id, posX, posZ);
     },
     [todo.id, posX, posZ],

@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { usePondStore } from '../../stores/usePondStore';
 
@@ -105,8 +106,23 @@ export function WaterSurface() {
     }
   });
 
+  // Click anywhere on the water surface → radiating ripple at the click
+  // point. R3F's raycaster hands us the world-space intersection as
+  // `e.point`; pass `(x, z)` to triggerRipple so the shader's uDropCenter
+  // gets the right position on the water plane. Lily-pad clicks
+  // stopPropagation before this fires, so clicking a pad does NOT ripple
+  // the water — only empty-water clicks do.
+  const handleWaterClick = useCallback((e: ThreeEvent<MouseEvent>) => {
+    usePondStore.getState().triggerRipple(e.point.x, e.point.z);
+  }, []);
+
   return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} renderOrder={0}>
+    <mesh
+      ref={meshRef}
+      rotation={[-Math.PI / 2, 0, 0]}
+      renderOrder={0}
+      onClick={handleWaterClick}
+    >
       <planeGeometry args={[100, 100, 64, 64]} />
       <shaderMaterial
         uniforms={uniforms}
