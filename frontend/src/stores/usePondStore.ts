@@ -201,6 +201,15 @@ export const usePondStore = create<PondState>((set, get) => ({
   },
 
   clearTodoError: (todoId: string) => {
+    // Keyed by todoId only — intentional "latest-wins / all-ops-share-one-slot"
+    // semantics. When `usePopupComplete` dispatches `useUpdateTodo` and
+    // `useCreateCreature` in parallel on the same id, the hook that succeeds
+    // first will clear any entry the other hook stamped. Accepted tradeoff
+    // per the 2026-04-17 code-review decision (spec AC #4): one visible
+    // decay per pad is sufficient UX; a partially-failed complete reads as
+    // "something went wrong, click the pad to retry" regardless of which
+    // half failed. If we ever need op-scoped decay, widen the key to
+    // `${todoId}:${op}` and fan out the clear from each hook.
     const current = get().errorTodos;
     if (!current.has(todoId)) return;
     const next = new Map(current);

@@ -44,6 +44,10 @@ vi.mock('../../stores/usePondStore', () => ({
       startDeletion: startDeletionMock,
       stampDeletionStart: stampDeletionStartMock,
       finishDeletion: finishDeletionMock,
+      // Story 2.6 P7 follow-up: LilyPad calls clearTodoError on unmount to
+      // prevent Map-entry leaks. The mock must expose it so the cleanup
+      // effect doesn't throw "not a function" during test teardown.
+      clearTodoError: vi.fn(),
     }),
   }),
   selectCompleting: () => () => undefined,

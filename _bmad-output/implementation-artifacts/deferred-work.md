@@ -28,6 +28,27 @@
 - Tab-backgrounded or computer-sleep mid-sequence collapses the 1.6s animation to an instant jump on resume — rare edge case; fix would detect large R3F clock delta and snap to terminal state without firing `triggerRipple`
 - useFrame-driven completion-sequence tests — need a `useFrame` invoker mock with controllable clock advancement to assert flash color, ripple-fired-once, finishCompletion at t=1.60s, and terminal `'completed'` phase. Scaffolding is non-trivial; deferred from story 2.4 code review
 
+## Deferred from: code review of story 2-6-loading-and-error-states (2026-04-17)
+
+- Click ripple wavefront speed mismatches shader phase velocity — `speed/freq = 5.5/1.3 ≈ 4.23` but hardcoded `wavefrontSpeed = 7.0`; leading edge races ahead of the real wave (WaterSurface.tsx, ripple feature)
+- `triggerRipple` single-slot zustand state coalesces simultaneous writes between useFrame ticks — two triggers same frame collapse to one (usePondStore.ts + WaterSurface.tsx, ripple feature; also noted in 2.5 deferred)
+- Water ripple fires during popup-open without closing the popup — `handleWaterClick` has no popup-state guard (WaterSurface.tsx, ripple feature)
+- Ambient ripple slot overwrite can evict an in-flight ripple when cadence runs faster than shader decay (3 slots × up to ~14s visibility vs. 2.5–7s schedule) (WaterSurface.tsx, ripple feature)
+- `useCreateCreature` POST has no idempotency key — retries could create duplicate creatures if first response is lost (frontend/src/api/creatureApi.ts + backend)
+- `stampedAt` field on `TodoErrorEntry` is written via `performance.now()` but never read (usePondStore.ts, harmless)
+- `useDeleteCreature` hook kept as dead-but-harmless code with no cleanup plan (frontend/src/api/creatureApi.ts, pre-existing)
+- Decay-on-`todo.completed` branch in LilyPad is dead code while backend excludes completed todos from `list_todos` — resolution depends on backend-scope decision from the same review (LilyPad.tsx)
+- `renderTodos` ordering places completing/deleting extras after live todos, so during initial-load-with-pending-mutation stagger index doesn't match visual position (PondScene.tsx:63-80)
+- `uDropCenter` mirrored-Z fix may have inverted any other caller of `triggerRipple(x, z)` that treated z as local-Y (WaterSurface.tsx, ripple feature)
+- `AMBIENT_WAVEFRONT_SPEED` injected via template literal into GLSL — fragile string-template idiom vs. `uniform float` (WaterSurface.tsx, ripple feature)
+- `dropRipple.time` uses `performance.now()/1000` (wall clock) while shader uniforms use R3F `elapsedTime` — two-clock mixing latent bug (usePondStore.ts + WaterSurface.tsx, ripple feature)
+- Click ripple slot round-robin can evict in-flight ripples above ~2Hz click rate (8 slots × ~4s visibility) (WaterSurface.tsx, ripple feature)
+- Ambient-ripple 20% skip-probability applies to the first ripple too — pond can look frozen on load in pathological RNG sequences (WaterSurface.tsx, ripple feature)
+- Ambient scheduler `setTimeout` cleanup does not clear a pending `pendingAmbientRef` on unmount — ghost ripple possible on StrictMode remount (WaterSurface.tsx, ripple feature)
+- No `useTodos` error-state handling — persistent query failure shows `EmptyPondHint` ("create a todo") and misreads as empty state; spec doesn't prescribe failed-initial-load UI (PondScene.tsx, warrants a follow-up story)
+- `finishDeletion` fires alongside `finishCompletion` at `COMPLETING_TOTAL` — cross-idempotent clear is defensive today but a footgun for adversarial inputs (LilyPad.tsx, pre-existing from 2.4/2.5)
+- `useEffect([], ...)` in LilyPad reads closure-captured `posX`/`posZ`/`rotationY` — latent bug when positions become mutable (Story 4.3 position-persistence; pre-existing, no trigger today)
+
 ## Deferred from: code review of story 2-5-deletion-via-popup-red-flash-and-dissolve (2026-04-17)
 
 - Tab backgrounded / computer sleep mid-deletion-sequence collapses the 1.6s animation to an instant jump on resume (inherited from 2.4 — same fix applies to both completion and deletion paths; detect large R3F clock delta and snap to terminal state)

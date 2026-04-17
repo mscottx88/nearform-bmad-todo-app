@@ -315,6 +315,20 @@ export function LilyPad({
     targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
   }, [todo.completed]);
 
+  // P7: clear any lingering error-decay entry on unmount. Without this,
+  // `errorTodos` accumulates entries for pads that were dissolved (terminal
+  // phase) or dropped from the list (delete → backend removes) while an
+  // in-flight retry was still failing — they never re-enter `resting` to
+  // show the decay, so the Map just grows across a session. Keyed to
+  // `todo.id` so StrictMode remounts correctly re-stamp on the surviving
+  // render.
+  useEffect(() => {
+    const id = todo.id;
+    return () => {
+      usePondStore.getState().clearTodoError(id);
+    };
+  }, [todo.id]);
+
   const handlePadClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
@@ -594,8 +608,12 @@ export function LilyPad({
       // Progressive density override: ensure focused pads render at readable size.
       // Decay adds a slow sinusoidal flicker on top of the base target scale.
       const baseTargetScale = focused ? 1.2 : 1.0;
+      // P8: per-pad phase offset via `driftSeed` so multiple decaying pads
+      // don't flicker in lockstep (reads as mechanical). Other per-pad
+      // animations (position bob / drift) already use the same seed for the
+      // same reason.
       const decayFlicker = errorEntry
-        ? Math.sin(state.clock.elapsedTime * 2 * Math.PI * DECAY_SCALE_FREQ_HZ) * DECAY_SCALE_AMPLITUDE
+        ? Math.sin(state.clock.elapsedTime * 2 * Math.PI * DECAY_SCALE_FREQ_HZ + driftSeed) * DECAY_SCALE_AMPLITUDE
         : 0;
       const targetScale = baseTargetScale + decayFlicker;
       const currentScale = group.scale.x;

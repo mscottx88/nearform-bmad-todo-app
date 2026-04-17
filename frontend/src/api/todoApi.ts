@@ -51,9 +51,12 @@ export function useUpdateTodo() {
       const { data } = await apiClient.patch<Todo>(`/todos/${id}`, fields);
       return data;
     },
-    // Story 2.6 AC #5: clear any decay the moment a retry begins so the
-    // pad reads as healthy during the attempt. Runs at the start of EACH
-    // retry attempt (React Query contract).
+    // Story 2.6 AC #5: clear any decay the moment a fresh mutation begins
+    // so the pad reads as healthy during the attempt. React Query calls
+    // onMutate once per `mutate()` call (before the first attempt), NOT on
+    // each retry — retries happen inside the existing promise. That's the
+    // behavior we want: the user-triggered retry clears decay; internal
+    // retries don't flicker the visual during the backoff window (AC #7).
     onMutate: ({ id }) => {
       usePondStore.getState().clearTodoError(id);
     },

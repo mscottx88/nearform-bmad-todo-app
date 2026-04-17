@@ -150,15 +150,15 @@ describe('PondScene', () => {
     expect(getByTestId('lily-pad-c').getAttribute('data-drop-delay-ms')).toBe('200');
   });
 
-  it('passes the same index-based stagger to each LilyPad on every render — anti-restagger is enforced by LilyPad mount-time capture (story 2.6 AC #3)', () => {
-    // PondScene is intentionally stateless about "have we completed the
-    // initial load". It always passes `index * STAGGER_STEP_MS`. The
-    // "don't re-stagger already-mounted pads" guarantee is enforced by
-    // LilyPad's own `useState(() => dropDelayMs)` lazy initializer,
-    // which captures the value at mount and ignores later prop changes.
-    // Mid-session-created pads (isRecent=true) override to 0 inside
-    // LilyPad, so even though PondScene passes a staggered delay for a
-    // new pad at index N, the pad itself forms immediately.
+  it('stops passing the index-based stagger after the initial non-empty render — a remount after the first cascade must NOT replay the stagger (story 2.6 AC #3, P5 follow-up)', () => {
+    // P5 (2026-04-17 code review): PondScene now tracks a
+    // `hasSeenInitialLoadRef` that flips (via useEffect) once the first
+    // non-empty `todos` list renders. From that moment on, every pad —
+    // including brand-new mounts caused by StrictMode remounts, failed-
+    // mutation-induced unmount + refetch cycles, or error-boundary retries
+    // — receives `dropDelayMs = 0`. Defense in depth alongside LilyPad's
+    // mount-time lazy-capture useState, which handles pads that stay
+    // mounted across re-renders.
     mockUseTodosData = [makeTodo('a'), makeTodo('b')];
 
     const queryClient = makeTestClient();
@@ -168,6 +168,8 @@ describe('PondScene', () => {
       </QueryClientProvider>,
     );
 
+    // First non-empty render: the stagger is still in effect (effect
+    // hasn't fired yet). This is THE one staggered cascade.
     expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
     expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
 
@@ -177,10 +179,11 @@ describe('PondScene', () => {
       </QueryClientProvider>,
     );
 
-    // PondScene keeps passing the index-based delay — the actual
-    // "ignore this value" behavior is proven by LilyPad.test.tsx and
-    // React's useState lazy-init semantics.
+    // After the effect has flipped the ref, subsequent renders pass 0 to
+    // every LilyPad regardless of index. Existing pads don't care (their
+    // useState already captured a value at mount); a hypothetical fresh
+    // mount would NOT re-trigger the cascade.
     expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
-    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
+    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('0');
   });
 });

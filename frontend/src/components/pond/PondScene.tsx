@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -24,23 +24,26 @@ export function PondScene() {
   const completingTodos = usePondStore((s) => s.completingTodos);
   const deletingTodos = usePondStore((s) => s.deletingTodos);
   const [glError, setGlError] = useState<string | null>(null);
-  const { data: todos = [] } = useTodos();
+  const { data: todos = [], isLoading: isTodosLoading } = useTodos();
   const completeTodo = useCompleteTodo();
   const deleteTodo = useDeleteTodoAction();
 
-  // Story 2.6 AC #1, #3: we always pass `index * STAGGER_STEP_MS` to each
-  // <LilyPad>. The stagger is applied only for pads that mount with a
-  // non-recent `todo.createdAt` — LilyPad itself captures `dropDelayMs`
-  // via a useState lazy initializer at mount time, so:
-  //   - Initial load (N existing todos): N pads mount, all non-recent, each
-  //     stagger delay is captured and honored → staggered cascade.
-  //   - Post-mutation refetch (existing pads stay mounted): LilyPad already
-  //     captured its delay at its own mount; new dropDelayMs props passed
-  //     by PondScene are ignored by the mount-time `useState` lazy init.
-  //   - Newly-created todo mid-session: LilyPad sees `isRecent=true` and
-  //     forces `initialDelayMs=0`, so the new pad forms immediately.
-  // This keeps PondScene stateless and avoids the React-purity pitfalls
-  // of tracking "have we completed the initial load" with a ref or effect.
+  // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
+  // the first non-empty data set has been rendered, any subsequent mount
+  // of a `<LilyPad>` (refetch re-adding an id, StrictMode double-invoke,
+  // error-boundary retry) must NOT replay the stagger. We track that with
+  // a ref that flips on the first non-empty render, so from that moment
+  // on PondScene passes `dropDelayMs = 0` to every pad. Existing mounted
+  // pads keep their captured delay via LilyPad's lazy useState; only new
+  // mounts observe the zeroed value.
+  //
+  // Written via useEffect to avoid mutating a ref during render (react-hooks
+  // purity). First non-empty render still passes `index * STAGGER_STEP_MS`
+  // because the effect hasn't run yet — that's the one staggered cascade.
+  const hasSeenInitialLoadRef = useRef(false);
+  useEffect(() => {
+    if (todos.length > 0) hasSeenInitialLoadRef.current = true;
+  }, [todos.length]);
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -137,14 +140,17 @@ export function PondScene() {
       <pointLight position={[0, 10, 0]} intensity={0.3} color="#00eeff" />
 
       <WaterSurface />
-      {renderTodos.length === 0 && <EmptyPondHint />}
+      {/* P9: only show the empty-pond hint after the initial todos query
+          has resolved — otherwise it briefly flashes during cold load while
+          `todos = []` (default) before data arrives. */}
+      {!isTodosLoading && renderTodos.length === 0 && <EmptyPondHint />}
       {renderTodos.map((todo, index) => (
         <LilyPad
           key={todo.id}
           todo={todo}
           onDropComplete={handleDropComplete}
           focused={activePopupTodoId === todo.id}
-          dropDelayMs={index * STAGGER_STEP_MS}
+          dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
       {popupTodo && (
