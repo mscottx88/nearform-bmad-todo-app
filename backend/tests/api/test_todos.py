@@ -12,7 +12,7 @@ def test_create_todo(client: TestClient) -> None:
     data = response.json()
     assert data["text"] == "Review Q2 roadmap"
     assert data["completed"] is False
-    assert data["color"] == "#00eeff"
+    assert data["color"] == "#00ff88"
     assert data["embedding_status"] == "pending"
     assert data["deleted"] is False
     assert "id" in data

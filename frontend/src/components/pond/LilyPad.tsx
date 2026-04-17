@@ -243,7 +243,7 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
-  const color = todo.color || '#00eeff';
+  const color = todo.color || '#00ff88';
   const colorVec = useMemo(() => new THREE.Color(color), [color]);
 
   // Sync target Y to the latest completion state via an effect so we don't

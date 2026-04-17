@@ -33,7 +33,7 @@ class Todo(Base):
     )
     color: Mapped[str] = mapped_column(
         String(7),
-        server_default=sa.text("'#00eeff'"),
+        server_default=sa.text("'#00ff88'"),
     )
     position_x: Mapped[float | None] = mapped_column(
         Float,

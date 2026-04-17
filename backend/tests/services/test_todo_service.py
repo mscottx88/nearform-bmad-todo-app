@@ -12,7 +12,7 @@ def test_create_todo(db_session: Session) -> None:
     assert todo.id is not None
     assert todo.text == "Buy groceries"
     assert todo.completed is False
-    assert todo.color == "#00eeff"
+    assert todo.color == "#00ff88"
     assert todo.embedding_status == "pending"
     assert todo.deleted is False
 

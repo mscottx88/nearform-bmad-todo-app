@@ -34,7 +34,7 @@ def upgrade() -> None:
     sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
     sa.Column('text', sa.Text(), nullable=False),
     sa.Column('completed', sa.Boolean(), server_default=sa.text('false'), nullable=False),
-    sa.Column('color', sa.String(length=7), server_default=sa.text("'#00eeff'"), nullable=False),
+    sa.Column('color', sa.String(length=7), server_default=sa.text("'#00ff88'"), nullable=False),
     sa.Column('position_x', sa.Float(), nullable=True),
     sa.Column('position_y', sa.Float(), nullable=True),
     sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=768), nullable=True),
