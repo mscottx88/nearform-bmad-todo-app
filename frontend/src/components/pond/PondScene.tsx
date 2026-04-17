@@ -1,9 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
 import { useTodos } from '../../api/todoApi';
+import { useCompleteTodo } from '../../hooks/usePopupComplete';
+import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
@@ -13,8 +15,10 @@ import { ActionPopup } from '../ui/ActionPopup';
 export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
+  const completingTodos = usePondStore((s) => s.completingTodos);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [] } = useTodos();
+  const completeTodo = useCompleteTodo();
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -30,6 +34,19 @@ export function PondScene() {
   const handleDropComplete = useCallback((x: number, z: number) => {
     usePondStore.getState().triggerRipple(x, z);
   }, []);
+
+  // Merge the live todo list with any in-flight completion overrides so a
+  // pad mid-dissolve keeps rendering even after the backend refetch drops
+  // it from `todos`. Dedup by id; live todos take precedence.
+  const renderTodos = useMemo<Todo[]>(() => {
+    if (completingTodos.size === 0) return todos;
+    const ids = new Set(todos.map((t) => t.id));
+    const extras: Todo[] = [];
+    for (const entry of completingTodos.values()) {
+      if (!ids.has(entry.todo.id)) extras.push(entry.todo);
+    }
+    return extras.length > 0 ? [...todos, ...extras] : todos;
+  }, [todos, completingTodos]);
 
   if (glError) {
     return (
@@ -47,8 +64,15 @@ export function PondScene() {
   }
 
   const popupTodo = activePopupTodoId
-    ? todos.find((t) => t.id === activePopupTodoId)
+    ? renderTodos.find((t) => t.id === activePopupTodoId)
     : null;
+
+  const handleComplete = () => {
+    if (!popupTodo) return;
+    const { creatureType, rarity } = completeTodo(popupTodo.id);
+    usePondStore.getState().startCompletion(popupTodo, creatureType, rarity);
+    usePondStore.getState().closePopup();
+  };
 
   return (
     <Canvas
@@ -64,8 +88,8 @@ export function PondScene() {
       <pointLight position={[0, 10, 0]} intensity={0.3} color="#00eeff" />
 
       <WaterSurface />
-      {todos.length === 0 && <EmptyPondHint />}
-      {todos.map((todo) => (
+      {renderTodos.length === 0 && <EmptyPondHint />}
+      {renderTodos.map((todo) => (
         <LilyPad
           key={todo.id}
           todo={todo}
@@ -77,8 +101,7 @@ export function PondScene() {
         <ActionPopup
           key={popupTodo.id}
           todo={popupTodo}
-          // TODO(Story 2.4): wire Complete to green-flash + dissolve completion
-          onComplete={() => console.log('Complete', popupTodo.id)}
+          onComplete={handleComplete}
           // TODO(Story 2.5): wire Delete to red-flash + dissolve
           onDelete={() => console.log('Delete', popupTodo.id)}
           // TODO(Story 4.1): open color swatch panel

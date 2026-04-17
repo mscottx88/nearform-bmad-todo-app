@@ -4,14 +4,20 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
-import { useUpdateTodo } from '../../api/todoApi';
-import { useCreateCreature, useDeleteCreature } from '../../api/creatureApi';
 import { usePondStore } from '../../stores/usePondStore';
-import { CompletionEgg } from '../creatures/CompletionEgg';
-import { Firefly } from '../creatures/creatures/Firefly';
-import { WaterStrider } from '../creatures/creatures/WaterStrider';
+import { EmergingCreature } from '../creatures/EmergingCreature';
 
-type DropPhase = 'forming' | 'dropping' | 'settling' | 'pulsing' | 'resting';
+// 'completed' is a terminal phase — the dissolve finished locally and the
+// pad is awaiting unmount. Distinct from 'completing' so we can distinguish
+// "happy-path finish" from "external cancel" in the recovery branch.
+type DropPhase =
+  | 'forming'
+  | 'dropping'
+  | 'settling'
+  | 'pulsing'
+  | 'resting'
+  | 'completing'
+  | 'completed';
 
 const DROP_Y_START = 3;
 const DROP_Y_REST = 0.05;
@@ -25,6 +31,16 @@ const COMPLETION_LERP = 0.05;
 const RIM_HEIGHT = 0.07;
 const SEGMENTS = 48;
 const NOTCH_ANGLE = 0.08;
+
+// Completion-sequence timings in seconds (R3F clock). See story 2-4 dev notes
+// for the single source of truth.
+const COMPLETING_FLASH_END = 0.30;
+const COMPLETING_EMERGE_START = 0.20;
+const COMPLETING_EMERGE_END = 0.70;
+const COMPLETING_DISSOLVE_START = 0.40;
+const COMPLETING_DISSOLVE_END = 1.20;
+const COMPLETING_TOTAL = 1.60;
+const COMPLETE_FLASH_COLOR = new THREE.Vector3(0.224, 1.0, 0.078); // #39ff14
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -122,59 +138,62 @@ interface LilyPadProps {
 }
 
 export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps) {
-  const isRecent = Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS;
+  // Lazy `useState` initializers so impure calls (`Date.now`, `Math.random`)
+  // run exactly once at mount, satisfying `react-hooks/purity`.
+  const [isRecent] = useState(
+    () => Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS,
+  );
+  const [driftSeed] = useState(() => Math.random() * Math.PI * 2);
+  const [rotationY] = useState(() => Math.random() * Math.PI * 2);
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
   const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
-  const updateTodo = useUpdateTodo();
-  const createCreature = useCreateCreature();
-  const deleteCreature = useDeleteCreature();
-  const [creatureType, setCreatureType] = useState<string | null>(null);
   const phaseRef = useRef<DropPhase>(isRecent ? 'forming' : 'resting');
   const phaseTimer = useRef(0);
-  const driftSeed = useRef(Math.random() * Math.PI * 2);
-  const rotationY = useRef(Math.random() * Math.PI * 2);
   const dropNotified = useRef(false);
   const restStartTime = useRef(0);
+  // R3F-clock timestamp stamped on the first frame of the completing phase.
+  // A ref so the same useFrame that sets it can read it on the next iteration
+  // without a setState round-trip. A parallel state mirror drives the one
+  // piece of JSX that needs to read it (the <EmergingCreature> mount gate).
+  const completingStartTimeRef = useRef<number | null>(null);
+  const [completingStartTime, setCompletingStartTime] = useState<number | null>(null);
+  const completingRippleFired = useRef(false);
   const [textOpacity, setTextOpacity] = useState(isRecent ? 0 : 1);
+
+  // Subscribe to the completion-sequence entry for this todo. When present,
+  // the pad transitions into the `completing` phase and drives the flash →
+  // emerge → dissolve → settle arc.
+  const completing = usePondStore((s) => s.completingTodos.get(todo.id));
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
   const color = todo.color || '#00eeff';
   const colorVec = useMemo(() => new THREE.Color(color), [color]);
 
-  // Update target Y when completion state changes
-  targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
+  // Sync target Y to the latest completion state via an effect so we don't
+  // mutate a ref during render (react-hooks rule).
+  useEffect(() => {
+    targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
+  }, [todo.completed]);
 
   const handlePadClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       e.stopPropagation();
+      // Ignore clicks on a pad mid-completion-sequence — the pad is still
+      // visibly present (scale/opacity > 0) through ~t=1.0s of the dissolve,
+      // so it remains hit-testable. A second popup + Complete would fire a
+      // duplicate POST /creatures that fails on the DB UniqueConstraint.
+      if (usePondStore.getState().completingTodos.has(todo.id)) return;
       usePondStore.getState().openPopup(todo.id, posX, posZ);
     },
     [todo.id, posX, posZ],
   );
 
-  const handleEggToggle = useCallback(() => {
-    const newCompleted = !todo.completed;
-    updateTodo.mutate({ id: todo.id, completed: newCompleted });
-    if (newCompleted) {
-      const type = Math.random() < 0.5 ? 'firefly' : 'water_strider';
-      setCreatureType(type);
-      createCreature.mutate({
-        todoId: todo.id,
-        creatureType: type,
-        rarity: 'common',
-      });
-    } else {
-      setCreatureType(null);
-      deleteCreature.mutate(todo.id);
-    }
-  }, [todo.id, todo.completed, updateTodo, createCreature, deleteCreature]);
-
   const padShape = useMemo(
-    () => buildPadShape(PAD_RADIUS, SEGMENTS, driftSeed.current),
-    [],
+    () => buildPadShape(PAD_RADIUS, SEGMENTS, driftSeed),
+    [driftSeed],
   );
 
   // Smooth solid rim — extruded wall with enough verts for a clean surface
@@ -221,13 +240,13 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
 
   const [padUniforms] = useState(() => ({
     uColor: { value: new THREE.Vector3(colorVec.r, colorVec.g, colorVec.b) },
-    uSeed: { value: driftSeed.current },
+    uSeed: { value: driftSeed },
   }));
 
   useEffect(() => {
     const group = groupRef.current;
     if (!group?.position) return;
-    group.rotation.y = rotationY.current;
+    group.rotation.y = rotationY;
     if (phaseRef.current !== 'resting') {
       group.position.set(posX, DROP_Y_START, posZ);
       group.scale.setScalar(0);
@@ -241,14 +260,123 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
     const group = groupRef.current;
     if (!group) return;
 
+    // Transition into the completion sequence as soon as the store marks
+    // this todo as completing. Stamp the start time from the R3F clock on
+    // the first active frame (never `performance.now()` — different clock).
+    if (completing && phaseRef.current === 'resting') {
+      phaseRef.current = 'completing';
+      completingRippleFired.current = false;
+      completingStartTimeRef.current = state.clock.elapsedTime;
+      setCompletingStartTime(state.clock.elapsedTime);
+    }
+
+    // Recovery: if the completing override was cleared while we were still
+    // mid-sequence (external cancel path — NOT the happy-path terminal
+    // transition, which moves to 'completed' first), restore the pad to
+    // `resting` with full opacity/scale so it isn't an invisible unclickable
+    // ghost when the todo is still present in useTodos.
+    if (!completing && phaseRef.current === 'completing') {
+      phaseRef.current = 'resting';
+      completingStartTimeRef.current = null;
+      completingRippleFired.current = false;
+      setCompletingStartTime(null);
+      group.scale.setScalar(1);
+      group.traverse((obj) => {
+        if (obj.userData.skipDissolve) return;
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh || (obj as THREE.Line).isLine) {
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(mat)) {
+            for (const m of mat) m.opacity = 1;
+          } else if (mat) {
+            mat.opacity = mat instanceof THREE.MeshBasicMaterial ? 0.4 : 1;
+          }
+        }
+      });
+      restStartTime.current = 0;
+    }
+
     const phase = phaseRef.current;
+
+    // Terminal state: dissolve finished, awaiting unmount. Don't re-walk
+    // descendants every frame, don't restore anything.
+    if (phase === 'completed') return;
+
+    if (phase === 'completing') {
+      const startedAt = completingStartTimeRef.current;
+      if (startedAt === null) return;
+      const t = state.clock.elapsedTime - startedAt;
+
+      // Once the sequence is done, mark terminal and release the store
+      // override. finishCompletion is idempotent (has-guard in the store).
+      if (t >= COMPLETING_TOTAL) {
+        phaseRef.current = 'completed';
+        usePondStore.getState().finishCompletion(todo.id);
+        return;
+      }
+
+      // Flash: override shader uColor to full-intensity neon green for the
+      // 300ms flash window (AC #2 — "at full intensity"), then restore to
+      // the pad's base color on flash-end. The dissolve's opacity fade
+      // hides whatever color is underneath.
+      if (padMeshRef.current) {
+        const mat = padMeshRef.current.material as THREE.ShaderMaterial;
+        if (mat.uniforms?.uColor) {
+          if (t < COMPLETING_FLASH_END) {
+            mat.uniforms.uColor.value.copy(COMPLETE_FLASH_COLOR);
+          } else {
+            mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
+          }
+        }
+      }
+
+      // Ripple: fire exactly once at the dissolve start.
+      if (
+        !completingRippleFired.current &&
+        t >= COMPLETING_DISSOLVE_START
+      ) {
+        usePondStore.getState().triggerRipple(posX, posZ);
+        completingRippleFired.current = true;
+      }
+
+      // Dissolve: scale the whole group and fade pad materials to 0.
+      // `userData.skipDissolve` opts subtrees out — <EmergingCreature>
+      // tags itself so its emerge fade isn't clobbered during the overlap.
+      if (t >= COMPLETING_DISSOLVE_START) {
+        const dissolveT = Math.min(
+          (t - COMPLETING_DISSOLVE_START) /
+            (COMPLETING_DISSOLVE_END - COMPLETING_DISSOLVE_START),
+          1,
+        );
+        const eased = easeOut(dissolveT);
+        group.scale.setScalar(1 - eased);
+        const opacity = 1 - eased;
+        group.traverse((obj) => {
+          if (obj.userData.skipDissolve) return;
+          const mesh = obj as THREE.Mesh;
+          if (mesh.isMesh || (obj as THREE.Line).isLine) {
+            const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+            if (Array.isArray(mat)) {
+              for (const m of mat) {
+                m.transparent = true;
+                m.opacity = opacity;
+              }
+            } else if (mat) {
+              mat.transparent = true;
+              mat.opacity = opacity;
+            }
+          }
+        });
+      }
+      return;
+    }
 
     if (phase === 'resting') {
       if (restStartTime.current === 0) {
         restStartTime.current = state.clock.elapsedTime;
       }
       const t = state.clock.elapsedTime - restStartTime.current;
-      const seed = driftSeed.current;
+      const seed = driftSeed;
       const ramp = Math.min(t / 3, 1);
       // Progressive density override: ensure focused pads render at readable size
       const targetScale = focused ? 1.2 : 1.0;
@@ -369,43 +497,47 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
         </bufferGeometry>
         <lineBasicMaterial color={color} linewidth={1} />
       </lineLoop>
-      {/* Text label — fades in on landing */}
-      <Html
-        position={[0, 0.2, 0]}
-        center
-        style={{ pointerEvents: 'none' }}
-      >
-        <div
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            color: '#ffffff',
-            fontSize: '11px',
-            textShadow: `0 0 6px ${color}`,
-            whiteSpace: 'nowrap',
-            opacity: textOpacity,
-            transition: 'opacity 200ms ease-in',
-            maxWidth: '100px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            userSelect: 'none',
-          }}
+      {/* Text label — fades in on landing. Hidden during the completion
+          sequence (store override) AND the terminal-completed window before
+          unmount. `completingStartTime` persists across finishCompletion so
+          a one-frame label flash over a scale=0 pad is avoided. The
+          external-cancel recovery path nulls it again, restoring the label. */}
+      {!completing && completingStartTime === null && (
+        <Html
+          position={[0, 0.2, 0]}
+          center
+          style={{ pointerEvents: 'none' }}
         >
-          {todo.text}
-        </div>
-      </Html>
-      {/* Completion egg — near the notch */}
-      <CompletionEgg
-        color={color}
-        completed={todo.completed}
-        onToggle={handleEggToggle}
-        padRadius={PAD_RADIUS}
-      />
-      {/* Hatched creature near the notch */}
-      {todo.completed && creatureType === 'firefly' && (
-        <Firefly position={[PAD_RADIUS * 0.4, 0.2, 0.1]} color={color} />
+          <div
+            style={{
+              fontFamily: "'Inter', sans-serif",
+              color: '#ffffff',
+              fontSize: '11px',
+              textShadow: `0 0 6px ${color}`,
+              whiteSpace: 'nowrap',
+              opacity: textOpacity,
+              transition: 'opacity 200ms ease-in',
+              maxWidth: '100px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              userSelect: 'none',
+            }}
+          >
+            {todo.text}
+          </div>
+        </Html>
       )}
-      {todo.completed && creatureType === 'water_strider' && (
-        <WaterStrider position={[PAD_RADIUS * 0.4, 0, 0.2]} color={color} />
+      {/* Completion creature — only visible during the emerge window of the
+          `completing` phase. The component self-hides before/after via its
+          useFrame; mounting while `completing` is present is enough. */}
+      {completing && completingStartTime !== null && (
+        <EmergingCreature
+          creatureType={completing.creatureType}
+          color={color}
+          basePosition={[0, 0.15, 0]}
+          startTime={completingStartTime + COMPLETING_EMERGE_START}
+          duration={COMPLETING_EMERGE_END - COMPLETING_EMERGE_START}
+        />
       )}
     </group>
   );

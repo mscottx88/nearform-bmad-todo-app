@@ -1,5 +1,25 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { usePondStore } from './usePondStore';
+import type { Todo } from '../types';
+
+function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
+  return {
+    id,
+    text: 'test',
+    completed: false,
+    color: '#00eeff',
+    positionX: 0,
+    positionY: 0,
+    embeddingStatus: 'pending',
+    archived: false,
+    archivedAt: null,
+    deleted: false,
+    deletedAt: null,
+    createdAt: '2026-04-16T00:00:00Z',
+    updatedAt: '2026-04-16T00:00:00Z',
+    ...overrides,
+  };
+}
 
 describe('usePondStore', () => {
   beforeEach(() => {
@@ -7,6 +27,7 @@ describe('usePondStore', () => {
       activePopupTodoId: null,
       cameraFocus: null,
       dropRipple: null,
+      completingTodos: new Map(),
     });
   });
 
@@ -64,6 +85,42 @@ describe('usePondStore', () => {
     it('is a no-op when no popup is open', () => {
       usePondStore.getState().closePopup();
       expect(usePondStore.getState().activePopupTodoId).toBeNull();
+    });
+  });
+
+  describe('startCompletion / finishCompletion', () => {
+    it('startCompletion adds an entry keyed by todo id with the todo snapshot', () => {
+      const todo = makeTodo('todo-1', { text: 'write report', color: '#39ff14' });
+      usePondStore.getState().startCompletion(todo, 'firefly', 'common');
+      const entry = usePondStore.getState().completingTodos.get('todo-1');
+      expect(entry).toBeDefined();
+      expect(entry?.todo).toEqual(todo);
+      expect(entry?.creatureType).toBe('firefly');
+      expect(entry?.rarity).toBe('common');
+    });
+
+    it('finishCompletion removes the entry', () => {
+      const todo = makeTodo('todo-1');
+      usePondStore.getState().startCompletion(todo, 'frog', 'uncommon');
+      usePondStore.getState().finishCompletion('todo-1');
+      expect(usePondStore.getState().completingTodos.has('todo-1')).toBe(false);
+    });
+
+    it('finishCompletion is a no-op when the id is not in the map', () => {
+      const sizeBefore = usePondStore.getState().completingTodos.size;
+      usePondStore.getState().finishCompletion('nonexistent');
+      expect(usePondStore.getState().completingTodos.size).toBe(sizeBefore);
+    });
+
+    it('supports multiple concurrent completing todos', () => {
+      const a = makeTodo('a');
+      const b = makeTodo('b');
+      usePondStore.getState().startCompletion(a, 'firefly', 'common');
+      usePondStore.getState().startCompletion(b, 'golden_koi', 'legendary');
+      const state = usePondStore.getState().completingTodos;
+      expect(state.size).toBe(2);
+      expect(state.get('a')?.rarity).toBe('common');
+      expect(state.get('b')?.rarity).toBe('legendary');
     });
   });
 });

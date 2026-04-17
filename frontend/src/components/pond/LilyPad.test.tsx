@@ -4,7 +4,6 @@ import { LilyPad } from './LilyPad';
 import type { Todo } from '../../types';
 
 const openPopupMock = vi.fn();
-const focusCameraMock = vi.fn();
 
 vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn(),
@@ -14,34 +13,20 @@ vi.mock('@react-three/drei', () => ({
   Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('../../api/todoApi', () => ({
-  useUpdateTodo: () => ({ mutate: vi.fn() }),
-}));
+const completingTodosMock = new Map<string, unknown>();
 
 vi.mock('../../stores/usePondStore', () => ({
-  usePondStore: Object.assign(() => 1.0, {
+  // Selector-aware stub: returns undefined for any hook selector call
+  // (covers `s.completingTodos.get(id)` which is the only selector this
+  // component uses today). `getState()` exposes the shape the component
+  // touches imperatively — `openPopup` + the `completingTodos` map read
+  // by the handlePadClick double-completion guard.
+  usePondStore: Object.assign(() => undefined, {
     getState: () => ({
-      focusCamera: focusCameraMock,
       openPopup: openPopupMock,
+      completingTodos: completingTodosMock,
     }),
   }),
-}));
-
-vi.mock('../../api/creatureApi', () => ({
-  useCreateCreature: () => ({ mutate: vi.fn() }),
-  useDeleteCreature: () => ({ mutate: vi.fn() }),
-}));
-
-vi.mock('../creatures/CompletionEgg', () => ({
-  CompletionEgg: () => null,
-}));
-
-vi.mock('../creatures/creatures/Firefly', () => ({
-  Firefly: () => null,
-}));
-
-vi.mock('../creatures/creatures/WaterStrider', () => ({
-  WaterStrider: () => null,
 }));
 
 const mockTodo: Todo = {

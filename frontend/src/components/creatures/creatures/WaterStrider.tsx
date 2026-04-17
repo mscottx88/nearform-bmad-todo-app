@@ -1,21 +1,27 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 interface WaterStriderProps {
   position: [number, number, number];
   color: string;
+  // When used inside <EmergingCreature>, position is driven by the parent's
+  // rise animation so the skimming useFrame must stand down.
+  asEmerging?: boolean;
 }
 
-export function WaterStrider({ position, color }: WaterStriderProps) {
+export function WaterStrider({ position, color, asEmerging = false }: WaterStriderProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const seed = useRef(Math.random() * Math.PI * 2);
+  // Lazy `useState` initializer keeps the impure `Math.random` call out of
+  // the render body (react-hooks/purity).
+  const [seed] = useState(() => Math.random() * Math.PI * 2);
 
   useFrame((state) => {
+    if (asEmerging) return;
     const group = groupRef.current;
     if (!group) return;
     const t = state.clock.elapsedTime;
-    const s = seed.current;
+    const s = seed;
     // Skims near the pad on the water surface
     group.position.x = position[0] + Math.sin(t * 0.5 + s) * 0.4;
     group.position.y = 0.02;
