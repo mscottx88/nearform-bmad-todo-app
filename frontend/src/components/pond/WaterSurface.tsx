@@ -1,13 +1,27 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { usePondStore } from '../../stores/usePondStore';
 
+// Scheduling constants for the occasional ambient ripple. The pond still
+// needs to feel alive when idle, but the previous 5 always-on ripple
+// sources drowned out user-triggered click/drop ripples. One scheduled
+// ambient ripple every 4-8s reads as "something stirred out there"
+// without masking intentional feedback.
+const AMBIENT_RIPPLE_MIN_DELAY_MS = 4000;
+const AMBIENT_RIPPLE_MAX_DELAY_MS = 8000;
+// First ripple fires quickly so the pond doesn't look frozen on load.
+const AMBIENT_RIPPLE_FIRST_DELAY_MS = 1500;
+// Random position within the visible pond area (±20 units on each axis).
+const AMBIENT_RIPPLE_RADIUS = 20;
+
 const vertexShader = /* glsl */ `
   uniform float uTime;
   uniform vec2 uDropCenter;
   uniform float uDropTime;
+  uniform vec2 uAmbientCenter;
+  uniform float uAmbientTime;
 
   varying float vElevation;
   varying vec2 vUv;
@@ -24,19 +38,23 @@ const vertexShader = /* glsl */ `
     vUv = uv;
     vec3 pos = position;
 
-    // Multiple ambient ripple sources across the pond
-    float r1 = ripple(pos.xy, vec2(12.0, 8.0),   1.2, 1.5, 0.06) * 0.12;
-    float r2 = ripple(pos.xy, vec2(-15.0, -10.0), 1.5, 1.2, 0.05) * 0.10;
-    float r3 = ripple(pos.xy, vec2(5.0, -18.0),   1.0, 1.8, 0.07) * 0.08;
-    float r4 = ripple(pos.xy, vec2(-8.0, 20.0),   1.8, 1.0, 0.08) * 0.06;
-    float r5 = ripple(pos.xy, vec2(22.0, -5.0),   1.3, 1.4, 0.06) * 0.07;
-
-    // Very subtle overall breathing motion
+    // Subtle overall breathing motion — the only always-on background
+    // so click/drop ripples stand out clearly.
     float breath = sin(uTime * 0.3) * 0.02;
+    float elevation = breath;
 
-    float elevation = r1 + r2 + r3 + r4 + r5 + breath;
+    // Occasional ambient ripple — one at a time, fades on its own over
+    // ~3.5s. Scheduled by JS on a 4-8s timer (see WaterSurface useEffect).
+    if (uAmbientTime > 0.0) {
+      float ambientElapsed = uTime - uAmbientTime;
+      if (ambientElapsed > 0.0 && ambientElapsed < 3.5) {
+        float ambientRipple = ripple(pos.xy, uAmbientCenter, 1.3, 1.5, 0.08);
+        float ambientDecay = exp(-ambientElapsed * 1.0);
+        elevation += ambientRipple * 0.10 * ambientDecay;
+      }
+    }
 
-    // Dynamic impact ripple from todo drop
+    // Dynamic impact ripple from todo drop OR user click
     if (uDropTime > 0.0) {
       float dropElapsed = uTime - uDropTime;
       if (dropElapsed > 0.0 && dropElapsed < 2.0) {
@@ -81,6 +99,8 @@ function createUniforms() {
     uNeonColor: { value: new THREE.Vector3(0.0, 0.933, 1.0) },
     uDropCenter: { value: new THREE.Vector2(0, 0) },
     uDropTime: { value: 0 },
+    uAmbientCenter: { value: new THREE.Vector2(0, 0) },
+    uAmbientTime: { value: 0 },
   };
 }
 
@@ -90,6 +110,11 @@ export function WaterSurface() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const dropRipple = usePondStore((s) => s.dropRipple);
   const lastRippleRef = useRef<number>(0);
+  // Ambient ripples are scheduled by JS setTimeout and queued as a pending
+  // {x, z} here; useFrame stamps the uniform on the next frame using the
+  // R3F clock for `uAmbientTime`. Ref (not state) because we don't want
+  // to trigger re-renders from the scheduler.
+  const pendingAmbientRef = useRef<{ x: number; z: number } | null>(null);
 
   useFrame((state) => {
     const mesh = meshRef.current;
@@ -111,7 +136,41 @@ export function WaterSurface() {
       material.uniforms.uDropTime.value = state.clock.elapsedTime;
       lastRippleRef.current = dropRipple.time;
     }
+
+    if (pendingAmbientRef.current) {
+      const { x, z } = pendingAmbientRef.current;
+      // Same world-Z → local-Y flip as dropCenter.
+      material.uniforms.uAmbientCenter.value.set(x, -z);
+      material.uniforms.uAmbientTime.value = state.clock.elapsedTime;
+      pendingAmbientRef.current = null;
+    }
   });
+
+  // Schedule occasional ambient ripples at random positions across the
+  // pond. Chain setTimeouts so each subsequent delay is independently
+  // randomized (setInterval would give fixed-cadence repeats, which
+  // reads as mechanical instead of natural).
+  useEffect(() => {
+    let timeoutId: number | undefined;
+    const queueOne = () => {
+      const x = (Math.random() - 0.5) * 2 * AMBIENT_RIPPLE_RADIUS;
+      const z = (Math.random() - 0.5) * 2 * AMBIENT_RIPPLE_RADIUS;
+      pendingAmbientRef.current = { x, z };
+    };
+    const schedule = (delayMs: number) => {
+      timeoutId = window.setTimeout(() => {
+        queueOne();
+        const nextDelay =
+          AMBIENT_RIPPLE_MIN_DELAY_MS +
+          Math.random() * (AMBIENT_RIPPLE_MAX_DELAY_MS - AMBIENT_RIPPLE_MIN_DELAY_MS);
+        schedule(nextDelay);
+      }, delayMs);
+    };
+    schedule(AMBIENT_RIPPLE_FIRST_DELAY_MS);
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   // Click anywhere on the water surface → radiating ripple at the click
   // point. R3F's raycaster hands us the world-space intersection as
