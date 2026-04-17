@@ -29,6 +29,7 @@ describe('usePondStore', () => {
       dropRipple: null,
       completingTodos: new Map(),
       deletingTodos: new Map(),
+      errorTodos: new Map(),
     });
   });
 
@@ -195,6 +196,66 @@ describe('usePondStore', () => {
       const { selectDeleting } = await import('./usePondStore');
       const state = usePondStore.getState();
       expect(selectDeleting('nope')(state)).toBeUndefined();
+    });
+  });
+
+  describe('setTodoError / clearTodoError', () => {
+    it('setTodoError stamps an entry keyed by todo id', () => {
+      const err = new Error('boom');
+      usePondStore.getState().setTodoError('todo-1', 'update', err);
+      const entry = usePondStore.getState().errorTodos.get('todo-1');
+      expect(entry).toBeDefined();
+      expect(entry?.todoId).toBe('todo-1');
+      expect(entry?.operation).toBe('update');
+      expect(entry?.error).toBe(err);
+      expect(typeof entry?.stampedAt).toBe('number');
+    });
+
+    it('clearTodoError removes the entry', () => {
+      usePondStore.getState().setTodoError('todo-1', 'delete', new Error('x'));
+      usePondStore.getState().clearTodoError('todo-1');
+      expect(usePondStore.getState().errorTodos.has('todo-1')).toBe(false);
+    });
+
+    it('clearTodoError is a no-op when the id is not present', () => {
+      const sizeBefore = usePondStore.getState().errorTodos.size;
+      usePondStore.getState().clearTodoError('nope');
+      expect(usePondStore.getState().errorTodos.size).toBe(sizeBefore);
+    });
+
+    it('setTodoError called twice on the same id keeps the latest entry', () => {
+      const first = new Error('first');
+      const second = new Error('second');
+      usePondStore.getState().setTodoError('todo-1', 'update', first);
+      usePondStore.getState().setTodoError('todo-1', 'delete', second);
+      const entry = usePondStore.getState().errorTodos.get('todo-1');
+      expect(entry?.error).toBe(second);
+      expect(entry?.operation).toBe('delete');
+      expect(usePondStore.getState().errorTodos.size).toBe(1);
+    });
+
+    it('supports concurrent errors on different todos', () => {
+      usePondStore.getState().setTodoError('a', 'update', new Error('a'));
+      usePondStore.getState().setTodoError('b', 'delete', new Error('b'));
+      const map = usePondStore.getState().errorTodos;
+      expect(map.size).toBe(2);
+      expect(map.get('a')?.operation).toBe('update');
+      expect(map.get('b')?.operation).toBe('delete');
+    });
+  });
+
+  describe('selectTodoError selector', () => {
+    it('returns the entry when present', async () => {
+      const { selectTodoError } = await import('./usePondStore');
+      usePondStore.getState().setTodoError('todo-1', 'complete', new Error('x'));
+      const state = usePondStore.getState();
+      expect(selectTodoError('todo-1')(state)?.operation).toBe('complete');
+    });
+
+    it('returns undefined when absent', async () => {
+      const { selectTodoError } = await import('./usePondStore');
+      const state = usePondStore.getState();
+      expect(selectTodoError('nope')(state)).toBeUndefined();
     });
   });
 });

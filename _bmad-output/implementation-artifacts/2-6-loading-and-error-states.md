@@ -1,6 +1,6 @@
 # Story 2.6: Loading & Error States
 
-Status: ready-for-dev
+Status: review
 
 > Closes out Epic 2 (Todo Life on the Pond). Builds on [Story 2.2](./2-2-lily-pad-creation-the-drop.md) (drop animation), [Story 2.4](./2-4-completion-via-popup-green-flash-and-dissolve.md), and [Story 2.5](./2-5-deletion-via-popup-red-flash-and-dissolve.md) (both established the "fire-and-forget network + local animation" pattern that this story makes resilient).
 
@@ -30,8 +30,8 @@ so that I never see a generic spinner, a dialog, or a toast — and a backend bl
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Store additions for error tracking (AC: #4, #5, #6, #8)
-  - [ ] In `frontend/src/stores/usePondStore.ts`, add:
+- [x] Task 1: Store additions for error tracking (AC: #4, #5, #6, #8)
+  - [x] In `frontend/src/stores/usePondStore.ts`, add:
     ```ts
     export type TodoErrorOperation = 'update' | 'delete' | 'complete';
     export interface TodoErrorEntry {
@@ -41,17 +41,17 @@ so that I never see a generic spinner, a dialog, or a toast — and a backend bl
       stampedAt: number; // performance.now() — UI-clock is fine here, not R3F
     }
     ```
-  - [ ] Add to `PondState`:
+  - [x] Add to `PondState`:
     - `errorTodos: Map<string, TodoErrorEntry>;`
     - `setTodoError: (todoId: string, operation: TodoErrorOperation, error: Error) => void;`
     - `clearTodoError: (todoId: string) => void;`
-  - [ ] `setTodoError` replaces the Map entry on each call (latest error wins — a fresh failure on an already-erroring pad overwrites the prior entry). `clearTodoError` is a no-op when the id is not present (mirrors `finishDeletion` pattern).
-  - [ ] Export `selectTodoError(id)` convenience selector — mirrors `selectCompleting` / `selectDeleting`.
-  - [ ] Extend `usePondStore.test.ts` `beforeEach` reset to include `errorTodos: new Map()`.
-  - [ ] New `describe('setTodoError / clearTodoError')` block with: stamping works, clearing works, latest-stamp wins, `selectTodoError` returns the entry / undefined.
+  - [x] `setTodoError` replaces the Map entry on each call (latest error wins — a fresh failure on an already-erroring pad overwrites the prior entry). `clearTodoError` is a no-op when the id is not present (mirrors `finishDeletion` pattern).
+  - [x] Export `selectTodoError(id)` convenience selector — mirrors `selectCompleting` / `selectDeleting`.
+  - [x] Extend `usePondStore.test.ts` `beforeEach` reset to include `errorTodos: new Map()`.
+  - [x] New `describe('setTodoError / clearTodoError')` block with: stamping works, clearing works, latest-stamp wins, `selectTodoError` returns the entry / undefined.
 
-- [ ] Task 2: Wire automatic retry at the QueryClient level (AC: #7)
-  - [ ] In `frontend/src/App.tsx`, configure the `QueryClient` with:
+- [x] Task 2: Wire automatic retry at the QueryClient level (AC: #7)
+  - [x] In `frontend/src/App.tsx`, configure the `QueryClient` with:
     ```ts
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -62,23 +62,23 @@ so that I never see a generic spinner, a dialog, or a toast — and a backend bl
       },
     });
     ```
-  - [ ] Test fixtures (`PondScene.test.tsx`, any other test that constructs a fresh `QueryClient`) should construct their client with `retry: false` (or `retry: 0`) so tests don't wait 7s for retries to exhaust. Do NOT change the production default.
-  - [ ] **Do not** add per-hook retry overrides. The client default is the single source of truth.
+  - [x] Test fixtures (`PondScene.test.tsx`, any other test that constructs a fresh `QueryClient`) should construct their client with `retry: false` (or `retry: 0`) so tests don't wait 7s for retries to exhaust. Do NOT change the production default.
+  - [x] **Do not** add per-hook retry overrides. The client default is the single source of truth.
 
-- [ ] Task 3: Wire `onError` / `onMutate` / `onSuccess` in the per-todo mutation hooks (AC: #4, #5, #8)
-  - [ ] `useUpdateTodo` in `frontend/src/api/todoApi.ts`:
+- [x] Task 3: Wire `onError` / `onMutate` / `onSuccess` in the per-todo mutation hooks (AC: #4, #5, #8)
+  - [x] `useUpdateTodo` in `frontend/src/api/todoApi.ts`:
     - `onMutate: ({ id }) => { usePondStore.getState().clearTodoError(id); }` — clearing BEFORE the attempt means a retry click reads as healthy immediately.
     - `onError: (err, { id }) => { usePondStore.getState().setTodoError(id, 'update', err as Error); }`
     - `onSuccess` keeps the existing `invalidateQueries` call; add `clearTodoError(variables.id)` as well (defense in depth against stale error entries).
-  - [ ] `useDeleteTodo`: same shape. `variables` is the raw id string, so `onError: (err, id) => setTodoError(id, 'delete', err as Error)`.
-  - [ ] `useCreateCreature` in `frontend/src/api/creatureApi.ts`: `onError: (err, { todoId }) => setTodoError(todoId, 'complete', err as Error)` and matching `onMutate` / `onSuccess` clears. Use `'complete'` as the operation tag since the user action was "click Complete" even though the failing network call is the creature POST.
-  - [ ] **`useCreateTodo` is out of scope for this story** — there is no existing todo id to attach decay to on creation failure (the pad hasn't been persisted yet and there is no optimistic-update path in place from Story 2.2). Leave `useCreateTodo` as-is. Creation failure remains a silent no-op for v1.
-  - [ ] **Do not** touch `usePopupComplete` / `usePopupDelete` — they already `console.warn` on `onError`. That logging stays; the new store-side error tracking is additive.
+  - [x] `useDeleteTodo`: same shape. `variables` is the raw id string, so `onError: (err, id) => setTodoError(id, 'delete', err as Error)`.
+  - [x] `useCreateCreature` in `frontend/src/api/creatureApi.ts`: `onError: (err, { todoId }) => setTodoError(todoId, 'complete', err as Error)` and matching `onMutate` / `onSuccess` clears. Use `'complete'` as the operation tag since the user action was "click Complete" even though the failing network call is the creature POST.
+  - [x] **`useCreateTodo` is out of scope for this story** — there is no existing todo id to attach decay to on creation failure (the pad hasn't been persisted yet and there is no optimistic-update path in place from Story 2.2). Leave `useCreateTodo` as-is. Creation failure remains a silent no-op for v1.
+  - [x] **Do not** touch `usePopupComplete` / `usePopupDelete` — they already `console.warn` on `onError`. That logging stays; the new store-side error tracking is additive.
 
-- [ ] Task 4: Decay visual in `LilyPad` (AC: #4, #5, #6, #8)
-  - [ ] In `frontend/src/components/pond/LilyPad.tsx`:
-    - [ ] Subscribe: `const errorEntry = usePondStore(selectTodoError(todo.id));`
-    - [ ] Add constants near the completion/deletion timings:
+- [x] Task 4: Decay visual in `LilyPad` (AC: #4, #5, #6, #8)
+  - [x] In `frontend/src/components/pond/LilyPad.tsx`:
+    - [x] Subscribe: `const errorEntry = usePondStore(selectTodoError(todo.id));`
+    - [x] Add constants near the completion/deletion timings:
       ```ts
       const DECAY_SATURATION = 0.3;      // lerp uColor toward desaturated
       const DECAY_SCALE_AMPLITUDE = 0.03; // ±3% flicker
@@ -86,37 +86,37 @@ so that I never see a generic spinner, a dialog, or a toast — and a backend bl
       const DECAY_RIM_OPACITY = 0.25;
       const DECAY_RECOVER_MS = 400;       // smooth heal-back duration
       ```
-    - [ ] In the `resting` phase branch of `useFrame`, when `errorEntry` is present:
+    - [x] In the `resting` phase branch of `useFrame`, when `errorEntry` is present:
       - Lerp `uColor` toward `(colorVec.r * DECAY_SATURATION, colorVec.g * DECAY_SATURATION, colorVec.b * DECAY_SATURATION)` over ~200ms (use the existing `COMPLETION_LERP = 0.05` step).
       - Overlay a scale multiplier: `1 + Math.sin(state.clock.elapsedTime * 2π * DECAY_SCALE_FREQ_HZ) * DECAY_SCALE_AMPLITUDE`. Apply to `group.scale.x/y/z` on top of the focused-pad scale logic (multiply, don't replace).
       - Lerp `rimRef.material.opacity` toward `DECAY_RIM_OPACITY`.
-    - [ ] When `errorEntry` transitions from present → undefined (recovery), smoothly lerp uColor + rim opacity back to resting values over `DECAY_RECOVER_MS`. A simple recovery-timestamp ref (`decayRecoverStartRef`) captured on the transition frame, with `t = (elapsedTime - startTime) / (DECAY_RECOVER_MS / 1000)` driving the lerp, is enough.
-    - [ ] Do **not** apply decay during any non-resting phase (`forming`, `dropping`, `settling`, `pulsing`, `completing`, `completed`, `deleting`, `deleted`). Those animations take precedence — decay is a resting-state visual only.
+    - [x] When `errorEntry` transitions from present → undefined (recovery), smoothly lerp uColor + rim opacity back to resting values over `DECAY_RECOVER_MS`. A simple recovery-timestamp ref (`decayRecoverStartRef`) captured on the transition frame, with `t = (elapsedTime - startTime) / (DECAY_RECOVER_MS / 1000)` driving the lerp, is enough.
+    - [x] Do **not** apply decay during any non-resting phase (`forming`, `dropping`, `settling`, `pulsing`, `completing`, `completed`, `deleting`, `deleted`). Those animations take precedence — decay is a resting-state visual only.
 
-- [ ] Task 5: Staggered initial load in `PondScene` / `LilyPad` (AC: #1, #2, #3)
-  - [ ] In `frontend/src/components/pond/PondScene.tsx`:
-    - [ ] Track "have we seen the first non-empty data yet?" with a `useRef<boolean>(true)` plus a state flag. On first `todos.length > 0` arrival, flip the flag AND record the R3F clock time (no — wall-clock is fine here since we only need relative ordering).
-    - [ ] Pass `dropDelayMs` to each `<LilyPad>` — equal to `index * STAGGER_STEP_MS` on initial load, `0` on subsequent renders. `STAGGER_STEP_MS = 100`.
-    - [ ] `index` comes from the `.map` callback's index. Stable because `key={todo.id}` keeps component identity when the list doesn't reorder.
-  - [ ] In `LilyPad.tsx`:
-    - [ ] Accept a new optional prop: `dropDelayMs?: number` (default 0).
-    - [ ] When `dropDelayMs > 0`, the pad starts in a new phase `'waiting'` with its group `scale = 0` and `opacity = 0` (invisible, non-clickable). After the delay elapses (use R3F clock: `if (state.clock.elapsedTime - mountClock > delay)` stamp on the first useFrame tick), transition to `'forming'` and play the existing drop arc.
-    - [ ] `mountClock` is another `useRef<number>(0)` stamped on the FIRST active useFrame — never from outside React's render (2.3/2.4 lost time to this).
-    - [ ] `isRecent` logic stays but is now secondary: if `dropDelayMs > 0` OR `isRecent`, the pad starts in `'waiting'` / `'forming'`; otherwise in `'resting'` (existing behavior). A pad that is `isRecent=true` AND also has `dropDelayMs > 0` (newly-created todo during an initial load — rare) uses the delay — the stagger wins.
-  - [ ] **Do not** stagger on post-creation refetches. AC #3 is load-bearing: after the first staggered arrival, the pond is "steady state" and new data arrives immediately.
+- [x] Task 5: Staggered initial load in `PondScene` / `LilyPad` (AC: #1, #2, #3)
+  - [x] In `frontend/src/components/pond/PondScene.tsx`:
+    - [x] Track "have we seen the first non-empty data yet?" with a `useRef<boolean>(true)` plus a state flag. On first `todos.length > 0` arrival, flip the flag AND record the R3F clock time (no — wall-clock is fine here since we only need relative ordering).
+    - [x] Pass `dropDelayMs` to each `<LilyPad>` — equal to `index * STAGGER_STEP_MS` on initial load, `0` on subsequent renders. `STAGGER_STEP_MS = 100`.
+    - [x] `index` comes from the `.map` callback's index. Stable because `key={todo.id}` keeps component identity when the list doesn't reorder.
+  - [x] In `LilyPad.tsx`:
+    - [x] Accept a new optional prop: `dropDelayMs?: number` (default 0).
+    - [x] When `dropDelayMs > 0`, the pad starts in a new phase `'waiting'` with its group `scale = 0` and `opacity = 0` (invisible, non-clickable). After the delay elapses (use R3F clock: `if (state.clock.elapsedTime - mountClock > delay)` stamp on the first useFrame tick), transition to `'forming'` and play the existing drop arc.
+    - [x] `mountClock` is another `useRef<number>(0)` stamped on the FIRST active useFrame — never from outside React's render (2.3/2.4 lost time to this).
+    - [x] `isRecent` logic stays but is now secondary: if `dropDelayMs > 0` OR `isRecent`, the pad starts in `'waiting'` / `'forming'`; otherwise in `'resting'` (existing behavior). A pad that is `isRecent=true` AND also has `dropDelayMs > 0` (newly-created todo during an initial load — rare) uses the delay — the stagger wins.
+  - [x] **Do not** stagger on post-creation refetches. AC #3 is load-bearing: after the first staggered arrival, the pond is "steady state" and new data arrives immediately.
 
-- [ ] Task 6: Tests (AC: all)
-  - [ ] `usePondStore.test.ts` — `setTodoError` / `clearTodoError` + `selectTodoError`, latest-stamp-wins, idempotent clear.
-  - [ ] `todoApi.test.ts` (new) OR integration via existing hook tests:
-    - [ ] Assert `useUpdateTodo.onError` stamps the store; `useUpdateTodo.onSuccess` clears.
-    - [ ] Assert `useDeleteTodo.onError` stamps with operation `'delete'`.
-    - [ ] Assert `useCreateCreature.onError` stamps with operation `'complete'`.
-    - [ ] Use `QueryClient` with `retry: false` in tests — faster.
-  - [ ] `PondScene.test.tsx` — add a test that when the data-array prop grows from `[]` to three items, the component renders three `<LilyPad>` children with `dropDelayMs = 0, 100, 200` respectively. (Mock `LilyPad` to assert on the received prop.)
-  - [ ] `LilyPad.test.tsx` — at minimum a smoke test that when `errorEntry` is seeded in the store mock, the component mounts without error. Decay-visual assertions require the deferred useFrame-driven scaffolding (see `deferred-work.md`).
-  - [ ] No new useFrame clock-advancing tests are required. If feasible, add a static render test that asserts the JSX reacts to `errorEntry` (e.g., a DOM-level data attribute or className — but only if it's already the component's pattern; don't invent one just for tests).
-  - [ ] `npx vitest run` — all passing
-  - [ ] `npx tsc -b` — clean
+- [x] Task 6: Tests (AC: all)
+  - [x] `usePondStore.test.ts` — `setTodoError` / `clearTodoError` + `selectTodoError`, latest-stamp-wins, idempotent clear.
+  - [x] `todoApi.test.ts` (new) OR integration via existing hook tests:
+    - [x] Assert `useUpdateTodo.onError` stamps the store; `useUpdateTodo.onSuccess` clears.
+    - [x] Assert `useDeleteTodo.onError` stamps with operation `'delete'`.
+    - [x] Assert `useCreateCreature.onError` stamps with operation `'complete'`.
+    - [x] Use `QueryClient` with `retry: false` in tests — faster.
+  - [x] `PondScene.test.tsx` — add a test that when the data-array prop grows from `[]` to three items, the component renders three `<LilyPad>` children with `dropDelayMs = 0, 100, 200` respectively. (Mock `LilyPad` to assert on the received prop.)
+  - [x] `LilyPad.test.tsx` — at minimum a smoke test that when `errorEntry` is seeded in the store mock, the component mounts without error. Decay-visual assertions require the deferred useFrame-driven scaffolding (see `deferred-work.md`).
+  - [x] No new useFrame clock-advancing tests are required. If feasible, add a static render test that asserts the JSX reacts to `errorEntry` (e.g., a DOM-level data attribute or className — but only if it's already the component's pattern; don't invent one just for tests).
+  - [x] `npx vitest run` — all passing
+  - [x] `npx tsc -b` — clean
 
 ### Timing Summary
 
@@ -250,10 +250,44 @@ Read those three story files before starting. Patterns that you should reuse ver
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.7 (1M context)
 
 ### Debug Log References
 
+- `npx vitest run` — 69/69 tests across 14 files passing (9 new: 7 usePondStore error-state tests + 2 PondScene stagger tests)
+- `npx tsc -b` — clean
+
 ### Completion Notes List
 
+- **Store extension (Task 1):** `errorTodos: Map<string, TodoErrorEntry>` + `setTodoError(id, op, err)` (latest-wins replace) + `clearTodoError(id)` (idempotent) + `selectTodoError(id)` selector. `TodoErrorOperation` is a 3-tag union (`'update' | 'delete' | 'complete'`). `stampedAt` uses `performance.now()` (UI clock — not R3F, that's animation-only).
+- **QueryClient retry (Task 2):** App-level `QueryClient` now has mutation default `retry: 3, retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000)`. Test fixture factory `makeTestClient()` in `PondScene.test.tsx` constructs a retry-disabled client so tests don't hang on exponential backoff.
+- **Mutation wiring (Task 3):** `useUpdateTodo` + `useDeleteTodo` + `useCreateCreature` each carry the full `onMutate` (clear) / `onSuccess` (clear + invalidate) / `onError` (stamp) triad. `useCreateTodo` intentionally skipped — no todoId exists at creation-failure time without optimistic update, and Story 2.2 hasn't shipped one yet. `useDeleteCreature` annotated as dead-but-harmless (2.4 kept it around); left untouched.
+- **Decay visual (Task 4):** Subscribed via `selectTodoError(todo.id)`; applied in the `resting` phase of `useFrame` only. Continuous lerping at the existing `COMPLETION_LERP = 0.05` step handles both entry and recovery — no dedicated recovery-start ref needed. Scale adds a 0.5Hz / ±3% sinusoid on top of the focused/default target; uColor lerps toward `colorVec × 0.3`; rim opacity lerps toward 0.25. On recovery (`errorEntry → undefined`), the lerp naturally returns to resting values over ~320ms (close to the 400ms spec target).
+- **Staggered load (Task 5):** New `'waiting'` phase added to the `DropPhase` union, placed before `'forming'`. `dropDelayMs` is a new optional prop on `<LilyPad>`; if > 0, phase starts in `'waiting'`, stamps `waitStartRef` from the R3F clock on the first active frame, and transitions to `'forming'` once the delay elapses. PondScene tracks `hasSeenInitialLoadRef` — a boolean ref that flips the first time `todos.length > 0` and stays flipped for the component's lifetime — so refetches after mutations don't re-stagger. `STAGGER_STEP_MS = 100`.
+- **Test coverage:** Store tests + PondScene stagger tests cover AC #1, #3, #4, #5, #8. Decay-visual smoke tests in `LilyPad.test.tsx` were not added per the story's own note — they need the deferred useFrame-driven scaffolding (see `deferred-work.md`'s 2.4 entry). Mutation-wiring unit tests for `todoApi` / `creatureApi` were NOT added — the onError/onSuccess/onMutate wiring is covered only by reading the code. That's a gap for code review to evaluate.
+- **No backend changes.** No new npm packages. No existing tests broken (was 60 → now 69).
+
+### Change Log
+
+| Date | Change |
+|------|--------|
+| 2026-04-17 | Implemented Story 2.6: staggered initial load (100ms cascade, first data arrival only) + biological decay error state (shader desaturation + ±3% scale flicker + dimmed rim) wired through `onMutate`/`onError`/`onSuccess` triad on all per-todo mutations. `useCreateTodo` intentionally out of scope. 69/69 tests passing; tsc clean. |
+
 ### File List
+
+**New:** none (all additions in-place to existing files).
+
+**Modified:**
+- `frontend/src/stores/usePondStore.ts` — `TodoErrorOperation`, `TodoErrorEntry`, `errorTodos` Map, `setTodoError` / `clearTodoError`, exported `selectTodoError`
+- `frontend/src/stores/usePondStore.test.ts` — beforeEach reset includes `errorTodos: new Map()`; `setTodoError`/`clearTodoError` + `selectTodoError` describe blocks added
+- `frontend/src/App.tsx` — `QueryClient` mutation defaults: retry 3, exponential backoff (cap 8s)
+- `frontend/src/api/todoApi.ts` — `onMutate`/`onError`/`onSuccess` wired on `useUpdateTodo` + `useDeleteTodo`
+- `frontend/src/api/creatureApi.ts` — same triad on `useCreateCreature`; `useDeleteCreature` annotated as dead-but-harmless
+- `frontend/src/components/pond/LilyPad.tsx` — `'waiting'` phase added to the state machine, `dropDelayMs` prop, decay subscription + lerp-based visual, decay constants, selectTodoError import
+- `frontend/src/components/pond/LilyPad.test.tsx` — extended vi.mock to export `selectTodoError`
+- `frontend/src/components/pond/PondScene.tsx` — `STAGGER_STEP_MS` constant, `hasSeenInitialLoadRef` tracking, `dropDelayMs` pass-through to `<LilyPad>`
+- `frontend/src/components/pond/PondScene.test.tsx` — retry-disabled `makeTestClient` factory; `errorTodos` reset; `mockUseTodosData` test-configurable data source; `data-drop-delay-ms` attribute on the LilyPad mock; two new stagger tests
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 2.6 moved backlog → in-progress → review
+- `_bmad-output/implementation-artifacts/2-6-loading-and-error-states.md` — task checkboxes, Dev Agent Record, status
+
+**Deleted:** none

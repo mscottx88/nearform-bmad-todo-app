@@ -29,8 +29,11 @@ vi.mock('@react-three/drei', () => ({
   Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+// Test-configurable `useTodos` — the default fixture returns empty, but
+// individual tests can override via `mockUseTodosData` before rendering.
+let mockUseTodosData: Todo[] = [];
 vi.mock('../../api/todoApi', () => ({
-  useTodos: () => ({ data: [], isLoading: false }),
+  useTodos: () => ({ data: mockUseTodosData, isLoading: false }),
   useUpdateTodo: () => ({ mutate: vi.fn() }),
 }));
 
@@ -42,9 +45,14 @@ vi.mock('../../hooks/usePopupDelete', () => ({
   useDeleteTodoAction: () => vi.fn(),
 }));
 
+// Expose dropDelayMs via a data attribute so the staggered-index test can
+// assert what PondScene passes to each LilyPad on initial load.
 vi.mock('./LilyPad', () => ({
-  LilyPad: ({ todo }: { todo: Todo }) => (
-    <div data-testid={`lily-pad-${todo.id}`} />
+  LilyPad: ({ todo, dropDelayMs }: { todo: Todo; dropDelayMs?: number }) => (
+    <div
+      data-testid={`lily-pad-${todo.id}`}
+      data-drop-delay-ms={dropDelayMs ?? 0}
+    />
   ),
 }));
 
@@ -68,16 +76,29 @@ function makeTodo(id: string): Todo {
 
 describe('PondScene', () => {
   beforeEach(() => {
+    mockUseTodosData = [];
     usePondStore.setState({
       activePopupTodoId: null,
       cameraFocus: null,
       completingTodos: new Map(),
       deletingTodos: new Map(),
+      errorTodos: new Map(),
     });
   });
 
+  // Test QueryClient with retry disabled — production retry policy is the
+  // App-level default (3 attempts, exponential backoff) but tests should
+  // not wait for backoff windows.
+  const makeTestClient = () =>
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+
   it('mounts without errors', () => {
-    const queryClient = new QueryClient();
+    const queryClient = makeTestClient();
     const { getByTestId } = render(
       <QueryClientProvider client={queryClient}>
         <PondScene />
@@ -90,7 +111,7 @@ describe('PondScene', () => {
     const ghost = makeTodo('ghost-todo');
     usePondStore.getState().startCompletion(ghost, 'firefly', 'common');
 
-    const queryClient = new QueryClient();
+    const queryClient = makeTestClient();
     const { getByTestId } = render(
       <QueryClientProvider client={queryClient}>
         <PondScene />
@@ -104,7 +125,7 @@ describe('PondScene', () => {
     const ghost = makeTodo('ghost-delete');
     usePondStore.getState().startDeletion(ghost);
 
-    const queryClient = new QueryClient();
+    const queryClient = makeTestClient();
     const { getByTestId } = render(
       <QueryClientProvider client={queryClient}>
         <PondScene />
@@ -112,5 +133,46 @@ describe('PondScene', () => {
     );
 
     expect(getByTestId('lily-pad-ghost-delete')).toBeInTheDocument();
+  });
+
+  it('passes staggered dropDelayMs (0, 100, 200) to LilyPad children on initial load (story 2.6 AC #1)', () => {
+    mockUseTodosData = [makeTodo('a'), makeTodo('b'), makeTodo('c')];
+
+    const queryClient = makeTestClient();
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
+    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
+    expect(getByTestId('lily-pad-c').getAttribute('data-drop-delay-ms')).toBe('200');
+  });
+
+  it('does not re-stagger on subsequent re-renders after initial load (story 2.6 AC #3)', () => {
+    mockUseTodosData = [makeTodo('a'), makeTodo('b')];
+
+    const queryClient = makeTestClient();
+    const { getByTestId, rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    // Initial load: staggered delays
+    expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
+    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('100');
+
+    // Simulate a post-mutation refetch: same data, re-render
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    // No stagger on re-render — dropDelayMs is 0 for all pads
+    expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
+    expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('0');
   });
 });

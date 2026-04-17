@@ -48,6 +48,7 @@ vi.mock('../../stores/usePondStore', () => ({
   }),
   selectCompleting: () => () => undefined,
   selectDeleting: () => () => undefined,
+  selectTodoError: () => () => undefined,
 }));
 
 const mockTodo: Todo = {

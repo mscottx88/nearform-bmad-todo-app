@@ -48,6 +48,17 @@ export interface DeletingEntry {
   startedAt: number;
 }
 
+// Error-state entry for a todo whose most recent mutation exhausted its
+// automatic retries. Drives the decay visual in LilyPad. Cleared on the
+// next successful mutation for the same id.
+export type TodoErrorOperation = 'update' | 'delete' | 'complete';
+export interface TodoErrorEntry {
+  todoId: string;
+  operation: TodoErrorOperation;
+  error: Error;
+  stampedAt: number; // performance.now() — UI-clock, not R3F clock
+}
+
 interface PondState {
   atmosphereMode: AtmosphereMode | 'base';
   glowIntensity: number;
@@ -57,6 +68,7 @@ interface PondState {
   activePopupTodoId: string | null;
   completingTodos: Map<string, CompletingEntry>;
   deletingTodos: Map<string, DeletingEntry>;
+  errorTodos: Map<string, TodoErrorEntry>;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   triggerRipple: (x: number, z: number) => void;
@@ -69,6 +81,8 @@ interface PondState {
   startDeletion: (todo: Todo) => void;
   stampDeletionStart: (todoId: string, startedAt: number) => void;
   finishDeletion: (todoId: string) => void;
+  setTodoError: (todoId: string, operation: TodoErrorOperation, error: Error) => void;
+  clearTodoError: (todoId: string) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -80,6 +94,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   activePopupTodoId: null,
   completingTodos: new Map(),
   deletingTodos: new Map(),
+  errorTodos: new Map(),
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -170,6 +185,28 @@ export const usePondStore = create<PondState>((set, get) => ({
     next.delete(todoId);
     set({ deletingTodos: next });
   },
+
+  setTodoError: (todoId: string, operation: TodoErrorOperation, error: Error) => {
+    // Latest error wins — a fresh failure on an already-erroring pad
+    // replaces the prior entry rather than accumulating history.
+    const current = get().errorTodos;
+    const next = new Map(current);
+    next.set(todoId, {
+      todoId,
+      operation,
+      error,
+      stampedAt: performance.now(),
+    });
+    set({ errorTodos: next });
+  },
+
+  clearTodoError: (todoId: string) => {
+    const current = get().errorTodos;
+    if (!current.has(todoId)) return;
+    const next = new Map(current);
+    next.delete(todoId);
+    set({ errorTodos: next });
+  },
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook
@@ -185,3 +222,11 @@ export const selectDeleting =
   (todoId: string) =>
   (s: PondState): DeletingEntry | undefined =>
     s.deletingTodos.get(todoId);
+
+// Error-state selector. Returns the latest TodoErrorEntry for the given id
+// if a mutation has exhausted its retries and not yet been retried; else
+// undefined. LilyPad uses this to drive its decay visual.
+export const selectTodoError =
+  (todoId: string) =>
+  (s: PondState): TodoErrorEntry | undefined =>
+    s.errorTodos.get(todoId);

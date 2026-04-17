@@ -4,7 +4,12 @@ import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Todo } from '../../types';
-import { usePondStore, selectCompleting, selectDeleting } from '../../stores/usePondStore';
+import {
+  usePondStore,
+  selectCompleting,
+  selectDeleting,
+  selectTodoError,
+} from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 
 // 'completed' / 'deleted' are terminal phases — the dissolve finished
@@ -12,6 +17,7 @@ import { EmergingCreature } from '../creatures/EmergingCreature';
 // 'deleting' so we can distinguish "happy-path finish" from "external
 // cancel" in the recovery branch.
 type DropPhase =
+  | 'waiting'
   | 'forming'
   | 'dropping'
   | 'settling'
@@ -52,6 +58,17 @@ const DELETING_DISSOLVE_START = 0.40;
 const DELETING_DISSOLVE_END = 1.20;
 const DELETING_TOTAL = 1.60;
 const DELETE_FLASH_COLOR = new THREE.Vector3(1.0, 0.09, 0.267); // #ff1744
+
+// Story 2.6 decay-state constants. Decay applies only in the `resting`
+// phase — other phases own their own uColor / scale / opacity choreography
+// and layering decay on top would paint muddy transitions.
+const DECAY_SATURATION = 0.3;       // lerp uColor toward 30% of base color
+const DECAY_SCALE_AMPLITUDE = 0.03; // ±3% flicker on top of focused scale
+const DECAY_SCALE_FREQ_HZ = 0.5;    // 0.5Hz ⇒ ~2s per cycle (slow wilt)
+const DECAY_RIM_OPACITY = 0.25;
+// Recovery is driven by COMPLETION_LERP across scale/uColor/rim — at 0.05
+// per frame it bottoms out ~320ms after the error clears, close to the
+// 400ms target in the spec's timing summary.
 
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
@@ -203,9 +220,18 @@ interface LilyPadProps {
   todo: Todo;
   onDropComplete?: (x: number, z: number) => void;
   focused?: boolean;
+  // Story 2.6: ms to wait before entering the 'forming' phase. PondScene
+  // passes index * STAGGER_STEP_MS on initial load so pads cascade in.
+  // 0 (or omitted) = no stagger.
+  dropDelayMs?: number;
 }
 
-export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps) {
+export function LilyPad({
+  todo,
+  onDropComplete,
+  focused = false,
+  dropDelayMs = 0,
+}: LilyPadProps) {
   // Lazy `useState` initializers so impure calls (`Date.now`, `Math.random`)
   // run exactly once at mount, satisfying `react-hooks/purity`.
   const [isRecent] = useState(
@@ -217,7 +243,15 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
   const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
-  const phaseRef = useRef<DropPhase>(isRecent ? 'forming' : 'resting');
+  // Initial phase — in priority order:
+  //   1. Staggered load (dropDelayMs > 0) → 'waiting' until the delay elapses.
+  //   2. Recently-created (isRecent) → 'forming'.
+  //   3. Otherwise → 'resting' (pre-existing pads on refetch).
+  const [initialDelayMs] = useState(() => dropDelayMs);
+  const waitStartRef = useRef<number | null>(null);
+  const phaseRef = useRef<DropPhase>(
+    initialDelayMs > 0 ? 'waiting' : isRecent ? 'forming' : 'resting',
+  );
   const phaseTimer = useRef(0);
   const dropNotified = useRef(false);
   const restStartTime = useRef(0);
@@ -240,6 +274,11 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
   const completing = usePondStore(selectCompleting(todo.id));
   // Parallel subscription for the deletion-sequence entry.
   const deleting = usePondStore(selectDeleting(todo.id));
+  // Story 2.6: if the most recent mutation exhausted its retries, this
+  // entry drives the decay visual during the `resting` phase. Continuous
+  // lerping handles recovery smoothly when the entry clears — no dedicated
+  // recovery-start ref needed.
+  const errorEntry = usePondStore(selectTodoError(todo.id));
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
@@ -520,8 +559,13 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
       const t = state.clock.elapsedTime - restStartTime.current;
       const seed = driftSeed;
       const ramp = Math.min(t / 3, 1);
-      // Progressive density override: ensure focused pads render at readable size
-      const targetScale = focused ? 1.2 : 1.0;
+      // Progressive density override: ensure focused pads render at readable size.
+      // Decay adds a slow sinusoidal flicker on top of the base target scale.
+      const baseTargetScale = focused ? 1.2 : 1.0;
+      const decayFlicker = errorEntry
+        ? Math.sin(state.clock.elapsedTime * 2 * Math.PI * DECAY_SCALE_FREQ_HZ) * DECAY_SCALE_AMPLITUDE
+        : 0;
+      const targetScale = baseTargetScale + decayFlicker;
       const currentScale = group.scale.x;
       group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
       group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
@@ -534,11 +578,17 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
       );
       group.position.y = restY + Math.sin(t * 0.5 + seed) * 0.01 * ramp;
 
-      // Desaturate pad shader when completed
+      // Desaturate pad shader when completed OR when the pad is in error decay.
+      // Decay takes precedence — a completed pad with a failed mutation reads
+      // as "wilting" rather than "softly faded".
       if (padMeshRef.current) {
         const mat = padMeshRef.current.material as THREE.ShaderMaterial;
         if (mat.uniforms?.uColor) {
-          const intensity = todo.completed ? 0.4 : 1.0;
+          const intensity = errorEntry
+            ? DECAY_SATURATION
+            : todo.completed
+            ? 0.4
+            : 1.0;
           const targetColor = new THREE.Vector3(
             colorVec.r * intensity,
             colorVec.g * intensity,
@@ -546,6 +596,37 @@ export function LilyPad({ todo, onDropComplete, focused = false }: LilyPadProps)
           );
           mat.uniforms.uColor.value.lerp(targetColor, COMPLETION_LERP);
         }
+      }
+
+      // Rim opacity dips during decay and lerps back on recovery. Uses the
+      // same lerp rate so color + rim + scale all recover in sync
+      // (~400ms per AC #8).
+      if (rimRef.current) {
+        const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
+        const targetRimOpacity = errorEntry ? DECAY_RIM_OPACITY : 0.4;
+        rimMat.opacity = THREE.MathUtils.lerp(
+          rimMat.opacity,
+          targetRimOpacity,
+          COMPLETION_LERP,
+        );
+      }
+      return;
+    }
+
+    // Staggered-load 'waiting' phase. On the first active frame, stamp the
+    // R3F-clock start time. Once `initialDelayMs` has elapsed, transition to
+    // 'forming' so the standard drop arc plays. Pad is kept invisible
+    // (scale=0, starting Y) until then.
+    if (phase === 'waiting') {
+      if (waitStartRef.current === null) {
+        waitStartRef.current = state.clock.elapsedTime;
+      }
+      const elapsedMs = (state.clock.elapsedTime - waitStartRef.current) * 1000;
+      group.position.set(posX, DROP_Y_START, posZ);
+      group.scale.setScalar(0);
+      if (elapsedMs >= initialDelayMs) {
+        phaseTimer.current = 0;
+        phaseRef.current = 'forming';
       }
       return;
     }

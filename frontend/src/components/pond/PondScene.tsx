@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -13,6 +13,11 @@ import { PondCamera } from './PondCamera';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
 
+// Milliseconds between consecutive pads entering the 'forming' phase on
+// the first staggered load. 100ms gives a visible cascade without dragging
+// out the load on dense ponds.
+const STAGGER_STEP_MS = 100;
+
 export function PondScene() {
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
@@ -22,6 +27,16 @@ export function PondScene() {
   const { data: todos = [] } = useTodos();
   const completeTodo = useCompleteTodo();
   const deleteTodo = useDeleteTodoAction();
+
+  // Story 2.6: stagger pads on the FIRST non-empty data arrival only.
+  // Subsequent refetches (after any mutation) render in place — we don't
+  // replay the cascade. A ref flips the moment we see the first todo, and
+  // stays flipped for the component's lifetime.
+  const hasSeenInitialLoadRef = useRef(false);
+  const isInitialLoad = !hasSeenInitialLoadRef.current && todos.length > 0;
+  if (isInitialLoad) {
+    hasSeenInitialLoadRef.current = true;
+  }
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
@@ -119,12 +134,13 @@ export function PondScene() {
 
       <WaterSurface />
       {renderTodos.length === 0 && <EmptyPondHint />}
-      {renderTodos.map((todo) => (
+      {renderTodos.map((todo, index) => (
         <LilyPad
           key={todo.id}
           todo={todo}
           onDropComplete={handleDropComplete}
           focused={activePopupTodoId === todo.id}
+          dropDelayMs={isInitialLoad ? index * STAGGER_STEP_MS : 0}
         />
       ))}
       {popupTodo && (

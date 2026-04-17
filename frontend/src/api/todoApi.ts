@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from './client';
+import { usePondStore } from '../stores/usePondStore';
 import type { Todo } from '../types';
 
 const TODOS_KEY = ['todos', 'list'] as const;
@@ -50,8 +51,20 @@ export function useUpdateTodo() {
       const { data } = await apiClient.patch<Todo>(`/todos/${id}`, fields);
       return data;
     },
-    onSuccess: () => {
+    // Story 2.6 AC #5: clear any decay the moment a retry begins so the
+    // pad reads as healthy during the attempt. Runs at the start of EACH
+    // retry attempt (React Query contract).
+    onMutate: ({ id }) => {
+      usePondStore.getState().clearTodoError(id);
+    },
+    onSuccess: (_data, { id }) => {
+      usePondStore.getState().clearTodoError(id);
       queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+    },
+    // Story 2.6 AC #4: fires only after the client-level retry budget
+    // (3 attempts, exponential backoff) is exhausted.
+    onError: (err, { id }) => {
+      usePondStore.getState().setTodoError(id, 'update', err as Error);
     },
   });
 }
@@ -65,8 +78,15 @@ export function useDeleteTodo() {
       // honest if/when the endpoint switches to the canonical 204 No Content.
       await apiClient.delete(`/todos/${id}`);
     },
-    onSuccess: () => {
+    onMutate: (id) => {
+      usePondStore.getState().clearTodoError(id);
+    },
+    onSuccess: (_data, id) => {
+      usePondStore.getState().clearTodoError(id);
       queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+    },
+    onError: (err, id) => {
+      usePondStore.getState().setTodoError(id, 'delete', err as Error);
     },
   });
 }
