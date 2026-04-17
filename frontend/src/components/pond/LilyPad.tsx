@@ -16,8 +16,18 @@ import { EmergingCreature } from '../creatures/EmergingCreature';
 // locally and the pad is awaiting unmount. Distinct from 'completing' /
 // 'deleting' so we can distinguish "happy-path finish" from "external
 // cancel" in the recovery branch.
+// 'waiting' + 'materializing' (story 2.6): stagger path for pads that
+// existed in the DB before this session. They render invisibly at rest
+// position during 'waiting', then scale in place during 'materializing'.
+// No high drop, no ripple — existing pads aren't being created, they're
+// just surfacing after a refresh.
+//
+// 'forming' / 'dropping' / 'settling' / 'pulsing' (story 2.2): creation
+// path for brand-new pads (isRecent=true). Pad drops from the sky with
+// ripple feedback so the user sees their thought land in the water.
 type DropPhase =
   | 'waiting'
+  | 'materializing'
   | 'forming'
   | 'dropping'
   | 'settling'
@@ -33,6 +43,10 @@ const DROP_Y_REST = 0.05;
 const FORM_DURATION = 0.2;
 const DROP_DURATION = 0.3;
 const SETTLE_DURATION = 0.4;
+// Story 2.6: staggered-load materialize window. Scale 0→1 at rest
+// position, no elevation change, no ripple. Lighter than the creation
+// drop arc because existing pads aren't being created.
+const MATERIALIZE_DURATION = 0.4;
 const PULSE_DURATION = 1.2; // 3 pulses over ~1.2 seconds
 const PAD_RADIUS = 1.0;
 const COMPLETED_Y = -0.1;
@@ -270,7 +284,13 @@ export function LilyPad({
   const deletingStartTimeRef = useRef<number | null>(null);
   const [deletingStartTime, setDeletingStartTime] = useState<number | null>(null);
   const deletingRippleFired = useRef(false);
-  const [textOpacity, setTextOpacity] = useState(isRecent ? 0 : 1);
+  // Text fades in at the END of the arrival animation. Both creation
+  // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
+  // paths leave textOpacity=0 until the pad reaches rest; already-settled
+  // pads (no animation) start with text fully visible.
+  const [textOpacity, setTextOpacity] = useState(() =>
+    phaseRef.current === 'resting' ? 1 : 0,
+  );
 
   // Subscribe to the completion-sequence entry for this todo. When present,
   // the pad transitions into the `completing` phase and drives the flash →
@@ -305,6 +325,10 @@ export function LilyPad({
       // UniqueConstraint; a second Delete would fire a duplicate DELETE.
       const state = usePondStore.getState();
       if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;
+      // Environmental feedback: a click should make the water respond.
+      // Uses the same single-slot ripple uniform as creation drops — one
+      // ripple per click, overwrites any prior in-flight ripple.
+      state.triggerRipple(posX, posZ);
       state.openPopup(todo.id, posX, posZ);
     },
     [todo.id, posX, posZ],
@@ -366,10 +390,18 @@ export function LilyPad({
     const group = groupRef.current;
     if (!group?.position) return;
     group.rotation.y = rotationY;
-    if (phaseRef.current !== 'resting') {
+    const phase = phaseRef.current;
+    if (phase === 'forming') {
+      // Creation path: high in the air, invisible, about to fall.
       group.position.set(posX, DROP_Y_START, posZ);
       group.scale.setScalar(0);
+    } else if (phase === 'waiting') {
+      // Materialize path: already at rest position but invisible until
+      // the stagger delay elapses. No elevation change on arrival.
+      group.position.set(posX, DROP_Y_REST, posZ);
+      group.scale.setScalar(0);
     } else {
+      // 'resting' — already-settled pad, visible at rest.
       group.position.set(posX, DROP_Y_REST, posZ);
       group.scale.setScalar(1);
     }
@@ -619,18 +651,19 @@ export function LilyPad({
 
     // Staggered-load 'waiting' phase. On the first active frame, stamp the
     // R3F-clock start time. Once `initialDelayMs` has elapsed, transition to
-    // 'forming' so the standard drop arc plays. Pad is kept invisible
-    // (scale=0, starting Y) until then.
+    // 'materializing' — a lighter in-place scale-up than the creation drop
+    // arc. Pad stays at rest position (no elevation) and invisible
+    // (scale=0) during the wait.
     if (phase === 'waiting') {
       if (waitStartRef.current === null) {
         waitStartRef.current = state.clock.elapsedTime;
       }
       const elapsedMs = (state.clock.elapsedTime - waitStartRef.current) * 1000;
-      group.position.set(posX, DROP_Y_START, posZ);
+      group.position.set(posX, DROP_Y_REST, posZ);
       group.scale.setScalar(0);
       if (elapsedMs >= initialDelayMs) {
         phaseTimer.current = 0;
-        phaseRef.current = 'forming';
+        phaseRef.current = 'materializing';
       }
       return;
     }
@@ -644,6 +677,19 @@ export function LilyPad({
       if (t >= 1) {
         phaseTimer.current = 0;
         phaseRef.current = 'dropping';
+      }
+    } else if (phase === 'materializing') {
+      // Scale up in place at rest position. No ripple, no drop — the pad
+      // was already in the DB; this is just the visual appearing after
+      // refresh. Ease-out so it "lands" softly rather than popping.
+      const t = Math.min(phaseTimer.current / MATERIALIZE_DURATION, 1);
+      group.scale.setScalar(easeOut(t));
+      group.position.set(posX, DROP_Y_REST, posZ);
+      if (t >= 1) {
+        setTextOpacity(1);
+        phaseTimer.current = 0;
+        phaseRef.current = 'resting';
+        restStartTime.current = 0;
       }
     } else if (phase === 'dropping') {
       const t = Math.min(phaseTimer.current / DROP_DURATION, 1);
