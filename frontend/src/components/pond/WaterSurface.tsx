@@ -100,7 +100,14 @@ export function WaterSurface() {
     material.uniforms.uGlowIntensity.value = glowIntensity;
 
     if (dropRipple && dropRipple.time !== lastRippleRef.current) {
-      material.uniforms.uDropCenter.value.set(dropRipple.x, dropRipple.z);
+      // The water plane is rotated -90° about X (mesh `rotation={[-Math.PI/2, 0, 0]}`),
+      // so world-Z maps to LOCAL -Y in the plane geometry. The shader
+      // compares `pos.xy` (local) against `uDropCenter`, so the world-Z
+      // we got from `triggerRipple(x, z)` must be negated here. Without
+      // this, the ripple appears at the mirrored-across-origin position
+      // — which is why creation drops only "worked" at world (0, 0),
+      // their default position before a user drags them.
+      material.uniforms.uDropCenter.value.set(dropRipple.x, -dropRipple.z);
       material.uniforms.uDropTime.value = state.clock.elapsedTime;
       lastRippleRef.current = dropRipple.time;
     }
