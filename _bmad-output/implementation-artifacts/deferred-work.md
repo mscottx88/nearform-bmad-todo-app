@@ -1,5 +1,13 @@
 # Deferred Work
 
+## Deferred from: code review of story 5-1-backend-embedding-pipeline (2026-04-20)
+
+- PATCH on `text` doesn't reset `embedding_status` or re-enqueue an embedding. `TodoUpdate.text` is writable in the schema, so edited todos have stale embeddings forever. Dev Notes § "What about re-embedding on text update?" explicitly scoped this out of 5.1. Fix: in `todo_service.update_todo`, detect `text` change, set `embedding_status='pending'`, call `enqueue_embedding(todo.id)`. (src/services/todo_service.py:58-68, src/schemas/todo.py:14-19)
+- No reaper for stuck `pending` rows. If the process SIGKILLs mid-retry, the row stays at `pending` with no embedding and is never re-scanned on startup. Dev Notes § "Soft-state resume on restart" marks this out of scope. Fix: a scheduled job or startup scan that re-enqueues `WHERE embedding_status='pending' AND created_at < now() - interval '5 minutes'`. (src/workers/embedding_worker.py, no startup scan)
+- No startup validation of `embedding_model` setting. Empty/whitespace/typo'd model name passes pydantic and fails at the Google API every time, burning 3 retries × N todos before operators notice. Fix: reject empty/whitespace `embedding_model` at `Settings` load time (pydantic validator) or log a WARNING in the lifespan startup. (src/config.py:7, src/main.py:22-33)
+- No optimistic-lock / `version_id_col` on `Todo`. The embedding worker and a concurrent user PATCH can both write to the same row; SQLAlchemy is last-writer-wins with no version check. A concurrent PATCH changing `color` while the worker is mid-write could lose the color change (or overwrite the embedding). Architectural concern, not a 5.1 issue. Fix: add `version_id_col` to `Todo` model + `__mapper_args__ = {"version_id_col": ...}`. (src/models/todo.py:21-75)
+- Whitespace-only text (`"   "`, `"\n\t"`) passes `TodoCreate.text` `min_length=1` and reaches the Google API. Either fails 3x or returns a near-zero vector that's useless for search. Fix: `text.strip()` check in `TodoCreate` validator, reject if empty after strip. (src/schemas/todo.py:8)
+
 ## Deferred from: code review of story 1-1-project-scaffolding-and-infrastructure (2026-04-15)
 
 - `google_api_key` defaults to empty string with no startup validation — will cause opaque errors when embedding feature is implemented (Story 5.1)

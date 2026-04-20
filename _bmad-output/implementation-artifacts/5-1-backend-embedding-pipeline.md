@@ -141,6 +141,44 @@ So that Epic 5's hybrid search (Story 5.2) can find todos by semantic concept, n
   - [x] `cd backend && uv run mypy --strict src/` — clean (tests may use `# type: ignore[misc]` for fixture types, per existing pattern in `conftest.py`). **Success: no issues found in 22 source files.**
   - [ ] Manual smoke: start the backend (`make dev` or `uvicorn src.main:app --reload`), POST a todo without a `GOOGLE_API_KEY` set → response is immediate, logs show the "not configured" warning + the "embedding_skipped: api_key_not_configured" per-todo warning. With a key set → logs show no warnings; psql `SELECT embedding_status FROM todos` shows `complete` after ~1–2s for each new todo. **Deferred to user — requires live Postgres + optional Google API key; automated coverage via the 40-test suite already covers both branches.**
 
+### Review Findings
+
+Code review run 2026-04-20. Three parallel layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor). 9 patches, 5 deferred, 12 dismissed as noise/false-positive/explicitly-in-scope.
+
+**Patches (fix now):**
+
+- [x] [Review][Patch] `enqueue_embedding` → `_executor.submit` races `stop_embedding_executor` — wraps submit in try/except RuntimeError and logs DEBUG. Test: `test_enqueue_swallows_runtime_error_on_shutdown_race`. [backend/src/workers/embedding_worker.py:55-73]
+- [x] [Review][Patch] No HTTP timeout on `client.models.embed_content` — `HttpOptions(timeout=15_000)` passed at `genai.Client` construction time (15s per request). Test asserts `ctor_kwargs["http_options"].timeout > 0`. [backend/src/services/embedding_service.py:27, 32-39]
+- [x] [Review][Patch] Missing `session.rollback()` between retry attempts — added before backoff `time.sleep` and on the `EmbeddingApiKeyMissingError` short-circuit. [backend/src/workers/embedding_worker.py:101-110]
+- [x] [Review][Patch] Module docstring updated to reflect shipped `gemini-embedding-001` + `output_dimensionality=768` + bounded HTTP timeout. [backend/src/services/embedding_service.py:1-13]
+- [x] [Review][Patch] `test_create_todo_response_time_not_affected` replaced — now patches `generate_embedding` with a blocking Event-waiter. If anyone moves embedding work onto the request path (direct call, BackgroundTasks, etc.), the POST blocks on the Event and the 1s assertion fails. Real thread-isolation test, not a tautology. [backend/tests/api/test_todos.py:152-181]
+- [x] [Review][Patch] Worker skips soft-deleted todos — `session.query(Todo).filter(Todo.id == todo_id, Todo.deleted == False)` in the worker. Test: `test_worker_skips_soft_deleted_todo`. [backend/src/workers/embedding_worker.py:78-88]
+- [x] [Review][Patch] `stop_embedding_executor` shutdown-order swapped — now calls `executor.shutdown(...)` first and clears `_executor = None` in a `finally` block, so a shutdown exception still releases the module-global. Test: `test_stop_executor_clears_ref_even_if_shutdown_raises`. [backend/src/workers/embedding_worker.py:40-54]
+- [x] [Review][Patch] Final `embedding_failed_final` WARNING now includes `exc`, `code`, `status` from the last attempt (hoisted `last_exc`). AC #3 wording satisfied. [backend/src/workers/embedding_worker.py:127-133]
+
+**Deferred (real, not this story's scope):**
+
+- [x] [Review][Defer] PATCH on `text` doesn't reset `embedding_status` or re-enqueue — Dev Notes § "What about re-embedding on text update?" explicitly puts this out of scope for 5.1. `TodoUpdate.text` IS currently writable in the schema, so this gap exists today. Add a guard to `todo_service.update_todo`: if `text` changed, set `embedding_status='pending'` + enqueue.
+- [x] [Review][Defer] No reaper for "stuck pending" rows — if the process is SIGKILL'd mid-retry, the row stays at `embedding_status='pending'` with no embedding and is never re-scanned. Dev Notes § "Soft-state resume on restart" marks this out of scope. A future admin tool + startup scan can recover.
+- [x] [Review][Defer] No startup validation of `embedding_model` — empty/whitespace/typo'd model name passes pydantic validation and burns 3 retries × N todos at the Google API before operators notice. Add a one-line `if not settings.embedding_model.strip(): raise/warn` at startup.
+- [x] [Review][Defer] No `version_id_col` / optimistic-lock on `Todo` — if a user PATCH and the embedding worker both commit to the same row at roughly the same time, SQLAlchemy will last-writer-wins with no version check. Architectural concern, not a 5.1 issue.
+- [x] [Review][Defer] Whitespace-only text (`"   "`, `"\n\t"`) passes `min_length=1` and reaches Google — either wastes 3 API calls failing, or returns a near-zero vector that's useless for search. Tighten `TodoCreate.text` validation (regex or `.strip()` check) in a schema-hardening pass.
+
+**Dismissed (false positive / covered / in-spec):**
+
+- Dismissed: `SessionLocal` in worker vs. test-injected session (tests currently don't override the engine — single DB).
+- Dismissed: commit-then-enqueue "race" (PG READ COMMITTED on single node makes new-session visibility after commit-return guaranteed).
+- Dismissed: `EmbeddingDimensionError` retried 3x looks wasteful — AC #8 explicitly says dimension mismatch is "retry-eligible."
+- Dismissed: module-global `_client` ignores runtime `settings.google_api_key` changes — `test_generate_embedding_client_is_lazily_constructed_once` pins this as intended.
+- Dismissed: thread-race on `_get_client()` lazy init — `genai.Client` is cheap, double-construct is harmless and vanishingly rare.
+- Dismissed: `AppError` `detail` kwarg — `AppError.__init__` DOES accept `detail` (exceptions.py:7); no runtime error.
+- Dismissed: test cross-contamination for executor start/stop — try/finally + `stop_embedding_executor(wait=False)` guards cleanup.
+- Dismissed: Unicode / null-byte / emoji not validated — pydantic + psycopg already reject NUL bytes; no current-diff bug.
+- Dismissed: `embeddings[0]` None vs. missing `.values` attr — speculative future SDK schema change, not in diff.
+- Dismissed: pgvector returns numpy on read — future-pattern concern, no diff code reads `.embedding` this way.
+- Dismissed: worker uses `text` snapshot not re-read per attempt — AC #7 requires fresh DB read at worker start (satisfied); no spec requirement for per-attempt re-read.
+- Dismissed: `EmbeddingDimensionError.detail` contains dimension numbers — never escapes to HTTP in this story (worker catches both exception types).
+
 ## Dev Notes
 
 ### Why thread-based, not asyncio — reiteration
@@ -346,3 +384,4 @@ Claude Opus 4.7 (1M context) — `claude-opus-4-7[1m]`.
 |------|--------|
 | 2026-04-20 | Story created as Epic 5.1 (first story of Epic 5 "Intelligent Search"). Scope: thread-based embedding pipeline via `ThreadPoolExecutor`, `google-genai` SDK, retry-with-exponential-backoff, non-blocking POST /todos. Schema already in place from Epic 1. Translated the architecture doc's async framing into thread-based implementation per CLAUDE.md constitutional constraint. |
 | 2026-04-20 | Story implemented. Added `google-genai` dep, `embedding_service` (lazy client, 768-dim validation), `embedding_worker` (ThreadPoolExecutor + retry/backoff + fresh session), FastAPI `lifespan` with sync body, `todo_service.create_todo` hook. 16 new tests added (5 service + 9 worker + 2 integration). 40/40 pytest, ruff clean, mypy --strict clean. Status → review. |
+| 2026-04-20 | Code review (3 adversarial layers). 8 patches applied, 5 items deferred, 12 dismissed. Fixes: enqueue/shutdown race, HTTP timeout on embed_content, session.rollback() on retry failures, docstring accuracy, soft-delete skip in worker, stop_executor shutdown order, final WARNING exc-type, response-time test made meaningful. 3 new tests added. 43/43 pytest, ruff clean, mypy --strict clean. Status stays → review pending user ack. |

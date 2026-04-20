@@ -36,11 +36,19 @@ def test_generate_embedding_happy_path() -> None:
 
     assert result == values
     assert len(result) == 768
-    client_ctor.assert_called_once_with(api_key="fake-key")
+    # Client is constructed with the key AND an http_options carrying a
+    # bounded timeout (ms) so a stuck API can't pin a worker thread.
+    assert client_ctor.call_count == 1
+    ctor_kwargs = client_ctor.call_args.kwargs
+    assert ctor_kwargs["api_key"] == "fake-key"
+    assert ctor_kwargs["http_options"].timeout and ctor_kwargs["http_options"].timeout > 0
     fake_client.models.embed_content.assert_called_once()
     call_kwargs = fake_client.models.embed_content.call_args.kwargs
     assert call_kwargs["contents"] == "hello world"
     assert call_kwargs["model"]  # embedding_model from settings
+    # output_dimensionality is forced to 768 so gemini-embedding-001
+    # returns vectors matching our VECTOR(768) schema.
+    assert call_kwargs["config"].output_dimensionality == 768
 
 
 def test_generate_embedding_wrong_dimension() -> None:

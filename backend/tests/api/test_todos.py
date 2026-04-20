@@ -1,3 +1,4 @@
+import threading
 import time
 import uuid
 from unittest.mock import patch
@@ -148,20 +149,36 @@ def test_create_todo_enqueues_embedding(client: TestClient) -> None:
 
 
 def test_create_todo_response_time_not_affected(client: TestClient) -> None:
-    # Worker patched to a no-op — if someone accidentally awaited the
-    # embedding in the request path, this threshold would blow past 100ms.
+    # Patch the embedding SDK call to block on an Event. If anyone moves
+    # the embedding work onto the request path (direct generate_embedding
+    # call, FastAPI BackgroundTasks, etc.), the POST will block waiting
+    # for this Event and the time assertion fails. If the work runs in
+    # the ThreadPoolExecutor as intended, the POST returns fast and the
+    # worker thread sits on `release.wait()` until the `finally` unblocks
+    # it. This is a real thread-isolation test, not a tautology.
+    release = threading.Event()
+
+    def blocking_embed(_text: str) -> list[float]:
+        # Bounded wait so a bug can't deadlock the test suite.
+        release.wait(timeout=5.0)
+        return [0.0] * 768
+
     with patch(
-        "src.services.todo_service.embedding_worker.enqueue_embedding",
-        return_value=None,
+        "src.workers.embedding_worker.embedding_service.generate_embedding",
+        side_effect=blocking_embed,
     ):
-        start = time.perf_counter()
-        response = client.post("/api/todos", json={"text": "Fast path"})
-        elapsed = time.perf_counter() - start
+        try:
+            start = time.perf_counter()
+            response = client.post("/api/todos", json={"text": "Fast path"})
+            elapsed = time.perf_counter() - start
+        finally:
+            # Always release the worker so lifespan shutdown (wait=True)
+            # doesn't stall teardown by 5s.
+            release.set()
 
     assert response.status_code == 201
-    # Loose threshold — catches "someone accidentally awaited the
-    # embedding in the request path" (a real API call is 100–400ms and
-    # would blow past 1s across retries).
+    # The blocking_embed sleeps up to 5s on the worker thread. A response
+    # time under 1s proves the embedding is NOT on the request path.
     assert elapsed < 1.0, (
         f"POST /api/todos took {elapsed:.3f}s — embedding in request path?"
     )

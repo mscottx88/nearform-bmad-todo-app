@@ -199,3 +199,65 @@ def test_worker_rejects_wrong_dimension_and_retries(db_session: Session) -> None
     reloaded = _reload(db_session, todo.id)
     assert reloaded is not None
     assert reloaded.embedding_status == "failed"
+
+
+def test_worker_skips_soft_deleted_todo(db_session: Session) -> None:
+    # A todo that was soft-deleted between enqueue and worker-run should
+    # be skipped without calling the paid Google API. The worker's query
+    # filters on `deleted == False`, so the row appears missing.
+    from datetime import UTC, datetime
+
+    from src.workers import embedding_worker
+
+    todo = _make_pending_todo(db_session, "soft-delete-me")
+    todo.deleted = True
+    todo.deleted_at = datetime.now(UTC)
+    db_session.commit()
+
+    with patch(
+        "src.workers.embedding_worker.embedding_service.generate_embedding",
+    ) as gen:
+        embedding_worker._run_embedding_worker(todo.id)
+
+    assert gen.call_count == 0
+    reloaded = _reload(db_session, todo.id)
+    assert reloaded is not None
+    # Status untouched — worker never wrote the row.
+    assert reloaded.embedding_status == "pending"
+    assert reloaded.embedding is None
+
+
+def test_enqueue_swallows_runtime_error_on_shutdown_race() -> None:
+    # Simulate the shutdown race: _executor is not None (passed the
+    # None-check) but .submit raises RuntimeError("cannot schedule new
+    # futures after shutdown"). enqueue must swallow and log DEBUG.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.workers import embedding_worker
+
+    fake_executor = ThreadPoolExecutor(max_workers=1)
+    fake_executor.shutdown(wait=True)  # Now .submit raises RuntimeError.
+
+    embedding_worker._executor = fake_executor
+    try:
+        # Should NOT raise.
+        embedding_worker.enqueue_embedding(uuid.uuid4())
+    finally:
+        embedding_worker._executor = None
+
+
+def test_stop_executor_clears_ref_even_if_shutdown_raises() -> None:
+    # If executor.shutdown raises, the module-global must still be
+    # nulled so a subsequent start_embedding_executor rebuilds cleanly.
+    from unittest.mock import MagicMock
+
+    from src.workers import embedding_worker
+
+    fake = MagicMock()
+    fake.shutdown.side_effect = RuntimeError("shutdown went boom")
+    embedding_worker._executor = fake
+
+    with pytest.raises(RuntimeError, match="shutdown went boom"):
+        embedding_worker.stop_embedding_executor(wait=True)
+
+    assert embedding_worker._executor is None
