@@ -1,6 +1,6 @@
 # Story 2.10: Lily Pads Float on the Water Surface
 
-Status: review
+Status: done
 
 > **Scope note:** 2.10 is a polish spillover story on Epic 2, sibling to 2.7 (pulse polish), 2.8 (glow polish), and 2.9 (ripple hardening). The insight came out of 2.9's browser-verification pass: with ripple amplitudes of 0.45–0.7 world units and pads pinned at `DROP_Y_REST = 0.05`, ripple crests visibly punch through the pads — reading as "pads are on a glass plate above the water" rather than "pads floating on the water." This story makes each pad sample the water elevation at its position every frame and ride the waves, plus tilt toward the local water gradient so a pad rocks as a wave passes under it.
 
@@ -16,7 +16,7 @@ so that the pads read as floating on the water (real physics) rather than hoveri
 
 2. **Given** a pad is in the `resting` phase and the water under it has a non-zero gradient (a wave crest passing asymmetrically), **When** each `useFrame` tick runs, **Then** the pad's group rotation tilts to align its up-vector with the local water normal. Gradient is sampled via central differences: `∂y/∂x = (elevation(x+δ, z) − elevation(x−δ, z)) / (2δ)` and `∂y/∂z` equivalently, with `δ ≈ 0.35` (roughly one-third of `PAD_RADIUS = 1.0` so the gradient reflects the pad-sized region, not a pointwise slope). Tilt is limited to ±15° on each axis to keep extreme wave crests from flipping the pad onto its side. Tilt lerps toward target each frame at a fixed rate (~0.08 per frame = ~200ms ease) so instant gradient snaps are smoothed.
 
-3. **Given** a pad is in any phase OTHER than `resting` (`forming`, `waiting`, `dropping`, `settling`, `materializing`, `pulsing`, `completing`, `deleting`, `completed`, `deleted`), **When** each `useFrame` tick runs, **Then** the pad does NOT sample water elevation or gradient. Phase-driven animation owns `group.position.y` and `group.rotation` exclusively during those phases. On `→ resting` transitions the water-float handoff begins from whatever `group.position.y` the prior phase left (typically `DROP_Y_REST`), and the pad smoothly eases into the wave-riding height on the next frame via the same 0.08/frame lerp as tilt.
+3. **Given** a pad is in `resting`, `settling`, or `pulsing` phase (the last two being the landing phases that play out on top of the pad's own impact ripple), **When** each `useFrame` tick runs, **Then** the pad samples water elevation and rides it: `resting` lerps toward `targetY + elevation` plus gradient tilt; `settling` adds elevation on top of the landing bounce (`DROP_Y_REST + bounce + elevation`); `pulsing` sets `position.y = DROP_Y_REST + elevation` while the scale pulse plays. Tilt is only applied in `resting`. **Given** a pad is in any other phase (`forming`, `waiting`, `dropping`, `materializing`, `completing`, `deleting`, `completed`, `deleted`), the pad does NOT sample elevation — those phases' own animation fully owns `position.y` and `rotation`. On `→ resting` transitions (from `pulsing`, `materializing`, or the cancel-recovery paths from `completing`/`deleting`), `group.position.y` is SEEDED to `targetY + sampleElevation(posX, posZ)` so no lerp-through-crest frames occur. _(AC amended in the 2026-04-20 code review to cover landing phases — see Review Findings.)_
 
 4. **Given** ripple crests that would otherwise have penetrated a pad (wave heights 0.45–0.7 world units vs the pad sitting at +0.05), **When** a ripple passes under a `resting` pad, **Then** the pad rides the crest and trough — at no frame does the water elevation at the pad's position exceed the pad's y-position (the pad is always above or exactly at the water surface). Verified via a unit test on `sampleElevation` that runs a click ripple through a grid of (x, z) sample points and confirms the derived `pad-ride-y` values are >= the computed elevation at each sample.
 
@@ -186,3 +186,48 @@ claude-opus-4-7 (1M context) — BMad dev-story skill, same session that drafted
 ### Change Log
 
 - 2026-04-20: All 7 tasks implemented; 83/83 tests green; `tsc -b` clean; story moved ready-for-dev → in-progress → review in a single session.
+- 2026-04-20: Code review complete. Acceptance Auditor 0 findings. Blind Hunter + Edge Case Hunter surfaced 4 real issues + 11 false positives. All 4 patches applied: (1) buffer refresh moved AFTER ripple drain in `WaterSurface.useFrame`; (2) LilyPad sampler now uses `group.position.x/z` instead of the anchor so ride/tilt track the drifted position; (3) `position.y` seeded to `targetY + elevation` on all four transitions into `resting` (materializing, pulsing, deleting-cancel, completing-cancel); (4) tautological AC #4 test replaced with 3 meaningful invariant tests (inside-crest margin, trough sign-check, flat-water baseline). 3 defers logged: pond-edge phantom-water tilt, frame-ordering invariant documentation, splash pre-bob (parity-correct).
+- 2026-04-20: AC #3 amendment — user flagged during CR that new pads emit an impact ripple at drop-end but don't visibly bob on it (they just ran through their scripted settling-bounce + scale-pulse and landed). Amendment: water-riding extended to `settling` (elevation added on top of the landing bounce) and `pulsing` (elevation written as `DROP_Y_REST + elevation` while the scale pulse plays). Tilt remains resting-only. Dropping/completing/deleting/materializing/terminal phases remain un-sampled per the original AC #3. New pads now visibly bob on the ripple they just emitted.
+- 85/85 tests green; `tsc -b` clean. Status review → done.
+
+### Review Findings (code review session 2026-04-20)
+
+Adversarial review of commit `d5b2d03` via Blind Hunter + Edge Case Hunter + Acceptance Auditor layers. **Acceptance Auditor: 0 violations / 0 deviations / 0 missing / 0 contradictions — all 7 ACs pass in isolation.** Blind Hunter + Edge Case Hunter surfaced 4 real issues (3 AC #4-adjacent correctness gaps + 1 tautological test) and a pile of false positives.
+
+- [x] [Review][Patch] **Buffer refresh runs BEFORE the same-frame ripple drain → one-frame delay on every new click ripple reaching LilyPads.**
+  - **Location:** [WaterSurface.tsx:330-367 (refresh) vs :378-392 (drain)](frontend/src/components/pond/WaterSurface.tsx#L330-L392)
+  - **What happens:** The elevation-buffer refresh iterates uniform arrays BEFORE the drain loop writes newly-queued ripples into those same uniforms. Any `triggerRipple` call landing this tick is visible to the shader next frame — but the JS buffer the LilyPads read (same tick) still reflects pre-drain state. Pads respond to brand-new ripples one frame late.
+  - **Fix:** swap the two blocks — drain first, refresh second. Single-block reorder.
+
+- [x] [Review][Patch] **Sampler anchor is `(posX, posZ)` but the pad's actual visual position drifts up to ±0.08 via the resting-drift sinusoid.**
+  - **Location:** [LilyPad.tsx:973-974 (drift) vs :993-1015 (sampler calls)](frontend/src/components/pond/LilyPad.tsx#L973-L1015)
+  - **What happens:** `group.position.x/z` are written as `posX + drift / posZ + drift` each frame, but `sampleElevation(posX, posZ)` uses the fixed anchor. The pad floats at the elevation for (posX, posZ) while visually positioned at (posX + 0.08, posZ + 0.06) → a small phase error in the gradient direction, most visible when a steep crest front is passing at angle ≠ 90° to the drift axis.
+  - **Fix:** replace the 5 `samplePond(posX…, posZ…)` calls with `samplePond(group.position.x…, group.position.z…)`. The drift writes already landed on lines 973-974; order is correct.
+
+- [x] [Review][Patch] **AC #4 gap at the `pulsing → resting` transition: pad teleports to `DROP_Y_REST` and then lerps UP toward `targetY + elevation` over ~130ms, so a ripple crest at the pad's position during that window is ABOVE the pad for several frames.**
+  - **Location:** [LilyPad.tsx:1141-1150 (pulsing → resting exit)](frontend/src/components/pond/LilyPad.tsx#L1141-L1150) + [:994-999 (first resting tick)](frontend/src/components/pond/LilyPad.tsx#L994-L999)
+  - **What happens:** At the last pulsing frame `group.position.y` is still `DROP_Y_REST` (pulsing never wrote to y). On first resting tick the lerp toward `targetY + elevation` starts from `DROP_Y_REST`, converging at 0.08/frame. If the ambient/click ripples happen to crest at the pad's position during the handoff (typical — a creation ripple fires right at the pad's own position), the water is above the pad for ~8 frames. Same-day AC #4 violation in a specific transition window the spec's test doesn't cover.
+  - **Fix:** seed `group.position.y` to `targetY.current + sampleElevation(posX, posZ)` in the `pulsing → resting` exit block (also applies to `materializing → resting` and any other entry into `resting`). Makes the handoff instant instead of lerp-from-zero-offset.
+
+- [x] [Review][Patch] **AC #4 test is tautological — `waterY - padY` where `padY := DROP_Y_REST + waterY` is algebraically `-DROP_Y_REST` always. The test cannot fail and proves nothing about `sampleElevation`.**
+  - **Location:** [waterElevation.test.ts:269-297](frontend/src/components/pond/waterElevation.test.ts#L269-L297)
+  - **What happens:** The test computes `padY = DROP_Y_REST + sampleElevation(x, z)` then asserts `sampleElevation(x, z) - padY ≈ -DROP_Y_REST`. By construction, `-DROP_Y_REST` at every sample. The invariant it "proves" is `x - (c + x) = -c` — arithmetic, not behavior.
+  - **Fix:** rewrite to test a meaningful invariant — e.g. at steady-state (no lerp-lag) the pad sits at a fixed offset above the water regardless of ripple amplitude, OR with the EC-H2 patch in place, assert that at `→ resting` transitions the initial `group.position.y` seed matches `targetY + elevation` so no below-water frames occur.
+
+- [x] [Review][Defer] **Pad-tilt gradient is evaluated outside the visible pond edge at extreme `posX`/`posZ`.** `sampleElevation` has no bounds — samples at `(posX ± 0.35, posZ ± 0.35)` return valid elevation even if the fragment shader's `edgeFade` has faded the water to black at that point. Pads within `TILT_DELTA` of the 20-unit pond edge tilt toward invisible "phantom water." Rare: the pond is 40×40 at most (`AMBIENT_RIPPLE_RADIUS`) and pads typically sit near center. Fix would duplicate the fragment-shader fade in the sampler.
+
+- [x] [Review][Defer] **Frame-ordering invariant between `WaterSurface.useFrame` (refreshes buffer) and `LilyPad.useFrame` (reads buffer) is not asserted.** Currently stable because `<WaterSurface />` is rendered before `renderTodos.map` in `PondScene`, so R3F subscribes WaterSurface's tick first. If anyone reorders the JSX or sets a `priority` on either, LilyPads would silently read a 1-frame-stale buffer. Comment-only fix: add an ordering note on both `useFrame` calls; OR explicit `priority` to lock it.
+
+- [x] [Review][Defer] **Splash term has no leading-edge gating — its Gaussian contributes non-zero elevation at pads far from the impact center BEFORE the wavefront arrives.** At dropDist=2, `exp(-3.2) ≈ 0.04` × amp (up to 0.7) × 1.2 = ~0.034 world units of elevation at t=0 of a click, while the real wavefront takes ~0.47s to reach that distance. Pads at intermediate range visually "pre-bob" before the ring arrives. Matches shader intent (parity-correct), but if "pre-bob" ever becomes a reported UX bug, add a leading-edge mask to the splash in both shader and sampler.
+
+**Summary:** 0 decision-needed, 4 patches (all applying the fix directly restores the AC #4 invariant that the current test can't detect), 3 defers, 11 dismissed as noise / false positives after verification:
+
+- Gradient direction inverted by world→local flip — math verified correct (world→local flip means `dydz` IS the world-Z derivative, which is exactly what the tilt formula needs).
+- Stale `samplePond` cached across unmount — handle is read per-frame (not at mount), auto-heals on next frame.
+- Non-resting tilt-zero runs for `completed`/`deleted` phases — runs ~8 more lerp-toward-0 writes on a pad about to unmount; harmless cost vs the early-return optimization which protects the expensive work below.
+- Uniform array length assumption — invariant holds by construction in `createUniforms`.
+- Unregister doesn't check identity / StrictMode-unsafe sampler swap — no observable impact (no frames run between unmount and remount effects in practice).
+- Noop closure recreated on each unregister — cosmetic.
+- Elapsed-edge semantics (`elapsed <= 0` treated as inactive) — matches shader `<=` check; JS/GLSL in parity.
+- `wavefrontOverride > 0` sentinel — design choice, current callers use positive values.
+- Tilt guard runs before phase transitions resolve — sequence verified correct (the snapshot on line 706 is the phase at useFrame entry; phase cascade dispatches on the same snapshot; transitions to new phases take effect next tick).

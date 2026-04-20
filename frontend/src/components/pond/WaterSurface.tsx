@@ -335,37 +335,6 @@ export function WaterSurface() {
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uGlowIntensity.value = glowIntensity;
 
-    // Story 2.10: refresh the elevation-sampler input buffer from the
-    // uniform arrays. Mutate in place — no allocations. LilyPads call
-    // `sampleElevation` via the store's imperative handle during their
-    // own useFrame tick (same R3F frame, guaranteed-fresh state).
-    {
-      const buf = elevationInputsRef.current;
-      buf.elapsedTime = state.clock.elapsedTime;
-      const uClickCenters = material.uniforms.uDropCenter.value as THREE.Vector2[];
-      const uClickTimes = material.uniforms.uDropTime.value as number[];
-      const uClickAmps = material.uniforms.uDropAmplitude.value as number[];
-      for (let i = 0; i < CLICK_SLOTS; i++) {
-        const slot = buf.clickSlots[i];
-        slot.centerX = uClickCenters[i].x;
-        slot.centerY = uClickCenters[i].y;
-        slot.startTime = uClickTimes[i];
-        slot.amplitude = uClickAmps[i];
-      }
-      const uAmbCenters = material.uniforms.uAmbientCenter.value as THREE.Vector2[];
-      const uAmbTimes = material.uniforms.uAmbientTime.value as number[];
-      const uAmbAmps = material.uniforms.uAmbientAmplitude.value as number[];
-      const uAmbDecay = material.uniforms.uAmbientDecayRate.value as number[];
-      for (let i = 0; i < AMBIENT_SLOTS; i++) {
-        const slot = buf.ambientSlots[i];
-        slot.centerX = uAmbCenters[i].x;
-        slot.centerY = uAmbCenters[i].y;
-        slot.startTime = uAmbTimes[i];
-        slot.amplitude = uAmbAmps[i];
-        slot.decayRate = uAmbDecay[i];
-      }
-    }
-
     // Story 2.9 AC #2: drain the ripple queue. Each enqueued ripple lands
     // in its own click slot, so two `triggerRipple` calls on the same JS
     // tick now both apply (pre-2.9 a single-slot `dropRipple` field
@@ -373,6 +342,11 @@ export function WaterSurface() {
     // getState() to avoid a re-render on every enqueue. The shader
     // plane is rotated -90° about X, so world-Z → local-Y needs a flip
     // at uniform-write time; the store holds world coords throughout.
+    //
+    // Story 2.10 CR-patch: this drain MUST run before the elevation-
+    // buffer refresh below — otherwise a ripple triggered on this tick
+    // writes the uniform after the buffer snapshot, and LilyPad.useFrame
+    // (same tick) reads stale slots → one-frame delay on pad-riding.
     const storeState = usePondStore.getState();
     const queued = storeState.dropRipples;
     if (queued.length > 0) {
@@ -406,6 +380,38 @@ export function WaterSurface() {
       amps[slot] = amplitude;
       nextAmbientSlotRef.current = (slot + 1) % AMBIENT_SLOTS;
       pendingAmbientRef.current = null;
+    }
+
+    // Story 2.10: refresh the elevation-sampler input buffer from the
+    // uniform arrays. Mutate in place — no allocations. Runs AFTER both
+    // drain blocks above so brand-new ripples triggered this tick are
+    // visible to LilyPad.useFrame (called later in the same R3F frame
+    // via the store's imperative sampler handle).
+    {
+      const buf = elevationInputsRef.current;
+      buf.elapsedTime = state.clock.elapsedTime;
+      const uClickCenters = material.uniforms.uDropCenter.value as THREE.Vector2[];
+      const uClickTimes = material.uniforms.uDropTime.value as number[];
+      const uClickAmps = material.uniforms.uDropAmplitude.value as number[];
+      for (let i = 0; i < CLICK_SLOTS; i++) {
+        const slot = buf.clickSlots[i];
+        slot.centerX = uClickCenters[i].x;
+        slot.centerY = uClickCenters[i].y;
+        slot.startTime = uClickTimes[i];
+        slot.amplitude = uClickAmps[i];
+      }
+      const uAmbCenters = material.uniforms.uAmbientCenter.value as THREE.Vector2[];
+      const uAmbTimes = material.uniforms.uAmbientTime.value as number[];
+      const uAmbAmps = material.uniforms.uAmbientAmplitude.value as number[];
+      const uAmbDecay = material.uniforms.uAmbientDecayRate.value as number[];
+      for (let i = 0; i < AMBIENT_SLOTS; i++) {
+        const slot = buf.ambientSlots[i];
+        slot.centerX = uAmbCenters[i].x;
+        slot.centerY = uAmbCenters[i].y;
+        slot.startTime = uAmbTimes[i];
+        slot.amplitude = uAmbAmps[i];
+        slot.decayRate = uAmbDecay[i];
+      }
     }
   });
 

@@ -643,6 +643,16 @@ export function LilyPad({
       if (glowMatRef.current) {
         glowMatRef.current.uniforms.uStrength.value = 0;
       }
+      // Story 2.10 CR-patch: seed position.y to the current water
+      // elevation so the first resting frame doesn't lerp UP through a
+      // wave crest after a cancel. The pad's position.y during the
+      // cancelled deleting sequence was DROP_Y_REST (pulsing/dissolve
+      // don't write y), so without this seed a crest at the pad's
+      // position would sit above the pad for ~8 frames.
+      {
+        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        group.position.y = targetY.current + elev;
+      }
     }
 
     // Transition into the completion sequence. Same store-anchor pattern as
@@ -700,6 +710,14 @@ export function LilyPad({
       }
       if (glowMatRef.current) {
         glowMatRef.current.uniforms.uStrength.value = 0;
+      }
+      // Story 2.10 CR-patch: mirror the deleting-recovery seed — the
+      // cancelled completing sequence left position.y at DROP_Y_REST,
+      // and without this seed the first resting frame would lerp UP
+      // through any wave crest sitting at the pad's position.
+      {
+        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        group.position.y = targetY.current + elev;
       }
     }
 
@@ -984,14 +1002,20 @@ export function LilyPad({
       group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
 
       // Story 2.10: pad rides the water surface. Sample elevation at
-      // the pad's (x, z) world position and lerp `position.y` toward
-      // `targetY.current + elevation`. `targetY.current` still drives
-      // the active/completed base height; water motion rides on top.
-      // Replaces the fake 0.01-amplitude sine bob that predated the
-      // sampler. Sampler is registered by WaterSurface on mount; before
-      // that it returns 0 (flat water) — harmless fallback.
+      // the pad's CURRENT (drifted) world position — not the anchor
+      // (posX, posZ) — so the ride + gradient reflect where the pad
+      // actually IS this frame, not where it was spawned. The drift
+      // (lines above) is ±0.08 / ±0.06 per axis; small, but at steep
+      // crest fronts that phase difference makes tilt + ride more
+      // accurate. `targetY.current` still drives the active/completed
+      // base height; water motion rides on top. Replaces the fake
+      // 0.01-amplitude sine bob that predated the sampler. Sampler is
+      // registered by WaterSurface on mount; before that it returns 0
+      // (flat water) — harmless fallback.
       const samplePond = usePondStore.getState().sampleElevation;
-      const elevation = samplePond(posX, posZ);
+      const sampleAtX = group.position.x;
+      const sampleAtZ = group.position.z;
+      const elevation = samplePond(sampleAtX, sampleAtZ);
       group.position.y = THREE.MathUtils.lerp(
         group.position.y,
         targetY.current + elevation,
@@ -999,18 +1023,18 @@ export function LilyPad({
       );
 
       // Story 2.10: tilt the pad toward the local water gradient via
-      // central differences at ±TILT_DELTA around the pad center.
-      // Small-angle alignment of pad +Y with water normal
+      // central differences at ±TILT_DELTA around the pad's current
+      // position. Small-angle alignment of pad +Y with water normal
       // (-df/dx, 1, -df/dz):
       //   rotation.z = +atan(dydx)   → +x wave-rise → +x corner up
       //   rotation.x = -atan(dydz)   → +z wave-rise → +z corner up
       // Both clamped to ±15° per axis (TILT_MAX_RADIANS) so extreme
       // crests can't flip the pad; lerped at TILT_LERP for smoothness.
       // No allocations: raw numbers only, no Vector2/Quaternion.
-      const elevXPlus = samplePond(posX + TILT_DELTA, posZ);
-      const elevXMinus = samplePond(posX - TILT_DELTA, posZ);
-      const elevZPlus = samplePond(posX, posZ + TILT_DELTA);
-      const elevZMinus = samplePond(posX, posZ - TILT_DELTA);
+      const elevXPlus = samplePond(sampleAtX + TILT_DELTA, sampleAtZ);
+      const elevXMinus = samplePond(sampleAtX - TILT_DELTA, sampleAtZ);
+      const elevZPlus = samplePond(sampleAtX, sampleAtZ + TILT_DELTA);
+      const elevZMinus = samplePond(sampleAtX, sampleAtZ - TILT_DELTA);
       const dydx = (elevXPlus - elevXMinus) / (2 * TILT_DELTA);
       const dydz = (elevZPlus - elevZMinus) / (2 * TILT_DELTA);
       const targetTiltZ = THREE.MathUtils.clamp(
@@ -1217,6 +1241,13 @@ export function LilyPad({
       if (t >= 1) {
         setTextOpacity(1);
         phaseTimer.current = 0;
+        // Story 2.10 CR-patch: seed position.y with the water elevation
+        // at the pad's spawn point so the first resting frame doesn't
+        // lerp UP through a wave crest. Without this seed, a crest
+        // passing the pad at handoff sits above the pad for ~8 frames
+        // (AC #4 violation during the transition window).
+        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        group.position.y = targetY.current + elev;
         phaseRef.current = 'resting';
         restStartTime.current = 0;
       }
@@ -1236,7 +1267,17 @@ export function LilyPad({
     } else if (phase === 'settling') {
       const t = Math.min(phaseTimer.current / SETTLE_DURATION, 1);
       const bounce = Math.sin(t * Math.PI) * 0.05 * (1 - t);
-      group.position.set(posX, DROP_Y_REST + bounce, posZ);
+      // Story 2.10 CR-patch: a new pad emits an impact ripple at
+      // `onDropComplete` (end of dropping). The settling and pulsing
+      // phases play out ON TOP of that outgoing ripple, so the pad
+      // should visibly bob on the crests it just created — otherwise
+      // the pad reads as "hovering above its own splash." AC #3 was
+      // amended in the 2026-04-20 CR to allow water-riding in
+      // settling + pulsing (the two landing phases); dropping,
+      // completing, deleting, and terminal states remain un-sampled
+      // because their own animation fully owns y.
+      const elev = usePondStore.getState().sampleElevation(posX, posZ);
+      group.position.set(posX, DROP_Y_REST + bounce + elev, posZ);
       if (t >= 1) {
         phaseTimer.current = 0;
         phaseRef.current = 'pulsing';
@@ -1247,6 +1288,13 @@ export function LilyPad({
       const decay = 1 - t;
       // Scale pulse
       group.scale.setScalar(1.0 + wave * 0.12 * decay);
+      // Story 2.10 CR-patch: ride the water during the pulse too —
+      // the impact ripple from the drop is still radiating outward
+      // during this 1.2s window and the pad should bob on it.
+      {
+        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        group.position.y = DROP_Y_REST + elev;
+      }
       // Rim: fade-blink between yellow glow and normal color
       const glow = Math.max(0, wave) * decay;
       if (rimRef.current) {
@@ -1286,7 +1334,14 @@ export function LilyPad({
         // No glow zero-out — the pulse formula above already lands at
         // strength=AMBIENT_GLOW_STRENGTH and color=pad HDR, matching
         // exactly what the resting branch will write on the next frame.
-        group.position.set(posX, DROP_Y_REST, posZ);
+        // Story 2.10 CR-patch: seed position.y with the water elevation
+        // at the pad's position so the first resting frame doesn't
+        // lerp UP through a wave crest — in particular, the creation
+        // ripple emitted by this pad (via onDropComplete) is peaking
+        // near the pad at this exact moment, so a non-seeded lerp
+        // would leave the pad below water for ~8 frames.
+        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        group.position.set(posX, targetY.current + elev, posZ);
         restStartTime.current = 0;
         phaseRef.current = 'resting';
       }

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-20 # story 2.10 implemented and moved to review
+last_updated: 2026-04-20 # story 2.10 code-reviewed, 5 patches applied, moved to done
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   2-7-pulse-on-flash-polish: done  # scale-pulse + full-sequence body tint + focus-flash + popup color; code-reviewed 2026-04-17
   2-8-pad-action-glow-on-water: done  # radial-mask halo + ambient + focused sustain + popup wheel-fwd; code-reviewed 2026-04-20 (12 patches applied)
   2-9-ripple-system-hardening: done  # all 11 ACs implemented + code-reviewed 2026-04-20; 1 decision-needed resolved (close-and-ripple), 4 defers logged
-  2-10-lily-pads-float-on-water: review  # all 7 ACs implemented 2026-04-20; 83/83 tests green (72 + 11 new), tsc clean; ready for CR
+  2-10-lily-pads-float-on-water: done  # code-reviewed + 5 patches applied (4 CR findings + 1 AC #3 amendment for settling/pulsing ride); 85/85 tests green
   # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
   #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
   epic-2-retrospective: optional
