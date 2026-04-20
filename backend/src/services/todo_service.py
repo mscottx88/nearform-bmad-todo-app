@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from src.exceptions import TodoNotFoundError
 from src.models.todo import Todo
 from src.schemas.todo import TodoCreate, TodoUpdate
+from src.workers import embedding_worker
 
 
 def _get_active_todo(
@@ -30,6 +31,7 @@ def create_todo(db: Session, data: TodoCreate) -> Todo:
     db.add(todo)
     db.commit()
     db.refresh(todo)
+    embedding_worker.enqueue_embedding(todo.id)
     return todo
 
 

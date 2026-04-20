@@ -1,4 +1,6 @@
+import time
 import uuid
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
@@ -132,6 +134,37 @@ def test_delete_todo_not_found(client: TestClient) -> None:
     assert response.status_code == 404
     data = response.json()
     assert data["error"] == "not_found"
+
+
+def test_create_todo_enqueues_embedding(client: TestClient) -> None:
+    with patch(
+        "src.services.todo_service.embedding_worker.enqueue_embedding",
+    ) as mock_enqueue:
+        response = client.post("/api/todos", json={"text": "Review Q2 roadmap"})
+
+    assert response.status_code == 201
+    todo_id = uuid.UUID(response.json()["id"])
+    mock_enqueue.assert_called_once_with(todo_id)
+
+
+def test_create_todo_response_time_not_affected(client: TestClient) -> None:
+    # Worker patched to a no-op — if someone accidentally awaited the
+    # embedding in the request path, this threshold would blow past 100ms.
+    with patch(
+        "src.services.todo_service.embedding_worker.enqueue_embedding",
+        return_value=None,
+    ):
+        start = time.perf_counter()
+        response = client.post("/api/todos", json={"text": "Fast path"})
+        elapsed = time.perf_counter() - start
+
+    assert response.status_code == 201
+    # Loose threshold — catches "someone accidentally awaited the
+    # embedding in the request path" (a real API call is 100–400ms and
+    # would blow past 1s across retries).
+    assert elapsed < 1.0, (
+        f"POST /api/todos took {elapsed:.3f}s — embedding in request path?"
+    )
 
 
 def test_response_uses_snake_case(client: TestClient) -> None:

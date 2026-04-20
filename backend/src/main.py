@@ -1,3 +1,7 @@
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,8 +11,32 @@ from src.api.creatures import router as creatures_router
 from src.api.todos import router as todos_router
 from src.config import settings
 from src.exceptions import AppError
+from src.workers import embedding_worker
 
-app = FastAPI(title="nearform-bmad-todo-app", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Framework contract forces `async def`, but the body is sync —
+    # thread-based concurrency only (see CLAUDE.md § concurrency).
+    embedding_worker.start_embedding_executor(max_workers=4)
+    if not settings.google_api_key:
+        logger.warning(
+            "GOOGLE_API_KEY not configured — embedding generation will be "
+            "disabled; todos will save with embedding_status='pending'",
+        )
+    try:
+        yield
+    finally:
+        embedding_worker.stop_embedding_executor(wait=True)
+
+
+app = FastAPI(
+    title="nearform-bmad-todo-app",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,

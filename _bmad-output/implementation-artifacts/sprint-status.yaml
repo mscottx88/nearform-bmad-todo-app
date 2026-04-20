@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-20 # story 5.1 drafted (backend embedding pipeline) — Epic 5 opened
+last_updated: 2026-04-20 # story 5.1 review (backend embedding pipeline — 40/40 tests, ruff + mypy clean)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
 
   # Epic 5: Intelligent Search
   epic-5: in-progress  # opened 2026-04-20 with story 5.1
-  5-1-backend-embedding-pipeline: ready-for-dev  # thread-based embedding pipeline (NOT asyncio per CLAUDE.md); builds on existing pgvector schema from Epic 1
+  5-1-backend-embedding-pipeline: review  # thread-based embedding pipeline implemented; 40/40 tests, ruff + mypy --strict clean
   5-2-hybrid-search-api: backlog
   5-3-type-anywhere-search-with-surface-submerge: backlog
   epic-5-retrospective: optional

@@ -38,3 +38,26 @@ class EmbeddingServiceError(AppError):
             message=message,
             status_code=503,
         )
+
+
+class EmbeddingApiKeyMissingError(AppError):
+    recoverable = True
+
+    def __init__(self) -> None:
+        super().__init__(
+            error="embedding_generation_failed",
+            message="Embedding service not configured",
+            status_code=503,
+        )
+
+
+class EmbeddingDimensionError(AppError):
+    recoverable = True
+
+    def __init__(self, got: int, expected: int = 768) -> None:
+        super().__init__(
+            error="embedding_generation_failed",
+            message="Embedding service returned unexpected response",
+            status_code=500,
+            detail=f"expected {expected}-dim vector, got {got}-dim",
+        )
