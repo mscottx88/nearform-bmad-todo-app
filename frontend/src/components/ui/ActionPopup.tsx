@@ -108,7 +108,11 @@ export function ActionPopup({
                 shiftKey: e.shiftKey,
                 altKey: e.altKey,
                 metaKey: e.metaKey,
-                bubbles: false,
+                // Let the synthesized event bubble so OrbitControls
+                // listeners at document / window scope (or any parent
+                // that may attach in the future) see it — the direct
+                // canvas listener still receives it either way.
+                bubbles: true,
               }),
             );
           }}

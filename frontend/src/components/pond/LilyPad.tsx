@@ -119,9 +119,13 @@ const FOCUS_GLOW_MAX = 0.35;          // Smaller cap for focus-flash glow — qu
 const AMBIENT_GLOW_STRENGTH = 0.22;
 const AMBIENT_GLOW_HDR_SCALE = 2.6;
 // Sustained halo for whichever pad currently has `focused=true` (popup
-// open). Quieter than the 0.4s click-to-focus pop (FOCUS_GLOW_MAX=0.35)
-// but brighter than the per-pad ambient, so the focused pad clearly
-// reads as "selected" without washing out its intrinsic color.
+// open). Quieter than the 0.4s click-to-focus pop (FOCUS_GLOW_MAX=0.35).
+// Matches AMBIENT_GLOW_STRENGTH (both 0.22) — a deliberate coupling so
+// the handoff from focused→unfocused (and vice versa) has no visible
+// step-change in halo brightness. The focused pad is distinguished by
+// color oscillation (pad-color↔white), not by strength. If you tune
+// one of these constants, tune the other in lockstep or add a lerp
+// bridge on the transition frame.
 const FOCUSED_GLOW_STRENGTH = 0.22;
 // Focused-pad halo breathes between the pad's own HDR color and HDR
 // white on a sine wave. Period is long enough to read as "alive" but
@@ -386,6 +390,12 @@ export function LilyPad({
   // as waitStartRef, completingStartTimeRef, etc.).
   const focusFlashPendingRef = useRef(false);
   const focusFlashStartRef = useRef<number | null>(null);
+  // Story 2.8 follow-up: anchor for the sustained focused-halo oscillation
+  // (AC #10). Stamped lazily on the first useFrame tick where `focused` is
+  // true and this ref is null — keeps the osc phase reproducible ("starts
+  // at pad color, breathes toward white") instead of starting wherever
+  // wall-clock time happens to land.
+  const focusStartTimeRef = useRef<number | null>(null);
   const prevFocusedRef = useRef(focused);
   // Text fades in at the END of the arrival animation. Both creation
   // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
@@ -442,6 +452,12 @@ export function LilyPad({
   useEffect(() => {
     if (focused && !prevFocusedRef.current) {
       focusFlashPendingRef.current = true;
+    }
+    // Reset the focused-osc anchor when the popup closes so the next
+    // focus opens from a known phase (osc=0 → pad-color) rather than
+    // picking up whatever phase the last session ended at.
+    if (!focused && prevFocusedRef.current) {
+      focusStartTimeRef.current = null;
     }
     prevFocusedRef.current = focused;
   }, [focused]);
@@ -562,6 +578,17 @@ export function LilyPad({
       }
       deletingStartTimeRef.current = anchor;
       setDeletingStartTime(anchor);
+      // Seed the glow color so the per-frame `uColor.lerp(DELETE_PAD_TINT, 0.06)`
+      // below starts from the pad's ambient HDR baseline rather than whatever
+      // lingered (on fresh mount this is (0,0,0), which would make the halo
+      // invisible for ~25 frames while the lerp climbs out of black).
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uColor.value.set(
+          colorVec.r * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.g * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.b * AMBIENT_GLOW_HDR_SCALE,
+        );
+      }
     }
 
     // External-cancel recovery for deletion. Runs before completing-cancel so
@@ -585,8 +612,13 @@ export function LilyPad({
       }
       // A focus-flash queued just before the click-to-delete would
       // otherwise land as a delayed flash when the pad returns to
-      // resting — drop the pending request.
+      // resting — drop the pending request AND any already-stamped
+      // start time. Without clearing `focusFlashStartRef`, a sub-0.4s
+      // click→delete→external-cancel sequence would replay the flash
+      // on the first resting frame (stale stamp still within the 0.4s
+      // FOCUS_FLASH_DURATION window).
       focusFlashPendingRef.current = false;
+      focusFlashStartRef.current = null;
       // Clear the body tint uniforms accumulated during the cancelled
       // sequence (both strength and the HDR color target).
       if (padMeshRef.current) {
@@ -615,6 +647,14 @@ export function LilyPad({
       }
       completingStartTimeRef.current = anchor;
       setCompletingStartTime(anchor);
+      // Same remount-safe glow seed as the deleting branch above.
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uColor.value.set(
+          colorVec.r * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.g * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.b * AMBIENT_GLOW_HDR_SCALE,
+        );
+      }
     }
 
     // Recovery: if the completing override was cleared while we were still
@@ -636,7 +676,11 @@ export function LilyPad({
         const rimMat = rimRef.current.material as THREE.MeshBasicMaterial;
         rimMat.color.set(color);
       }
+      // Mirror the deleting-recovery cleanup: clear BOTH pending and
+      // already-stamped flash state so a sub-0.4s click→complete→cancel
+      // sequence can't replay the flash on return to resting.
       focusFlashPendingRef.current = false;
+      focusFlashStartRef.current = null;
       if (padMeshRef.current) {
         const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
         if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
@@ -717,6 +761,18 @@ export function LilyPad({
       // DISSOLVE_START, so the dissolve's `scale = 1 - eased` (starting
       // at eased=0 → scale=1) picks up seamlessly from the pulse tail.
 
+      // Shared with the body-tint and glow writes below. `intensity`
+      // matches the resting-branch dimming so the first completing
+      // frame's glow strength lines up with whatever the prior-frame
+      // resting write produced (no upward step for completed/errored
+      // pads, which wrote `AMBIENT * 0.4` or `AMBIENT * DECAY_SATURATION`).
+      const totalT = Math.min(t / COMPLETING_TOTAL, 1);
+      const intensity = errorEntry
+        ? DECAY_SATURATION
+        : todo.completed
+        ? 0.4
+        : 1.0;
+
       // Body tint — cubic ease-in across the FULL 2.0s sequence so the
       // shift toward the HDR action color is subtle through the pulse,
       // strengthens through the dissolve, and peaks just as the pad
@@ -724,7 +780,6 @@ export function LilyPad({
       // because the lerp target changes gradually with t.
       if (mat?.uniforms?.uFlashColor && mat.uniforms?.uFlashStrength) {
         mat.uniforms.uFlashColor.value.copy(COMPLETE_PAD_TINT);
-        const totalT = Math.min(t / COMPLETING_TOTAL, 1);
         mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
       }
 
@@ -735,13 +790,13 @@ export function LilyPad({
       // the sustained focused halo if the user just clicked Complete)
       // toward COMPLETE_PAD_TINT at ~6% per frame — no visible
       // green→disappear→red discontinuity. Strength ramps from the
-      // AMBIENT baseline up to PAD_TINT_MAX so there's also no dip at
-      // t=0 (totalT³ starts at 0 but we lerp between ambient and peak).
+      // intensity-scaled AMBIENT baseline up to PAD_TINT_MAX so there's
+      // also no dip at t=0 (totalT³ starts at 0 but we lerp between
+      // ambient and peak).
       if (glowMatRef.current) {
         glowMatRef.current.uniforms.uColor.value.lerp(COMPLETE_PAD_TINT, 0.06);
-        const totalT = Math.min(t / COMPLETING_TOTAL, 1);
         glowMatRef.current.uniforms.uStrength.value = THREE.MathUtils.lerp(
-          AMBIENT_GLOW_STRENGTH,
+          AMBIENT_GLOW_STRENGTH * intensity,
           PAD_TINT_MAX,
           totalT * totalT * totalT,
         );
@@ -829,24 +884,30 @@ export function LilyPad({
       }
       // See completing branch for the PULSE_END == DISSOLVE_START note.
 
+      // Mirror of the completing branch — see that branch's comment.
+      const totalT = Math.min(t / DELETING_TOTAL, 1);
+      const intensity = errorEntry
+        ? DECAY_SATURATION
+        : todo.completed
+        ? 0.4
+        : 1.0;
+
       // Body tint — same full-2.0s cubic ease-in as the completing branch,
       // just with the delete HDR target.
       if (mat?.uniforms?.uFlashColor && mat.uniforms?.uFlashStrength) {
         mat.uniforms.uFlashColor.value.copy(DELETE_PAD_TINT);
-        const totalT = Math.min(t / DELETING_TOTAL, 1);
         mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
       }
 
       // Story 2.8: water glow mirrors the body tint — DELETE_PAD_TINT,
-      // same cubic-eased strength ramp from the ambient baseline. Color
-      // LERPS from prior value (green ambient, or focused white) toward
-      // DELETE_PAD_TINT rather than snapping — no green→disappear→red
-      // seam at the start of the delete sequence.
+      // same cubic-eased strength ramp from the intensity-scaled ambient
+      // baseline. Color LERPS from prior value (green ambient, or
+      // focused white) toward DELETE_PAD_TINT rather than snapping — no
+      // green→disappear→red seam at the start of the delete sequence.
       if (glowMatRef.current) {
         glowMatRef.current.uniforms.uColor.value.lerp(DELETE_PAD_TINT, 0.06);
-        const totalT = Math.min(t / DELETING_TOTAL, 1);
         glowMatRef.current.uniforms.uStrength.value = THREE.MathUtils.lerp(
-          AMBIENT_GLOW_STRENGTH,
+          AMBIENT_GLOW_STRENGTH * intensity,
           PAD_TINT_MAX,
           totalT * totalT * totalT,
         );
@@ -993,26 +1054,37 @@ export function LilyPad({
       //     yields to the baseline — no hand-off seam at flash-end.
       if (glowMatRef.current) {
         const uColor = glowMatRef.current.uniforms.uColor.value;
+        // Shared intensity — keeps the focused halo in sync with the
+        // pad body's decay/completion dimming (without it, a focused
+        // completed or errored pad would outshine its own dim body).
+        const intensity = errorEntry
+          ? DECAY_SATURATION
+          : todo.completed
+          ? 0.4
+          : 1.0;
         let strength: number;
 
         if (focused) {
+          // Stamp the focus anchor on the first tick we see `focused`.
+          // The osc phase then reads from elapsed-since-focus-open, so
+          // every popup opens at osc=0 (pad-color) and breathes toward
+          // white on a fixed cadence — reproducible feel per open.
+          if (focusStartTimeRef.current === null) {
+            focusStartTimeRef.current = state.clock.elapsedTime;
+          }
+          const focusElapsed = state.clock.elapsedTime - focusStartTimeRef.current;
           const osc =
             0.5 +
             0.5 *
-              Math.sin((state.clock.elapsedTime * 2 * Math.PI) / FOCUSED_OSC_PERIOD_S);
+              Math.sin((focusElapsed * 2 * Math.PI) / FOCUSED_OSC_PERIOD_S);
           uColor.set(
             colorVec.r * AMBIENT_GLOW_HDR_SCALE,
             colorVec.g * AMBIENT_GLOW_HDR_SCALE,
             colorVec.b * AMBIENT_GLOW_HDR_SCALE,
           );
           uColor.lerp(FOCUS_PAD_GLOW, osc);
-          strength = FOCUSED_GLOW_STRENGTH;
+          strength = FOCUSED_GLOW_STRENGTH * intensity;
         } else {
-          const intensity = errorEntry
-            ? DECAY_SATURATION
-            : todo.completed
-            ? 0.4
-            : 1.0;
           uColor.set(
             colorVec.r * AMBIENT_GLOW_HDR_SCALE,
             colorVec.g * AMBIENT_GLOW_HDR_SCALE,
@@ -1232,8 +1304,10 @@ export function LilyPad({
           mounted (uniforms default to strength=0 → null contribution);
           useFrame branches above write per-phase color + strength.
           Rendered last in JSX so `querySelector('mesh')` in existing
-          tests still returns the clickable pad mesh — renderOrder={5}
-          on the material enforces paint-below-pad regardless of JSX order. */}
+          tests still returns the clickable pad mesh — renderOrder=5
+          on the glow mesh (Object3D property) paints before the pad
+          (renderOrder=10) and rim (11/12), so the halo sits visually
+          beneath the pad regardless of JSX order. */}
       <GlowSource ref={glowMatRef} radius={GLOW_RADIUS} yOffset={GLOW_Y_OFFSET} />
     </group>
   );

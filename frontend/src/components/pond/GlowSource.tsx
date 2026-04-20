@@ -68,8 +68,9 @@ export const GlowSource = forwardRef<THREE.ShaderMaterial, GlowSourceProps>(
           fragmentShader={fragmentShader}
           transparent
           depthWrite={false}
+          depthTest={false}
           blending={THREE.AdditiveBlending}
-          side={THREE.DoubleSide}
+          side={THREE.FrontSide}
         />
       </mesh>
     );

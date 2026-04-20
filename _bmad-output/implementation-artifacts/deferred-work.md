@@ -56,6 +56,12 @@
 - `uDropCenter` ripple-uniform collision in `WaterSurface.tsx` — two rapid pad actions share a single ripple slot; story 2.5 aggravates frequency (both Complete and Delete fire through the popup) but the single-slot limit dates from story 1.2. Consider a short ripple queue or multiple uniform slots
 - Camera focus mid-lerp cut-off — when the user clicks Delete before `PondCamera`'s focus-zoom lerp completes (before `ARRIVE_THRESHOLD=0.1`), `closePopup()` nulls `cameraFocus` and the camera stops at a random intermediate position. Pre-existing consequence of the spec's camera-restore drop in 2.3/2.4/2.5 — accepted, but worth re-visiting if UX complains
 
+## Deferred from: code review of story 2-8-pad-action-glow-on-water (2026-04-20)
+
+- `document.querySelector('canvas')` in `ActionPopup.onWheel` is brittle if a second canvas is ever added — should use a passed ref or R3F context (ActionPopup.tsx:~91)
+- `focusFlashStartRef` is read by both the rim block and the glow block in the same `useFrame` call — ordering coupling creates a maintenance hazard if blocks are refactored or extracted (LilyPad.tsx:~948,~1027)
+- Pulse→resting strength handoff depends on numeric coincidence `AMBIENT_GLOW_STRENGTH === FOCUSED_GLOW_STRENGTH === 0.22` — pulse ends at 0.22 and the next resting frame also writes 0.22 regardless of `focused`, but if either constant is tuned independently a step-change will appear at pulse-end. Add a coupling comment or lerp-on-first-frame if constants diverge. (LilyPad.tsx:119, 125, 1137-1139)
+
 ## Deferred from: code review of story 2-7-pulse-on-flash-polish (2026-04-17)
 
 - `prefers-reduced-motion` not honored by scale pulses, rim glows, body tint, or focus flash in LilyPad.tsx — project-wide accessibility gap, not a 2.7 regression. Warrants a dedicated a11y sweep.
