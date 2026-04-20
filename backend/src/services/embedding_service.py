@@ -6,6 +6,7 @@ that either returns a valid 768-dim `list[float]` or raises.
 """
 
 from google import genai
+from google.genai import types
 
 from src.config import settings
 from src.exceptions import EmbeddingApiKeyMissingError, EmbeddingDimensionError
@@ -32,6 +33,7 @@ def generate_embedding(text: str) -> list[float]:
     response = client.models.embed_content(
         model=settings.embedding_model,
         contents=text,
+        config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSION),
     )
 
     embeddings = getattr(response, "embeddings", None) or []

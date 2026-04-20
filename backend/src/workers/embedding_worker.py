@@ -85,11 +85,17 @@ def _run_embedding_worker(todo_id: uuid.UUID) -> None:
                 )
                 return
             except Exception as exc:  # noqa: BLE001 - deliberate catch-all for retry
+                # Log .code / .status if present (google.genai.errors.ClientError
+                # exposes HTTP code + API status like INVALID_ARGUMENT). These
+                # are safe to log — no user text, no API key.
                 logger.warning(
-                    "embedding_attempt_failed attempt=%d todo_id=%s exc=%s",
+                    "embedding_attempt_failed attempt=%d todo_id=%s exc=%s "
+                    "code=%s status=%s",
                     attempt,
                     todo_id,
                     type(exc).__name__,
+                    getattr(exc, "code", "?"),
+                    getattr(exc, "status", "?"),
                 )
                 if attempt < MAX_ATTEMPTS:
                     time.sleep(2 ** (attempt - 1))
