@@ -394,23 +394,20 @@ export function WaterSurface() {
   }, []);
 
   // Click anywhere on the water surface → radiating ripple at the click
-  // point OR close an open popup (story 2.9 AC #3). R3F's raycaster
-  // hands us the world-space intersection as `e.point`. Lily-pad clicks
-  // stopPropagation before this fires, so clicking a pad does NOT ripple
-  // the water — only empty-water clicks do.
+  // point. R3F's raycaster hands us the world-space intersection as
+  // `e.point`. Lily-pad clicks stopPropagation before this fires, so
+  // clicking a pad does NOT ripple the water — only empty-water clicks do.
   //
-  // Popup-open guard: if the Action Popup is open (activePopupTodoId
-  // set), an empty-water click reads as "dismiss the popup" rather
-  // than "ripple AND leave the popup hanging." Read via getState() so
-  // this handler doesn't subscribe to activePopupTodoId changes (which
-  // would trigger a re-render on every open/close).
+  // Popup dismissal on water-click is owned by `PondCamera.handlePointerUp`
+  // (native `pointerup` fires before `click` per DOM event order). When
+  // the popup is open and the user clicks water: PondCamera closes it;
+  // this handler then fires a ripple at the click point. Net UX:
+  // popup dismisses AND the water ripples where the dismiss click
+  // landed — the ripple reads as tactile "click landed" feedback and
+  // doesn't obstruct the dismiss. Resolves story 2.9 AC #3 as option
+  // (b) "close-and-ripple" per the 2026-04-20 code review.
   const handleWaterClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-    const store = usePondStore.getState();
-    if (store.activePopupTodoId !== null) {
-      store.closePopup();
-      return;
-    }
-    store.triggerRipple(e.point.x, e.point.z);
+    usePondStore.getState().triggerRipple(e.point.x, e.point.z);
   }, []);
 
   return (

@@ -1,6 +1,6 @@
 # Story 2.9: Ripple System Hardening
 
-Status: review
+Status: done
 
 > **Scope note:** 2.9 is a tech-debt / hardening spillover story — not part of the original Epic 2 plan in `epics.md`. Consolidates 10 deferred items accumulated across the 2.4 / 2.5 / 2.6 code reviews (see `_bmad-output/implementation-artifacts/deferred-work.md`). All items touch the ripple system (`WaterSurface.tsx` + `usePondStore.triggerRipple` + callers). Grouped here so one coherent diff fixes the whole cluster rather than spreading fixes across future feature stories where they'd be out of context. No new user-facing features; success is "same visual feel, fewer latent bugs, less fragile code."
 
@@ -89,6 +89,51 @@ so that future feature work on the pond (Epic 4 clustering, Epic 5 search, Epic 
   - [x] `npx vitest run` — all tests pass.
   - [x] `npx tsc -b` — clean.
   - [x] Manual browser check: empty-water click rip­ples, rapid complete/delete pairs on the same frame, popup + empty-water click, cold-load first ambient ripple appears ≤ 1.5s after mount.
+
+### Review Findings (code review session 2026-04-20)
+
+Adversarial review of commit `92d6d23` via Blind Hunter + Edge Case Hunter + Acceptance Auditor layers. **Acceptance Auditor: 0 violations / 0 deviations / 0 missing / 0 contradictions — all 11 ACs pass in isolation.** The Edge Case Hunter surfaced one high-severity interaction with a pre-existing subsystem (`PondCamera`) that the spec didn't anticipate. Triage below.
+
+- [x] [Review][Decision → Patch] Close-only vs close-and-ripple: actual shipped behavior is close-and-ripple, contradicting the Dev Agent Record's stated "close-only" choice for AC #3. **Resolved:** chose option (a) — accept close-and-ripple. Removed the dormant guard in `handleWaterClick` ([WaterSurface.tsx:397-411](frontend/src/components/pond/WaterSurface.tsx#L397-L411)) and rewrote the comment to document the PondCamera-owned dismissal path. Dev Agent Record updated. Spec AC #3 resolution pointed at option (b) in the spec's framing ("so the click isn't 'free'").
+  - **Root cause:** [PondCamera.tsx:58-62](frontend/src/components/pond/PondCamera.tsx#L58-L62) already calls `closePopup()` on native `pointerup` for water-plane clicks — pre-existing behavior that the 2.9 spec didn't see. Per DOM event order (`pointerup` fires before `click`), PondCamera's handler runs first, closes the popup, and by the time [WaterSurface.handleWaterClick](frontend/src/components/pond/WaterSurface.tsx#L398-L414) runs (on `click`), its popup-guard sees `activePopupTodoId === null` and falls through to `triggerRipple`. The guard is dormant.
+  - **Options to resolve:**
+    - **(a) Accept close-and-ripple as intended.** Remove the dormant guard in `handleWaterClick` (reverts it to the pre-2.9 shape, minus the empty-water-no-popup path which is unchanged). Update this Dev Agent Record to say "close-and-ripple: ripple provides tactile feedback that the dismiss click landed." Spec AC #3 allows this option explicitly ("fire both — close + ripple — so the click isn't 'free'").
+    - **(b) Enforce true close-only.** Remove the `closePopup()` call from `PondCamera.handlePointerUp` (leave the early-return guarding camera-pan). `WaterSurface.handleWaterClick` then becomes the sole owner of close-on-water-click. **Trade-off:** clicks that miss the water plane (off-scene) no longer close the popup, since `handleWaterClick` fires only on raycast-hit-water. This may or may not be desired — pre-2.9 the popup would dismiss on any canvas click.
+    - **(c) Keep both paths, but coordinate.** PondCamera closes popup AND sets a short-lived `popupJustClosed` flag; WaterSurface reads it and skips ripple if set within the last ~50ms. More surface area, same visible outcome as (b) for water clicks.
+  - **Recommendation:** (a). The ripple is small, reads as click feedback, and doesn't obstruct the dismiss. (b) loses click-outside-pond-to-dismiss which users probably expect. (c) is over-engineering.
+
+- [x] [Review][Defer] `drainRipples` uses absolute `set({ dropRipples: [] })` instead of `slice(queued.length)` — theoretical race if a synchronous reentrancy enqueues mid-drain.
+  - **Location:** [usePondStore.ts:142](frontend/src/stores/usePondStore.ts#L142) + [WaterSurface.tsx:311-328](frontend/src/components/pond/WaterSurface.tsx#L311-L328).
+  - **Trigger:** None today — the drain loop only writes to uniforms; no callback or subscriber can synchronously reentrantly call `triggerRipple` during the loop.
+  - **Reason to defer:** Fix is trivial (`set((s) => ({ dropRipples: s.dropRipples.slice(queued.length) }))`) but solves a path that can't exist. Document here so future refactors keep the invariant.
+
+- [x] [Review][Defer] Ambient scheduler's `setTimeout` callback can complete after cleanup if it's mid-flight at unmount.
+  - **Location:** [WaterSurface.tsx:370-393](frontend/src/components/pond/WaterSurface.tsx#L370-L393).
+  - **Trigger:** Extremely rare — requires the cleanup to run during the ~microsecond window between setTimeout callback entry and its `schedule(nextDelay, false)` re-arm. No user-visible impact (no useFrame to read stale state), but the re-armed timer becomes an orphan.
+  - **Reason to defer:** Today the ref is per-instance and GC'd; the re-armed timer fires but writes to a now-null `pendingAmbientRef.current` slot on a dead instance (no-op). Becomes a real leak if anyone migrates to a shared/module-scope ref. Add an `unmounted` flag if this pattern ever becomes shared.
+
+- [x] [Review][Defer] Unbounded `dropRipples` queue growth during `useFrame` early-return windows (initial ref-attach, WebGL context loss).
+  - **Location:** [WaterSurface.tsx:296-300](frontend/src/components/pond/WaterSurface.tsx#L296-L300).
+  - **Trigger:** WebGL context loss (laptop sleep/wake, dedicated-to-integrated-GPU switch, etc.) between `triggerRipple` calls and drain. Queue grows until material is restored, then drains all at once with the same `state.clock.elapsedTime` — all queued ripples fire simultaneously at their original positions. Visible as a "burst" of ripples on recovery.
+  - **Reason to defer:** Rare (requires GPU context loss). Mitigation is a bounded queue — cap at `CLICK_SLOTS * 2` and drop oldest in `triggerRipple`. Would be worth adding if context-loss recovery becomes a real use case (heavy-GPU laptops, integrated/discrete switching).
+
+- [x] [Review][Defer] Shader `wavefrontOverride > 0.0` sentinel doesn't guard against `freq <= 0.0` in the derived path — a future edit to `freq=0.0` produces `Infinity` wavefront.
+  - **Location:** [WaterSurface.tsx:113-125](frontend/src/components/pond/WaterSurface.tsx#L113-L125).
+  - **Trigger:** Not today — click ripple uses `freq=1.3` (positive). Only hits if a future tuner sets `freq=0.0`.
+  - **Reason to defer:** Could be addressed with `max(freq, 1e-6)` or a shader assertion, but the current callers are stable and adding GLSL guards for non-existent paths clutters the math. Comment on the `ripple()` function signature would be sufficient if this ever changes.
+
+**Summary:** 1 decision-needed (the close-only/close-and-ripple intent question), 4 deferred (all theoretical / not user-visible today), 11 dismissed as noise / false positives after verification:
+- Comment "speed/freq ≈ 4.23" — Blind Hunter misread the call's positional args; the comment is correct (`freq=1.3, speed=5.5`).
+- `handleWaterClick` without `stopPropagation` — R3F synthetic onClick on the bottom-of-z-stack water mesh has no further propagation path to guard.
+- Array-spread in `triggerRipple` forcing subscriber re-renders — no subscribers exist; `WaterSurface` reads via `getState()` per the documented pattern.
+- `drainRipples` no-short-circuit — guarded by the caller's `queued.length > 0` check.
+- Shader `> 0.0` precludes legit `0.0` override — current design choice; no caller uses 0 meaningfully.
+- First-tick bypass airtightness — `queueOne()` has no internal guard; bypass is airtight.
+- Test destructures action — zustand actions don't use `this`; idiom is safe.
+- `closePopup` without `stopPropagation` — same as the handleWaterClick dismissal.
+- StrictMode double-fire of first ripple — cleanup cancels the first timer before it fires (1200ms delay vs synchronous cleanup); second mount is fresh.
+- Identical-position rapid `triggerRipple` calls waste slots — realistic user-facing callers differ by ≥ 1 pixel; internal callers (pad complete/delete) fire once per pad per sequence, never in identical pairs.
+- Acceptance Auditor report had no findings to dismiss.
 
 ## Dev Notes
 
@@ -181,7 +226,7 @@ No incidents. One TypeScript diagnostic surfaced mid-refactor (`AMBIENT_WAVEFRON
 ### Completion Notes List
 
 - **Task 2 (queue).** Chose option (a): `dropRipples: RippleEvent[]` in the store, drained FIFO by `WaterSurface.useFrame`. `WaterSurface` reads the queue via `usePondStore.getState()` (no subscription) so enqueues don't trigger re-renders. Added a `drainRipples` action so the drain is an explicit set call that preserves zustand patterns.
-- **Task 3 (popup-guard).** Chose "close-only" over "close-and-ripple". An empty-water click with the popup open reads as "dismiss" — adding a ripple on top would muddle the signal. Implemented inside `handleWaterClick` via `usePondStore.getState()` — no new subscription.
+- **Task 3 (popup-guard).** Initial implementation chose "close-only" but code review (2026-04-20) surfaced that `PondCamera.handlePointerUp` already closes the popup on `pointerup` (which fires before `click` per DOM order). The `handleWaterClick` guard was dormant — shipped behavior was close-and-ripple. Resolution: accept close-and-ripple as the intended behavior (spec AC #3 option (b) — "so the click isn't 'free'"). Removed the dormant guard; the ripple reads as tactile "click-landed" feedback alongside the popup dismissal.
 - **Task 5 (R3F clock).** Dropped the `time: performance.now() / 1000` field from `RippleEvent`. The queue-length-and-identity handle change detection; ripple timestamps are stamped from `state.clock.elapsedTime` inside `useFrame` at drain time.
 - **Task 8 (coordinate naming).** Chose rename: `triggerRipple(worldX, worldZ)` + `RippleEvent` uses `worldX, worldZ`. Kept the world-Z → local-Y flip in `WaterSurface` at uniform-write time (one-line `centers[slot].set(worldX, -worldZ)`). JSDoc on `triggerRipple` documents the coord system explicitly. Rejected moving the flip into the store because storing shader-local coords in the store would be semantically confusing (any non-WaterSurface consumer would get garbage).
 - **Task 1 (wavefront/wave velocity).** Changed the shader's `ripple()` to derive `wavefrontSpeed` internally from `speed / freq` when the override argument is `0.0`. Click-ripples pass `0.0` so their leading edge locks to the crest (5.5/1.3 ≈ 4.23 u/s). Ambient ripples still pass the explicit `uAmbientWavefrontSpeed` uniform — ambient is deliberately mismatched (slower front than wave) for the languid "distant rain" feel; keeping the option at the call site preserves that.
@@ -201,3 +246,4 @@ No incidents. One TypeScript diagnostic surfaced mid-refactor (`AMBIENT_WAVEFRON
 ### Change Log
 
 - 2026-04-20: Implementation of all 11 ACs complete; 72/72 tests green; `tsc -b` clean; story moved ready-for-dev → in-progress → review in a single session.
+- 2026-04-20: Code review complete. Acceptance Auditor 0 findings; Blind Hunter + Edge Case Hunter surfaced 1 real interaction with pre-existing `PondCamera.handlePointerUp` (dormant popup-guard) + 4 theoretical defers. Decision resolved as close-and-ripple (AC #3 option b). Dormant guard removed from `handleWaterClick`. 4 defers logged to `deferred-work.md`. Status review → done.

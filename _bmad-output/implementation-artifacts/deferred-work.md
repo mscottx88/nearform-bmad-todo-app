@@ -56,6 +56,13 @@
 - `uDropCenter` ripple-uniform collision in `WaterSurface.tsx` — two rapid pad actions share a single ripple slot; story 2.5 aggravates frequency (both Complete and Delete fire through the popup) but the single-slot limit dates from story 1.2. Consider a short ripple queue or multiple uniform slots
 - Camera focus mid-lerp cut-off — when the user clicks Delete before `PondCamera`'s focus-zoom lerp completes (before `ARRIVE_THRESHOLD=0.1`), `closePopup()` nulls `cameraFocus` and the camera stops at a random intermediate position. Pre-existing consequence of the spec's camera-restore drop in 2.3/2.4/2.5 — accepted, but worth re-visiting if UX complains
 
+## Deferred from: code review of story 2-9-ripple-system-hardening (2026-04-20)
+
+- `drainRipples` uses absolute `set({ dropRipples: [] })` instead of `set((s) => ({ dropRipples: s.dropRipples.slice(queued.length) }))` — theoretical race if a synchronous reentrancy enqueues during the drain loop. No user-visible impact today (drain loop only writes to uniforms, no callbacks to reenter), but the defensive form makes the invariant robust to future refactors. (usePondStore.ts:142, WaterSurface.tsx:311-328)
+- Ambient scheduler's `setTimeout` callback can complete after cleanup if it's mid-flight at unmount — the re-armed timer then writes to a null `pendingAmbientRef.current` on a dead instance (no-op today). Real leak if anyone migrates to a shared/module-scope ref. Add an `unmounted` flag if that pattern emerges. (WaterSurface.tsx:370-393)
+- Unbounded `dropRipples` queue growth during `useFrame` early-return windows (initial ref-attach, WebGL context loss). If GPU context is lost between `triggerRipple` calls and the next drain, the queue grows until restoration, then drains all at once with the same `elapsedTime` — visible as a "burst" of same-time ripples. Fix: cap the queue at `CLICK_SLOTS * 2` in `triggerRipple`, drop oldest. Worth adding if context-loss recovery becomes a real use case (integrated/discrete GPU switching laptops). (WaterSurface.tsx:296-300)
+- Shader `wavefrontOverride > 0.0` sentinel doesn't guard against `freq <= 0.0` in the derived path — a future edit to `freq=0.0` would produce `Infinity` wavefront and collapse the ripple into a planar oscillation. Not a bug today (click uses `freq=1.3`). A comment on the `ripple()` function signature or a `max(freq, 1e-6)` clamp would preempt this. (WaterSurface.tsx:113-125)
+
 ## Deferred from: code review of story 2-8-pad-action-glow-on-water (2026-04-20)
 
 - `document.querySelector('canvas')` in `ActionPopup.onWheel` is brittle if a second canvas is ever added — should use a passed ref or R3F context (ActionPopup.tsx:~91)
