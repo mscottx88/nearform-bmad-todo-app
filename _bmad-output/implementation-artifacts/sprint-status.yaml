@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-20 # story 5.2 drafted (hybrid search API — FTS + pgvector cosine)
+last_updated: 2026-04-20 # story 5.2 review (hybrid search API — 62/62 tests, ruff + mypy clean)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -84,7 +84,7 @@ development_status:
   # Epic 5: Intelligent Search
   epic-5: in-progress  # opened 2026-04-20 with story 5.1
   5-1-backend-embedding-pipeline: done  # thread-based embedding pipeline; CR applied 8 patches (shutdown-race, HTTP timeout, rollback, soft-delete skip, etc.); 43/43 tests
-  5-2-hybrid-search-api: ready-for-dev  # GET /api/search?q= combining FTS (GIN/tsvector) + pgvector cosine; reuses 5.1's generate_embedding; graceful FTS-only fallback
+  5-2-hybrid-search-api: review  # 5 new files + main.py wire-up; 19 new tests; 62/62 pytest, ruff + mypy --strict clean
   5-3-type-anywhere-search-with-surface-submerge: backlog
   epic-5-retrospective: optional
 

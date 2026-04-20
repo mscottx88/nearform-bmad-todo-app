@@ -1,0 +1,151 @@
+from unittest.mock import patch
+
+from sqlalchemy.orm import Session
+from starlette.testclient import TestClient
+
+from src.exceptions import EmbeddingApiKeyMissingError
+from src.models.todo import Todo
+
+
+def _vec(index: int) -> list[float]:
+    v = [0.0] * 768
+    v[index] = 1.0
+    return v
+
+
+def _seed_todo(
+    db: Session,
+    text: str,
+    *,
+    embedding: list[float] | None = None,
+    embedding_status: str = "pending",
+    completed: bool = False,
+    deleted: bool = False,
+) -> Todo:
+    todo = Todo(text=text, completed=completed, deleted=deleted)
+    if embedding is not None:
+        todo.embedding = embedding
+        todo.embedding_status = embedding_status
+    elif embedding_status != "pending":
+        todo.embedding_status = embedding_status
+    db.add(todo)
+    db.commit()
+    db.refresh(todo)
+    return todo
+
+
+def test_search_missing_q_param(client: TestClient) -> None:
+    response = client.get("/api/search")
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_search_empty_q(client: TestClient) -> None:
+    response = client.get("/api/search?q=")
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_search_whitespace_only_q(client: TestClient) -> None:
+    response = client.get("/api/search?q=   ")
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_search_too_long_q(client: TestClient) -> None:
+    response = client.get("/api/search", params={"q": "x" * 501})
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_search_returns_expected_shape(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _seed_todo(
+        db_session,
+        "Review Q2 roadmap",
+        embedding=_vec(3),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(3),
+    ):
+        response = client.get("/api/search", params={"q": "review"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {"query", "results", "vector_search_unavailable"}
+    assert body["query"] == "review"
+    assert body["vector_search_unavailable"] is False
+    assert len(body["results"]) == 1
+    result = body["results"][0]
+    assert set(result.keys()) == {"todo", "score", "match_type"}
+    assert 0.0 <= result["score"] <= 1.0
+    assert result["match_type"] in {"keyword", "semantic", "hybrid"}
+    # The nested todo uses the same TodoResponse shape as /api/todos.
+    assert "id" in result["todo"]
+    assert "text" in result["todo"]
+    assert "embedding_status" in result["todo"]
+
+
+def test_search_graceful_degradation_without_api_key(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    # A todo whose text matches the query; embedding missing because the
+    # service call will fail.
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        side_effect=EmbeddingApiKeyMissingError(),
+    ):
+        response = client.get("/api/search", params={"q": "review"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["vector_search_unavailable"] is True
+    assert len(body["results"]) == 1
+    assert body["results"][0]["match_type"] == "keyword"
+
+
+def test_search_does_not_return_completed_or_deleted(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _seed_todo(
+        db_session,
+        "Review completed todo",
+        completed=True,
+        embedding=_vec(1),
+        embedding_status="complete",
+    )
+    _seed_todo(
+        db_session,
+        "Review deleted todo",
+        deleted=True,
+        embedding=_vec(1),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(1),
+    ):
+        response = client.get("/api/search", params={"q": "review"})
+
+    assert response.status_code == 200
+    assert response.json()["results"] == []
+
+
+def test_search_openapi_schema_includes_endpoint(client: TestClient) -> None:
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    assert "/api/search" in paths
+    assert "get" in paths["/api/search"]
+    # Route is tagged so it shows up under a search group in the docs.
+    assert "search" in paths["/api/search"]["get"]["tags"]

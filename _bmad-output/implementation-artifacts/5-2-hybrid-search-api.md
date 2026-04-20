@@ -1,6 +1,6 @@
 # Story 5.2: Hybrid Search API
 
-Status: ready-for-dev
+Status: review
 
 > **Scope note:** Second story of Epic 5 (Intelligent Search). Builds directly on Story 5.1's embedding pipeline: this story adds a new `GET /api/search` endpoint that combines PostgreSQL full-text search (GIN index on `to_tsvector('english', text)`) with pgvector cosine-similarity search (HNSW index on `embedding VECTOR(768)`). Both indexes landed in the initial migration at [backend/migrations/versions/7af34c6df37c_initial_schema.py:40-52](backend/migrations/versions/7af34c6df37c_initial_schema.py#L40-L52). Query-side embedding generation reuses `embedding_service.generate_embedding` from Story 5.1. Frontend integration (type-anywhere search UI, surface/submerge animation, 300 ms debounce) lands in Story 5.3.
 
@@ -51,12 +51,12 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: New response + request schemas in `backend/src/schemas/search.py` (AC: #1, #5, #6)
-  - [ ] `SearchResult(BaseModel)` — fields: `todo: TodoResponse`, `score: float` (constrained to `Field(ge=0.0, le=1.0)`), `match_type: Literal["keyword", "semantic", "hybrid"]`. Reuse existing `TodoResponse` from `schemas/todo.py`.
-  - [ ] `SearchResponse(BaseModel)` — fields: `query: str`, `results: list[SearchResult]`, `vector_search_unavailable: bool`.
-  - [ ] No new `SearchRequest` model — the `q` query param is validated directly on the route via `Query(..., min_length=1, max_length=500)`.
+- [x] Task 1: New response + request schemas in `backend/src/schemas/search.py` (AC: #1, #5, #6)
+  - [x] `SearchResult(BaseModel)` — fields: `todo: TodoResponse`, `score: float` (constrained to `Field(ge=0.0, le=1.0)`), `match_type: Literal["keyword", "semantic", "hybrid"]`. Reuse existing `TodoResponse` from `schemas/todo.py`.
+  - [x] `SearchResponse(BaseModel)` — fields: `query: str`, `results: list[SearchResult]`, `vector_search_unavailable: bool`.
+  - [x] No new `SearchRequest` model — the `q` query param is validated directly on the route via `Query(..., min_length=1, max_length=500)`.
 
-- [ ] Task 2: New service module `backend/src/services/search_service.py` (AC: #2, #3, #4, #7, #8)
+- [x] Task 2: New service module `backend/src/services/search_service.py` (AC: #2, #3, #4, #7, #8)
   - [ ] Module constants: `FTS_WEIGHT = 0.3`, `VECTOR_WEIGHT = 0.7`, `MAX_CANDIDATES_PER_SIDE = 50`, `RESULT_LIMIT = 20`. Each with a one-line comment on why.
   - [ ] `hybrid_search(db: Session, query_text: str) -> SearchResponse` — the public entry point. Strips `query_text`, runs FTS + (optional) vector, merges, returns.
   - [ ] Private helper `_run_fts(db, q: str) -> dict[UUID, tuple[Todo, float]]` — runs the FTS SQL, returns a dict keyed by `todo.id` with `(todo, normalised_score)`. Uses `websearch_to_tsquery('english', :q)` and `ts_rank_cd / (1 + ts_rank_cd)` for `[0,1]` normalisation. Filters `deleted=false AND completed=false AND archived=false`. `LIMIT 50`.
@@ -84,16 +84,16 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
     ```
   - [ ] Strict mypy. No `async` anywhere.
 
-- [ ] Task 3: New route module `backend/src/api/search.py` (AC: #1, #5, #6, #7, #10)
-  - [ ] `router = APIRouter(prefix="/api/search", tags=["search"])`.
-  - [ ] `@router.get("", response_model=SearchResponse)` — sync `def search(q: str = Query(..., min_length=1, max_length=500), db: Session = Depends(get_db)) -> SearchResponse`.
-  - [ ] Additional validation: strip `q` and re-check `len >= 1` — defends against `q=%20` (single-space). On empty-after-strip, raise `HTTPException(422, detail="Query cannot be empty")` — or better: use a pydantic validator on a small request model; **pick one path** and document.
-  - [ ] Delegates to `search_service.hybrid_search(db, q)`. Returns the result directly.
+- [x] Task 3: New route module `backend/src/api/search.py` (AC: #1, #5, #6, #7, #10)
+  - [x] `router = APIRouter(prefix="/api/search", tags=["search"])`.
+  - [x] `@router.get("", response_model=SearchResponse)` — sync `def search(q: QParam, db: Session = Depends(get_db)) -> SearchResponse`, where `QParam = Annotated[str, Query(min_length=1, max_length=500), AfterValidator(_non_whitespace)]`.
+  - [x] Whitespace-only guard: `AfterValidator` raises `PydanticCustomError` on empty-after-strip — keeps the standard `validation_error` envelope AND stays JSON-serialisable (a bare `ValueError` would put a non-serialisable exception in the error ctx and crash the handler).
+  - [x] Delegates to `search_service.hybrid_search(db, q)`. Returns the result directly.
 
-- [ ] Task 4: Register the search router in `backend/src/main.py` (AC: #10)
-  - [ ] Add `from src.api.search import router as search_router` and `app.include_router(search_router)` next to the existing `todos_router` and `creatures_router` include lines.
+- [x] Task 4: Register the search router in `backend/src/main.py` (AC: #10)
+  - [x] Added `from src.api.search import router as search_router` and `app.include_router(search_router)` next to the existing `todos_router` and `creatures_router` include lines.
 
-- [ ] Task 5: Unit tests — `backend/tests/services/test_search_service.py` (AC: #9)
+- [x] Task 5: Unit tests — `backend/tests/services/test_search_service.py` (AC: #9)
   - [ ] Use existing `db_session` fixture from `conftest.py`. Seed a small set of todos with varied `text`, `completed`, `deleted`, and hand-crafted `embedding` values (use `[0.0] * 768` with a single position set to differentiate vectors — full random vectors aren't necessary when the math is deterministic).
   - [ ] Patch `embedding_service.generate_embedding` to return a known `list[float]` so the vector query has a predictable ordering.
   - [ ] `test_hybrid_search_keyword_only_hits_FTS` — query matches text of one todo but no embeddings are set up; assert only that todo is returned with `vector_search_unavailable=False` (because the embed call succeeded and returned a vector, but no rows had `embedding_status='complete'`), `score ≤ 0.3` (capped by FTS weight), and `match_type == "keyword"`.
@@ -107,7 +107,7 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
   - [ ] `test_hybrid_search_candidate_limit_respected` — seed 60 todos all matching; assert each side's `LIMIT 50` is respected by checking the count of candidates before merge (either expose `_run_fts`/`_run_vector` directly or set `RESULT_LIMIT` via monkeypatch for the test).
   - [ ] `test_hybrid_search_empty_query_after_strip_raises` — call `hybrid_search(db, "   ")`; assert it raises `ValueError` OR returns an empty-result response. **Pick one and document in Dev Notes**; the route layer should surface 422 either way.
 
-- [ ] Task 6: Integration tests — `backend/tests/api/test_search.py` (AC: #9, #10)
+- [x] Task 6: Integration tests — `backend/tests/api/test_search.py` (AC: #9, #10)
   - [ ] `test_search_missing_q_param` → 422.
   - [ ] `test_search_empty_q` — `?q=` → 422 (from pydantic `min_length=1`).
   - [ ] `test_search_too_long_q` — 501-char `q` → 422.
@@ -116,11 +116,11 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
   - [ ] `test_search_graceful_degradation_without_api_key` — patch `embedding_service.generate_embedding` to raise `EmbeddingApiKeyMissingError`, call search; assert HTTP 200, `vector_search_unavailable: true`, and FTS hits still present.
   - [ ] `test_search_does_not_return_completed_or_deleted` — seed a completed and a deleted todo whose text matches; assert neither appears.
 
-- [ ] Task 7: Run full backend test suite + quality gates (AC: #9)
-  - [ ] `cd backend && uv run pytest -v` — all green (expect 43 pre-existing + ~15 new = ~58 tests).
-  - [ ] `cd backend && uv run ruff check src/ tests/` — clean.
-  - [ ] `cd backend && uv run mypy --strict src/` — clean.
-  - [ ] Manual smoke (optional, requires live Postgres + optional API key): `GET /api/search?q=test` via `curl` or HTTPie.
+- [x] Task 7: Run full backend test suite + quality gates (AC: #9)
+  - [x] `cd backend && uv run pytest -v` — all green (62 passed; 43 pre-existing + 19 new).
+  - [x] `cd backend && uv run ruff check src/ tests/` — clean.
+  - [x] `cd backend && uv run mypy --strict src/` — clean (25 source files).
+  - [ ] Manual smoke (optional, requires live Postgres + optional API key): `GET /api/search?q=test` via `curl` or HTTPie. **Deferred to user — the automated test suite exercises the real SQL path (FTS + pgvector) against the live Postgres used for tests, including the fallback branch.**
 
 ## Dev Notes
 
@@ -347,22 +347,71 @@ Net: the backend is warm from 5.1. All 43 tests green. 5.2 is purely additive �
 
 ### Agent Model Used
 
-_(to be filled on dev-story run)_
+Claude Opus 4.7 (1M context) — `claude-opus-4-7[1m]`.
 
 ### Debug Log References
 
-_(to be filled on dev-story run)_
+- `uv run pytest` — 62 passed in 0.69s (43 pre-existing + 19 new; 11 service + 8 integration).
+- `uv run ruff check src/ tests/` — clean after naming `test_hybrid_search_keyword_only_hits_FTS` to `..._fts` (N802) and collapsing one nested `with` into combined context managers (SIM117).
+- `uv run mypy --strict src/` — clean; 25 source files.
+- Smoke: `from src.main import app` → routes include `/api/search`. `/openapi.json` test confirms endpoint is documented under `search` tag.
 
 ### Completion Notes List
 
-_(to be filled on dev-story run)_
+**Implementation summary:**
+
+- **Schemas** ([backend/src/schemas/search.py](backend/src/schemas/search.py)) — `SearchResult` (with `Field(ge=0.0, le=1.0)` on `score` and `Literal["keyword","semantic","hybrid"]` on `match_type`) and `SearchResponse`. `TodoResponse` is reused verbatim from [schemas/todo.py](backend/src/schemas/todo.py).
+- **Service layer** ([backend/src/services/search_service.py](backend/src/services/search_service.py)) — three helpers (`_run_fts`, `_run_vector`, `_merge`) orchestrated by `hybrid_search`. Both SQL queries use `text(...)` with parameter binding (and `bindparam("query_vec", type_=Vector(768))` on the vector side). Result IDs are collected from the scoring SQL, then hydrated via `db.query(Todo).filter(Todo.id.in_(ids))` — avoids brittle raw-row-to-ORM stitching. FTS normalisation `x / (1 + x)`; vector uses `1 - (embedding <=> :query_vec)` clamped to `[0, 1]`. Merge picks `match_type` from key presence in each side.
+- **Route** ([backend/src/api/search.py](backend/src/api/search.py)) — sync `def search(q: QParam, db: Session = Depends(get_db))`. `QParam` is `Annotated[str, Query(min_length=1, max_length=500), AfterValidator(_non_whitespace)]`.
+- **Main wire-up** ([backend/src/main.py](backend/src/main.py)) — one import + one `include_router` line.
+
+**Design decisions / deviations from the spec:**
+
+1. **Validator exception type**: spec said "either `HTTPException(422)` OR pydantic validator — pick one." Chose the pydantic `AfterValidator` path so the response uses the existing `validation_error` envelope (same shape as "empty text on POST /api/todos"). Switched from `ValueError` to `PydanticCustomError` because a plain `ValueError` puts the exception instance into the error context, which then crashes the global `validation_error_handler`'s `exc.errors()` serialisation (not JSON-safe). `PydanticCustomError` keeps everything JSON-serialisable and doesn't require touching main.py's handler.
+2. **Vector similarity clamp to `[0, 1]`**: the `<=>` operator returns cosine distance in `[0, 2]`; `1 - distance` can technically be negative for diametrically opposed vectors. Clamped so the `SearchResult.score` field constraint (`ge=0.0, le=1.0`) always holds and a pathological embedding can't turn into a 500.
+3. **FTS candidate hydration**: the spec suggested either (a) stitching raw rows to `Todo` objects or (b) collecting IDs and re-querying via the ORM. Chose (b) as the spec's "preferred alternative" — a second `SELECT * FROM todos WHERE id IN (...)` is cheap and future-proof against new columns.
+4. **Score combined clamp**: `max(0.0, min(1.0, combined))` in `_merge` defends against float-arithmetic drift (e.g., `0.7 + 0.3` in IEEE-754 can produce `1.0000000000000002`). Pydantic would otherwise reject the value.
+5. **Extra test `test_hybrid_search_empty_result_set_returns_empty_list`** added beyond the spec's list to pin the "zero matches" happy path.
+6. **Extra integration test `test_search_openapi_schema_includes_endpoint`** verifies AC #10's OpenAPI tag requirement programmatically.
+
+**Constitutional compliance:**
+
+- No `async def`, `await`, `asyncio`, or async SDK imports anywhere in the new code. Sync route handler, sync service, synchronous SQLAlchemy session from `Depends(get_db)`.
+- Zero retries on the search path (distinct from the 5.1 background worker's 3-retry policy).
+- API key + query text never logged. WARNING log on fallback carries only exception type + `.code` + `.status` (mirrors the enriched format from 5.1's `embedding_attempt_failed`).
+- SQL is fully parameter-bound (both `:q` and the 768-dim vector via `bindparam(..., type_=Vector(768))`).
+
+**What was NOT changed:**
+
+- [backend/src/services/embedding_service.py](backend/src/services/embedding_service.py) — reused as-is. The existing `HttpOptions(timeout=15_000)` from 5.1 bounds the worst-case query-embedding call.
+- [backend/src/models/todo.py](backend/src/models/todo.py), [backend/src/schemas/todo.py](backend/src/schemas/todo.py) — untouched.
+- No new DB migrations; HNSW and GIN indexes from the initial migration are already in place.
+- [backend/src/api/todos.py](backend/src/api/todos.py) — untouched.
+- Frontend — zero changes (Story 5.3's territory).
+
+**Deferred / interactions with 5.1 CR-defer list:**
+
+- "Pending" rows still only keyword-searchable — matches spec intent (graceful degradation). No new defer added.
+- No search-path-specific HTTP timeout added (the 15s global cap is the fallback). Covered in the Out-of-scope section of this story's Dev Notes.
+- No reaper for stuck pending rows (still deferred from 5.1).
 
 ### File List
 
-_(to be filled on dev-story run)_
+**New:**
+
+- `backend/src/schemas/search.py`
+- `backend/src/services/search_service.py`
+- `backend/src/api/search.py`
+- `backend/tests/services/test_search_service.py`
+- `backend/tests/api/test_search.py`
+
+**Modified:**
+
+- `backend/src/main.py` (added `search_router` import + `include_router` line)
 
 ### Change Log
 
 | Date | Change |
 |------|--------|
 | 2026-04-20 | Story created as Epic 5.2 (second story of Epic 5 "Intelligent Search"). Scope: `GET /api/search?q=...` hybrid endpoint combining Postgres FTS (GIN/`to_tsvector('english', text)` via `websearch_to_tsquery`) and pgvector cosine-similarity (HNSW/`vector_cosine_ops`). Reuses 5.1's `generate_embedding`. Graceful degradation to FTS-only on any embedding failure. Thread-based (no async). FTS weight 0.3, vector weight 0.7; merged/sorted to top 20. |
+| 2026-04-20 | Story implemented. 5 new files (`schemas/search.py`, `services/search_service.py`, `api/search.py`, `tests/services/test_search_service.py`, `tests/api/test_search.py`) + 1 modified (`main.py` router wire-up). 19 new tests (11 service + 8 integration). 62/62 pytest, ruff clean, mypy --strict clean. Status → review. |

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.creatures import router as creatures_router
+from src.api.search import router as search_router
 from src.api.todos import router as todos_router
 from src.config import settings
 from src.exceptions import AppError
@@ -72,3 +73,4 @@ def validation_error_handler(
 
 app.include_router(todos_router)
 app.include_router(creatures_router)
+app.include_router(search_router)
