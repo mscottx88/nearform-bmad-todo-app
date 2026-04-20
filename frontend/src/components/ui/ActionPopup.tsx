@@ -88,6 +88,30 @@ export function ActionPopup({
           onPointerDown={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
+          // Wheel events over the panel normally get swallowed (panel
+          // is `pointer-events: auto`, the drei <Html> portal is a
+          // sibling of the canvas in the DOM so wheel doesn't bubble
+          // there). Forward the wheel to the canvas so OrbitControls
+          // zoom still works when the mouse is hovering the popup.
+          onWheel={(e) => {
+            const canvas = document.querySelector('canvas');
+            if (!canvas) return;
+            canvas.dispatchEvent(
+              new WheelEvent('wheel', {
+                deltaX: e.deltaX,
+                deltaY: e.deltaY,
+                deltaZ: e.deltaZ,
+                deltaMode: e.deltaMode,
+                clientX: e.clientX,
+                clientY: e.clientY,
+                ctrlKey: e.ctrlKey,
+                shiftKey: e.shiftKey,
+                altKey: e.altKey,
+                metaKey: e.metaKey,
+                bubbles: false,
+              }),
+            );
+          }}
         >
           <button
             type="button"

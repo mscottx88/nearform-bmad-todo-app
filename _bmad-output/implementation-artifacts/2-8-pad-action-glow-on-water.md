@@ -1,6 +1,6 @@
 # Story 2.8: Pad-Action Glow on Water
 
-Status: ready-for-dev
+Status: review
 
 > **Scope note:** 2.8 is a spillover polish story — not part of the original Epic 2 plan in `epics.md`. Emerged from the story 2.7 code review (2026-04-17) as a follow-up to the HDR rim/body-tint work in complete/delete/focus sequences. Michael asked "when the color intensifies during create and delete or other flashing, can the bloom effect also occur, highlighting the water nearby?" Current answer: the Bloom post-process already screen-space-blurs HDR-bright pad pixels onto the water (indiscriminate blur), but the water doesn't *respond* — no deliberate halo tied to the pad's action color. This story adds that deliberate per-pad glow source.
 
@@ -12,66 +12,79 @@ so that bright pad moments read as the pad *illuminating* the pond, not just a s
 
 ## Acceptance Criteria
 
-1. **Given** a pad enters the `completing` phase, **When** the pulse + body-tint sequence plays (0.0–2.0s), **Then** a circular glow source is rendered in the scene at the pad's X/Z position just above the water surface (`y ≈ 0.01`, below the pad's `y = 0.1`), facing up (`rotation.x = -Math.PI / 2`), additively blended, radius `GLOW_RADIUS = 1.8` (≈1.8× `PAD_RADIUS`) with a radial falloff that dies off to zero at the edge. Its emissive color is `COMPLETE_PAD_TINT` (HDR green) and its strength drives the `uFlashStrength` curve — cubic ease-in 0→`PAD_TINT_MAX = 0.6` across the full 2.0s — so Bloom picks it up as a soft green halo on the water that builds with the pulse and peaks as the pad disappears.
+> _ACs #1–#7 below were rewritten 2026-04-17 during the browser-tuning session after initial implementation shipped. The original ACs required cubic ease-in glows that started at `uStrength = 0` and snapped color on phase entry, which the user found clunky ("lily pads are not causing the water to glow", "didn't do much", "should not disappear, it should just lerp"). The revised ACs describe the actual smooth-lerp + ambient-baseline behavior that shipped. New ACs #9–#11 cover ambient resting glow, focused sustained halo, and popup wheel-forwarding that were added during the same session._
 
-2. **Given** a pad enters the `deleting` phase, **When** the sequence plays, **Then** the glow source mirrors AC #1 with `DELETE_PAD_TINT` (HDR red) as the emissive color. Same radius, same curve, same duration, only the color differs.
+1. **Given** a pad enters the `completing` phase from any prior glow state (ambient pad-color halo, or focused oscillating-white halo), **When** the 2.0s pulse + body-tint sequence plays, **Then** the glow source's color **lerps** (not snaps) toward `COMPLETE_PAD_TINT` at ~6% per frame (≈300ms to visually arrive) and its strength lerps from `AMBIENT_GLOW_STRENGTH` (0.22) up to `PAD_TINT_MAX` (0.6) across the full 2.0s on a cubic curve (`totalT³`). There must be **no frame** where the halo visibly disappears — the transition reads as a single smooth shift from the pad's resting color into the action color.
 
-3. **Given** a pad is in the `pulsing` creation phase (right after drop), **When** the 1.2s creation pulse plays, **Then** the glow source renders `CREATION_RIM_COLOR` (HDR gold) with strength driven by the same `max(0, wave) · decay` curve that drives the rim highlight — so the water glows in sync with each of the three pulse crests rather than a cubic ramp. Strength peaks at `PAD_TINT_MAX` and returns to 0 when the pulsing phase ends.
+2. **Given** a pad enters the `deleting` phase from any prior glow state, **When** the sequence plays, **Then** the glow source mirrors AC #1 with `DELETE_PAD_TINT` (HDR red) as the target color. Same 6%/frame color lerp, same `AMBIENT → PAD_TINT_MAX` cubic strength ramp, same no-disappear constraint.
 
-4. **Given** the user clicks a resting pad to focus it, **When** the 0.4s focus-flash fires on the rim, **Then** the glow source renders `FOCUS_RIM_COLOR` (HDR white) at a lower strength cap (`FOCUS_GLOW_MAX = 0.35`) driven by the same `(1 - flashT)` decay curve as the rim. White glow fades out with the flash — no trailing halo after `flashT >= 1`.
+3. **Given** a pad is in the `pulsing` creation phase (right after drop → settle), **When** the 1.2s creation pulse plays, **Then** the halo **grows from zero** and flashes between the pad's own HDR color and HDR gold (`CREATION_PAD_GLOW`) on each pulse crest. Specifically: color lerps between `padHDR × AMBIENT_GLOW_HDR_SCALE` and `CREATION_PAD_GLOW` driven by `max(0, wave) · decay`; strength is `t · AMBIENT_GLOW_STRENGTH` (linear growth) + `glow · 0.35` (crest boost). At pulse-end the formula naturally lands at `(padHDR, AMBIENT_GLOW_STRENGTH)` so the transition to resting's ambient halo is seamless (no dip, no snap).
 
-5. **Given** no flash/pulse is active on a pad (phase = `resting`/`waiting`/`materializing`/`forming`/`dropping`/`settling`/`completed`/`deleted`), **When** each frame runs, **Then** the glow source's strength is exactly 0 and it contributes nothing to the framebuffer. The underlying mesh may remain mounted (for ref stability) but must be visually absent.
+4. **Given** the user clicks a resting pad to focus it, **When** the 0.4s focus-flash fires, **Then** the click flash acts as an **additive overlay** on the sustained focused baseline (AC #10) — not a standalone write. Color lerps toward `FOCUS_PAD_GLOW` by `flashDecay`; strength lerps from the baseline up toward `FOCUS_GLOW_MAX` (0.35) by `flashDecay`. As `flashDecay → 0`, both color and strength smoothly return to the sustained focused baseline. No hand-off seam between flash and sustain.
 
-6. **Given** the `EffectComposer` Bloom pass at `luminanceThreshold = 0.2`, **When** the glow mesh emits an HDR color with strength > ~0.1, **Then** the glow mesh pixels breach the luminance threshold and get the full bloom blur treatment — producing a soft feathered halo that extends beyond the `GLOW_RADIUS = 1.8` disc onto surrounding water. No additional postprocess pass is added.
+5. **Given** the click-to-focus flash ends (`flashT >= 1`), **When** the resting branch runs on the next frame, **Then** the rim color **lerps** back to base at `COMPLETION_LERP = 0.05` (≈400ms ease) rather than snapping. The rim color transition visually matches the glow's smooth decay — no rim-snap-back clunk.
 
-7. **Given** the external-cancel recovery paths for completing/deleting (from story 2.7's patches), **When** a sequence is cancelled mid-pulse, **Then** the glow strength is snapped to 0 on the same frame the rim color / `uFlashStrength` uniforms are reset. No stuck/frozen glow halo.
+6. **Given** the `EffectComposer` Bloom pass at `luminanceThreshold = 0.2`, **When** the glow mesh emits an HDR color with effective luminance > 0.2, **Then** the glow mesh pixels get the full bloom blur treatment — producing a soft feathered halo that extends beyond the `GLOW_RADIUS = 1.8` disc onto surrounding water. The fragment shader MUST output `alpha = 1.0` (not `strength * falloff`) so Three.js `AdditiveBlending` (`src.rgb * src.alpha + dst.rgb`) contributes `color × strength × falloff` to the framebuffer — NOT `color × (strength × falloff)²`. Writing alpha to a sub-1 value double-attenuates via the blend equation and makes the halo invisible at moderate strengths.
 
-8. **Given** the full test suite runs after this change, **When** all tests finish, **Then** every existing test remains green. The `<EffectComposer>` / `<Bloom>` stubs in `PondScene.test.tsx` already render children as passthrough — the new `<GlowSource>` mesh will pass through untouched. No new timing-sensitive tests required; the glow strength is a deterministic function of the pad's existing phase/time state.
+7. **Given** the external-cancel recovery paths for completing/deleting (from story 2.7's patches), **When** a sequence is cancelled mid-pulse, **Then** the glow strength is snapped to 0 on the same frame the rim color / `uFlashStrength` uniforms are reset. Also snapped to 0 on happy-path terminal transitions (`t >= *_TOTAL → phase = 'completed'/'deleted'`) so unmounting pads leave a clean framebuffer.
+
+8. **Given** the full test suite runs after this change, **When** all tests finish, **Then** every existing test remains green (69/69). The `<EffectComposer>` / `<Bloom>` stubs in `PondScene.test.tsx` already render children as passthrough — the new `<GlowSource>` mesh passes through untouched. No new timing-sensitive tests required.
+
+9. **Given** a pad is in the `resting` phase and not focused, **When** each frame runs, **Then** the glow source emits a gentle ambient halo in the pad's own HDR-scaled color at `AMBIENT_GLOW_STRENGTH × intensity`, where `intensity` mirrors the pad body's completion/decay state (`DECAY_SATURATION` for error pads, `0.4` for completed pads, `1.0` otherwise). The HDR scale factor `AMBIENT_GLOW_HDR_SCALE = 2.6` pushes LDR hex pad colors past 1.0 so the Bloom pass picks them up. This is NOT a flash moment — it's persistent lighting that makes the pond read as "lit by the pads".
+
+10. **Given** a pad is in the `resting` phase and `focused === true` (popup open on this pad), **When** each frame runs, **Then** the glow source emits a sustained halo that oscillates between the pad's HDR color and `FOCUS_PAD_GLOW` on a ~2.5s sine cycle (`FOCUSED_OSC_PERIOD_S`). Strength is `FOCUSED_GLOW_STRENGTH` (0.22, matching ambient for seamless continuity). The oscillation reads as "alive and selected" rather than a static white flat. For a default green pad, the user sees a green↔white breathe; when the popup color-swatch lands (Story 4.1), the oscillation automatically reflects whatever color the user picks.
+
+11. **Given** the Action Popup panel has `pointer-events: auto` (to absorb clicks per story 2.7 ripple-guard), **When** the user scrolls the mouse wheel while hovering over the popup panel, **Then** an `onWheel` handler on the panel synthesizes a new `WheelEvent` with the same `deltaX/Y/Z`, `deltaMode`, `clientX/Y`, and modifier keys, and dispatches it to the canvas element. OrbitControls receives the event and handles the zoom normally. Popup-hover must NOT break wheel-zoom (the original 2.7 implementation inadvertently broke it).
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Define constants + glow-color resolver in `LilyPad.tsx` (AC: #1, #2, #3, #4)
-  - [ ] Add `GLOW_RADIUS = 1.8`, `GLOW_Y_OFFSET = 0.01` (just above water), `FOCUS_GLOW_MAX = 0.35` near the existing `PAD_TINT_MAX` block.
-  - [ ] Derive glow state (strength + color Vector3) each frame from the active phase. Single source of truth: the same `t` values already computed inside the completing/deleting/pulsing/focus branches.
+- [x] Task 1: Define constants + glow-color resolver in `LilyPad.tsx` (AC: #1, #2, #3, #4)
+  - [x] Added `GLOW_RADIUS = 1.8`, `GLOW_Y_OFFSET = -0.04` (group-local; puts halo at world y=0.01), `FOCUS_GLOW_MAX = 0.35`, `CREATION_PAD_GLOW`, `FOCUS_PAD_GLOW` near the existing `PAD_TINT_MAX` block. Note: `GLOW_Y_OFFSET` was changed from the spec's 0.01 (world-intent) to −0.04 (group-local) during implementation — the LilyPad group sits at `DROP_Y_REST = 0.05`, so local −0.04 correctly places the halo 1cm above the water plane. Comment inline explains the math.
+  - [x] Glow state derived each frame inside the active-phase branches from the existing `t` / `wave` / `decay` / `flashT` / `totalT` values (single source of truth preserved).
 
-- [ ] Task 2: Create `frontend/src/components/pond/GlowSource.tsx` (AC: #1-#6)
-  - [ ] Accept props: `strength: number` (0..1), `color: THREE.Vector3` (HDR), `radius: number`.
-  - [ ] Render a single `<mesh>` at `[0, GLOW_Y_OFFSET, 0]` with `rotation-x={-Math.PI / 2}` (normals face up — so the additive blend layers on top of water from the camera's view).
-  - [ ] Geometry: `<circleGeometry args={[radius, 48]}>` (48 segments = smooth disc).
-  - [ ] Material: custom `<shaderMaterial>` with:
-    - `uniforms`: `{ uColor: { value: Vector3 }, uStrength: { value: number } }`
-    - `vertexShader`: pass-through `vUv` (`vUv = uv;` → standard projection).
-    - `fragmentShader`: compute `float d = distance(vUv, vec2(0.5)); float falloff = 1.0 - smoothstep(0.0, 0.5, d);` then `gl_FragColor = vec4(uColor * uStrength * falloff, uStrength * falloff);`.
-    - `transparent: true`, `blending: THREE.AdditiveBlending`, `depthWrite: false`, `side: THREE.DoubleSide` (pad may be flipped relative to camera).
-  - [ ] Early-out: if `strength <= 0.001`, material opacity is naturally zero via the shader math — no CPU-side visibility toggle needed. Mesh stays mounted, renders a null contribution.
+- [x] Task 2: Create `frontend/src/components/pond/GlowSource.tsx` (AC: #1-#6)
+  - [x] Component accepts `radius` + `yOffset` props; shader uniforms (`uColor`, `uStrength`) initialized internally via `useMemo` so they allocate exactly once per mount. `forwardRef` exposes the `ShaderMaterial` to the parent for per-frame uniform mutation.
+  - [x] Geometry: `<circleGeometry args={[radius, 48]}>` rotated to face up.
+  - [x] Material: custom shader with passthrough vUv in the vertex stage and a `distance + smoothstep` radial falloff in the fragment stage. HDR color × strength × falloff composed into both rgb and alpha — alpha zeroes naturally when strength is 0.
+  - [x] `transparent: true`, `blending: AdditiveBlending`, `depthWrite: false`, `side: DoubleSide`. `renderOrder={5}` on the mesh keeps the halo painted below the pad body (renderOrder=10) regardless of JSX sibling order.
+  - [x] Implementation divergence from spec: the `strength`/`color` props were dropped in favor of internal uniforms mutated through the forwarded material ref. Simpler data flow (no prop round-trips per frame, no React re-render churn) and matches the pattern already established by `padMeshRef`/`rimRef` in LilyPad.
 
-- [ ] Task 3: Mount `<GlowSource>` inside the LilyPad group + wire per-frame strength (AC: #1-#5, #7)
-  - [ ] Add a `glowSourceRef` alongside `padMeshRef` / `rimRef`.
-  - [ ] Render `<GlowSource ref={glowSourceRef} strength={0} color={new Vector3(0,0,0)} radius={GLOW_RADIUS} />` inside the `<group ref={groupRef}>` JSX, just after the pad + rim meshes.
-  - [ ] In `useFrame`, alongside the existing `uFlashColor`/`uFlashStrength` uniform writes:
-    - **Completing branch:** `glowUniforms.uColor.value.copy(COMPLETE_PAD_TINT)`; `glowUniforms.uStrength.value = totalT * totalT * totalT * PAD_TINT_MAX` (same cubic as `uFlashStrength`).
-    - **Deleting branch:** same, with `DELETE_PAD_TINT`.
-    - **Pulsing branch:** `glowUniforms.uColor.value.copy(CREATION_RIM_COLOR as Vector3)`; `glowUniforms.uStrength.value = max(0, wave) * decay * PAD_TINT_MAX`. _Note: `CREATION_RIM_COLOR` is a `THREE.Color`; convert to `Vector3(r,g,b)` or duplicate as a `CREATION_PAD_GLOW` Vector3 for shader-uniform compatibility._
-    - **Focus flash branch (resting, inside `focusFlashStartRef !== null`):** `glowUniforms.uColor.value.copy(FOCUS_RIM_COLOR as Vector3)`; `glowUniforms.uStrength.value = flashDecay * FOCUS_GLOW_MAX` where `flashDecay = 1 - flashT`.
-    - **All other phases / branches:** `glowUniforms.uStrength.value = 0`.
+- [x] Task 3: Mount `<GlowSource>` inside the LilyPad group + wire per-frame strength (AC: #1-#5, #7)
+  - [x] Added `glowMatRef = useRef<THREE.ShaderMaterial>(null)` alongside `padMeshRef` / `rimRef`.
+  - [x] `<GlowSource ref={glowMatRef} radius={GLOW_RADIUS} yOffset={GLOW_Y_OFFSET} />` mounted at the END of the `<group ref={groupRef}>` JSX (not the start) so `container.querySelector('mesh')` in existing LilyPad tests continues to return the clickable pad mesh. Paint order is driven by `renderOrder={5}` on the material, not JSX order — no visual difference.
+  - [x] Completing branch: writes `COMPLETE_PAD_TINT` + `totalT³ · PAD_TINT_MAX` (same cubic as `uFlashStrength`).
+  - [x] Deleting branch: writes `DELETE_PAD_TINT` + `totalT³ · PAD_TINT_MAX`.
+  - [x] Pulsing branch: writes `CREATION_PAD_GLOW` + `max(0, wave) · decay · PAD_TINT_MAX` (wave-crest curve, not monotonic — halo breathes with the three pulse crests); resets strength to 0 on pulse-end before transition to resting.
+  - [x] Focus-flash branch (inside `resting`): writes `FOCUS_PAD_GLOW` + `flashDecay · FOCUS_GLOW_MAX`; zeroes strength when `flashT >= 1`.
+  - [x] All other phases / branches naturally carry the last-written value (initially 0); since phase transitions into these other phases happen through either a terminal cleanup (Task 4) or the pulsing→resting reset, strength stays 0 outside active-glow windows.
 
-- [ ] Task 4: Snap glow to 0 in external-cancel recovery (AC: #7)
-  - [ ] In both `!deleting && phase === 'deleting'` and `!completing && phase === 'completing'` recovery blocks, add `glowUniforms.uStrength.value = 0` alongside the existing `uFlashStrength`/`uFlashColor` resets.
-  - [ ] Also zero on happy-path terminal transitions (`phase → 'completed'` / `'deleted'`) mirroring the 2.7 cleanup pattern.
+- [x] Task 4: Snap glow to 0 in external-cancel recovery (AC: #7)
+  - [x] Added `glowMatRef.current.uniforms.uStrength.value = 0` to the `!deleting && phase === 'deleting'` cancel block (alongside the 2.7 `uFlashStrength` reset).
+  - [x] Same in the `!completing && phase === 'completing'` cancel block.
+  - [x] Same in the `t >= COMPLETING_TOTAL` happy-path terminal transition.
+  - [x] Same in the `t >= DELETING_TOTAL` happy-path terminal transition.
 
-- [ ] Task 5: Verify no regressions (AC: #6, #8)
-  - [ ] `npx vitest run` — 69/69 existing tests remain green. The `EffectComposer` + `Bloom` mocks in `PondScene.test.tsx` render children as passthrough, so a new `<mesh>` inside `<LilyPad>` is invisible to happy-dom.
-  - [ ] `npx tsc -b` — clean.
-  - [ ] Manual browser verification:
-    - [ ] Complete a todo — green halo on water builds across 2.0s, peaks at dissolve-end.
-    - [ ] Delete a todo — red halo, same shape.
-    - [ ] Drop a new todo — gold halo pulses in sync with three scale-pulse crests.
-    - [ ] Click a resting pad — brief white halo flashes and fades with the rim.
-    - [ ] Cancel mid-sequence (e.g., mutation rollback) — halo snaps out immediately, no stuck glow.
+- [x] Task 5: Verify no regressions (AC: #6, #8)
+  - [x] `npx vitest run` — 69/69 tests pass (14 suites, 1.89s total).
+  - [x] `npx tsc -b` — clean.
+  - [x] Manual browser verification pending by Michael — five checks to run once dev server is up: complete a todo (green halo), delete a todo (red halo), drop a new todo (gold wave-crest halo), click a resting pad (brief white halo), and cancel mid-sequence (halo snaps out).
+  - [x] During implementation: the LilyPad test "calls openPopup with todo id and pad position when clicked" initially failed because `container.querySelector('mesh')` returned GlowSource's inner mesh instead of the pad when GlowSource was the first JSX child. Resolved by moving `<GlowSource>` to the end of the group JSX — paint order is controlled by `renderOrder` on the material, not by DOM order.
 
-- [ ] Task 6: Tests (AC: all)
-  - [ ] No new vitest unit tests added. Rationale: matches 2.7's deferred approach — `useFrame` is mocked as a no-op in `LilyPad.test.tsx`, so glow strength is never driven from JSDOM's perspective. A rendered-DOM assertion would require the same clock-advancing scaffolding deferred across 2.4/2.5/2.6/2.7. Glow strength is a pure function of existing `t` values in already-tested branches.
-  - [ ] Manual browser verification is the shipping gate (same as 2.7 rim/body-tint work).
+- [x] Task 6: Tests (AC: all)
+  - [x] No new vitest unit tests added (per spec guidance; matches 2.7 deferred approach). `useFrame` is mocked as a no-op in `LilyPad.test.tsx`, so glow strength is never driven from JSDOM's perspective.
+  - [x] Glow strength is a pure function of the already-tested `t` / `wave` / `decay` / `flashT` / `totalT` values — no new logic to unit-test in isolation.
+  - [x] Manual browser verification is the shipping gate.
+
+- [x] Task 7: Browser-tuning polish session (AC: #1-#5, #9, #10, #11 — added 2026-04-17 during manual browser verification)
+  - [x] **Shader double-attenuation bug fixed.** Original fragment shader wrote `gl_FragColor = vec4(uColor * a, a)` which produced `color × (strength × falloff)²` under `AdditiveBlending` (the blend equation multiplies `src.rgb * src.alpha`). Changed to `gl_FragColor = vec4(uColor * strength * falloff, 1.0)` so the framebuffer gets a correct linear `color × strength × falloff` contribution. Inline comment in [GlowSource.tsx:22-35](frontend/src/components/pond/GlowSource.tsx#L22-L35) explains the blend math so future edits don't revert.
+  - [x] **Ambient resting glow** (AC #9). Added `AMBIENT_GLOW_STRENGTH = 0.22` and `AMBIENT_GLOW_HDR_SCALE = 2.6` constants; resting-phase branch now writes `uColor = colorVec × AMBIENT_HDR_SCALE`, `uStrength = AMBIENT × intensity` when no focus-flash is active. Intensity mirrors pad body's decay/completion state.
+  - [x] **Focused sustained halo** (AC #10). Added `FOCUSED_GLOW_STRENGTH = 0.22` and `FOCUSED_OSC_PERIOD_S = 2.5` constants; when `focused=true` in the resting branch, color lerps between pad-HDR and `FOCUS_PAD_GLOW` on a sine wave driven by `state.clock.elapsedTime`.
+  - [x] **Smooth click-flash layering** (AC #4). Removed the standalone glow-write inside the focus-flash rim branch. Replaced with an additive overlay in the unified glow block: baseline is computed first (ambient or focused), then if flash is active the color is lerped toward `FOCUS_PAD_GLOW` by `flashDecay` and strength is lerped up toward `FOCUS_GLOW_MAX` by `flashDecay`. As flashDecay → 0, both smoothly revert to baseline with no hand-off seam.
+  - [x] **Smooth rim color revert** (AC #5). On flash-end, rim color is no longer snapped via `rimMat.color.set(color)` — instead the existing `rimMat.opacity` lerp block now also lerps the color via `rimMat.color.lerp(colorVec, COMPLETION_LERP)` for a ~400ms ease that visually matches the glow's overlay decay.
+  - [x] **Smooth complete/delete color lerp** (AC #1, #2). Completing and deleting branches now call `uColor.value.lerp(TARGET_TINT, 0.06)` each frame (~300ms to arrive) instead of `.copy(TARGET_TINT)`. Strength uses `THREE.MathUtils.lerp(AMBIENT_GLOW_STRENGTH, PAD_TINT_MAX, totalT³)` so it starts at the ambient baseline instead of 0 — no disappear-reappear moment at phase entry.
+  - [x] **Creation pulse growth + green↔gold flash** (AC #3). Pulsing branch rewrote glow strength as `t · AMBIENT_GLOW_STRENGTH + glow · 0.35` (linear growth + crest boost) and color as `lerp(padHDR, CREATION_PAD_GLOW, glow)`. Halo now grows from 0 and flashes green↔gold synced to the three rim crests; lands at ambient at pulse-end for seamless handoff to resting.
+  - [x] **Popup wheel-zoom forwarding** (AC #11). Added an `onWheel` handler on [ActionPopup.tsx](frontend/src/components/ui/ActionPopup.tsx)'s `.action-popup__panel` that creates a new `WheelEvent` from the handler's event properties and dispatches it to the canvas. OrbitControls picks it up and zoom works over the popup. Fixes a pre-existing 2.7 bug where popup hover completely blocked wheel-zoom.
+  - [x] `npx vitest run` — 69/69 tests pass after every tuning iteration. `npx tsc -b` — clean.
 
 ## Dev Notes
 
@@ -188,22 +201,40 @@ Net: the HDR-color + shader-uniform plumbing is fresh from 2.7. 2.8 adds one new
 
 ### Agent Model Used
 
-_(to be filled on dev-story run)_
+Claude Opus 4.7 (1M context)
 
 ### Debug Log References
 
-_(to be filled on dev-story run)_
+- `npx vitest run` — 14 test files, 69 tests, all passing. No new tests added (per spec).
+- `npx tsc -b` — clean, no type errors.
+- Mid-implementation test failure: `LilyPad > calls openPopup with todo id and pad position when clicked` initially failed because `container.querySelector('mesh')` returned the GlowSource's inner mesh (previously the first `<mesh>` in the group). Fix: moved `<GlowSource>` to the end of the group JSX — `renderOrder={5}` on the glow material preserves the paint-below-pad behavior regardless of JSX sibling order. All 69 tests green after the move.
 
 ### Completion Notes List
 
-_(to be filled on dev-story run)_
+- **Constants (Task 1):** `GLOW_Y_OFFSET` changed from the spec's `0.01` to `-0.04` during implementation. The spec value reflected world-Y intent ("1cm above water plane"), but the LilyPad group root sits at `DROP_Y_REST = 0.05`, so local-group Y must be `0.01 - 0.05 = -0.04` to land the halo 1cm above world-Y 0. Comment inline in [LilyPad.tsx:105-110](frontend/src/components/pond/LilyPad.tsx#L105-L110) explains the math so future edits don't revert.
+- **GlowSource component (Task 2):** Simplified the API from the spec's `strength` + `color` props to internal uniforms mutated via a forwarded `ShaderMaterial` ref. Rationale: per-frame prop updates would trigger React reconciliation ~60 times per second during active glow windows; mutating uniforms through a ref keeps the fast path React-free and matches the pattern already established by `padMeshRef` / `rimRef`. Public API of the component is now `{ radius, yOffset }`; all dynamic state is ref-driven. No behavioral difference visible to the user.
+- **Mount position (Task 3):** `<GlowSource>` is mounted last in the group JSX (not first as the spec suggested) specifically to keep the pad mesh as the first `<mesh>` in the rendered DOM — existing [LilyPad.test.tsx:88](frontend/src/components/pond/LilyPad.test.tsx#L88) relies on `container.querySelector('mesh')` returning the clickable pad. Paint order is preserved via `renderOrder={5}` on the glow material versus `renderOrder={10}` on the pad.
+- **Cleanup hygiene (Task 4):** Glow strength is zeroed in all four 2.7-established cleanup points — both external-cancel recovery blocks and both happy-path terminal transitions (`t >= *_TOTAL → phase = 'completed' / 'deleted'`). Mirrors the existing `uFlashStrength` / `uFlashColor` reset pattern exactly.
+- **Creation pulse curve:** Glow uses `max(0, wave) · decay · PAD_TINT_MAX` for the pulsing phase, which produces three discrete halo crests synced to the creation scale-pulse. This matches the existing rim-glow curve — the halo "breathes" with the rim rather than ramping cubically like the complete/delete halos. Intentional shape difference per AC #3 / spec §"glow-color resolver".
+- **No backend changes, no store changes, no water-shader changes, no new npm packages.** Option B (water-shader uniform array) remains deferred per spec.
 
 ### Change Log
 
 | Date | Change |
 |------|--------|
 | 2026-04-17 | Story created as Epic 2 spillover from the 2.7 code review (Michael's bloom-on-water question). Scope locked to Option A (radial-mask quad) — Option B water-shader uniform array deferred to `deferred-work.md`. |
+| 2026-04-17 | Story 2.8 implemented. New `GlowSource.tsx` (additive HDR disc, custom shader with radial falloff) mounted inside each LilyPad group just above the water plane. LilyPad's `useFrame` drives the glow's `uColor` + `uStrength` uniforms from per-phase curves: cubic ease-in for complete (green) and delete (red), wave-crest-synced for creation pulse (gold), decaying 400ms for click-to-focus (white). Cleanup in all four 2.7-established points (two cancel-recovery blocks, two happy-path terminals). 69/69 tests green, tsc clean. Implementation divergences from spec: `GLOW_Y_OFFSET = -0.04` (group-local, not world-Y 0.01); `GlowSource` API is ref-driven rather than prop-driven; `<GlowSource>` mounted at end of group JSX (test-compatibility). All divergences documented inline. |
+| 2026-04-17 | **Browser-tuning polish session** per Michael's live feedback. 8 changes applied: (1) fixed shader double-attenuation bug (`AdditiveBlending` was squaring the contribution via `src.rgb * src.alpha`); alpha now locked at 1.0; (2) added ambient resting glow at `AMBIENT_GLOW_STRENGTH = 0.22` × `AMBIENT_GLOW_HDR_SCALE = 2.6` so every pad emits a subtle halo in its own color (new AC #9); (3) added sustained focused halo that oscillates pad-color ↔ HDR white on a 2.5s sine (new AC #10); (4) converted the click-flash glow write into an additive overlay on the baseline so the 0.4s flash smoothly yields to the sustained focused halo with no hand-off seam (revised AC #4); (5) rim color now lerps back to base via `COMPLETION_LERP` on flash-end instead of snapping (new AC #5); (6) completing/deleting branches now lerp color toward the action tint at 6%/frame and ramp strength from the ambient baseline rather than 0 — no green→disappear→red moment (revised AC #1, #2); (7) creation pulsing now grows from 0 to ambient linearly with an additive crest boost and lerps color pad-HDR↔gold per pulse crest — halo grows and flashes instead of three discrete pop-to-zero pulses (revised AC #3); (8) added `onWheel` forwarding on the popup panel so mouse-wheel zoom works while hovering the popup — fixes a pre-existing 2.7 regression (new AC #11). ACs #1–#7 rewritten to reflect shipped behavior; ACs #9–#11 added. 69/69 tests green throughout, tsc clean. |
 
 ### File List
 
-_(to be filled on dev-story run)_
+**New:**
+- `frontend/src/components/pond/GlowSource.tsx` — additive-blended circle disc with custom shader (radial falloff) and two uniforms (`uColor: Vector3`, `uStrength: float`). Forwards the `ShaderMaterial` ref to the parent.
+
+**Modified:**
+- `frontend/src/components/pond/LilyPad.tsx` — added 2.8 constants (`GLOW_RADIUS`, `GLOW_Y_OFFSET`, `FOCUS_GLOW_MAX`, `CREATION_PAD_GLOW`, `FOCUS_PAD_GLOW`, `AMBIENT_GLOW_STRENGTH`, `AMBIENT_GLOW_HDR_SCALE`, `FOCUSED_GLOW_STRENGTH`, `FOCUSED_OSC_PERIOD_S`); imported + mounted `<GlowSource>` with `glowMatRef`; wrote glow uniforms in completing/deleting/pulsing branches; unified ambient/focused/flash-overlay glow writes in the resting branch; zeroed strength in cancel-recovery and happy-path terminals; smooth rim color revert on focus-flash end.
+- `frontend/src/components/ui/ActionPopup.tsx` — added `onWheel` handler on `.action-popup__panel` that forwards wheel events to the canvas (restores OrbitControls zoom while popup is hovered — fixes a pre-existing 2.7 regression).
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 2.8 moved `ready-for-dev → in-progress → review`.
+- `_bmad-output/implementation-artifacts/2-8-pad-action-glow-on-water.md` — task checkboxes, ACs rewritten for polish session, new ACs #9–#11, Dev Agent Record, File List, Change Log, Status.
+
+**Deleted:** none.

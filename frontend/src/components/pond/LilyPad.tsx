@@ -11,6 +11,7 @@ import {
   selectTodoError,
 } from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
+import { GlowSource } from './GlowSource';
 
 // 'completed' / 'deleted' are terminal phases — the dissolve finished
 // locally and the pad is awaiting unmount. Distinct from 'completing' /
@@ -95,6 +96,42 @@ const DELETE_RIM_COLOR = new THREE.Color().setRGB(2.5, 0.3, 0.7);
 const COMPLETE_PAD_TINT = new THREE.Vector3(0.2, 2.0, 0.1);
 const DELETE_PAD_TINT = new THREE.Vector3(2.0, 0.2, 0.5);
 const PAD_TINT_MAX = 0.6;
+
+// Story 2.8: pad-action glow on water. Each pad mounts a GlowSource
+// disc just above the water plane; its shader uniforms are driven from
+// the same per-phase strength curves that feed the pad body/rim tint.
+// The existing Bloom pass at luminanceThreshold 0.2 picks these HDR
+// colors up automatically, producing a soft halo on the water surface.
+const GLOW_RADIUS = 1.8;              // 1.8x PAD_RADIUS — halo extends past the pad rim
+// Local Y inside the LilyPad group. Group root sits at DROP_Y_REST=0.05,
+// so local -0.04 puts the halo at world y=0.01 — 1cm above the water
+// plane at y=0 (avoids z-fighting with water mesh, stays below the pad
+// body at local y=0.1). During dissolve the group scales down and the
+// glow rides that scale — reads as the halo receding into the water.
+const GLOW_Y_OFFSET = -0.04;
+const FOCUS_GLOW_MAX = 0.35;          // Smaller cap for focus-flash glow — quieter than action moments
+// Ambient glow: every resting pad emits a subtle halo in its own color
+// so the pond reads as "lit by the pads" rather than "dark water with
+// bright decorations sitting on it". Strength is deliberately low so
+// the transient flash/pulse/focus moments still clearly stand out.
+// The HDR scale pushes LDR hex pad colors past 1.0 so the Bloom pass
+// at luminanceThreshold 0.2 picks them up as a gentle neon bleed.
+const AMBIENT_GLOW_STRENGTH = 0.22;
+const AMBIENT_GLOW_HDR_SCALE = 2.6;
+// Sustained halo for whichever pad currently has `focused=true` (popup
+// open). Quieter than the 0.4s click-to-focus pop (FOCUS_GLOW_MAX=0.35)
+// but brighter than the per-pad ambient, so the focused pad clearly
+// reads as "selected" without washing out its intrinsic color.
+const FOCUSED_GLOW_STRENGTH = 0.22;
+// Focused-pad halo breathes between the pad's own HDR color and HDR
+// white on a sine wave. Period is long enough to read as "alive" but
+// slow enough not to feel frantic — ~2.5s per cycle.
+const FOCUSED_OSC_PERIOD_S = 2.5;
+// Vector3-typed mirrors of the THREE.Color creation/focus HDR rim targets,
+// so the GlowSource shader uniform (vec3) can consume them via .copy()
+// without per-frame object allocation.
+const CREATION_PAD_GLOW = new THREE.Vector3(2.5, 1.8, 0.2);
+const FOCUS_PAD_GLOW = new THREE.Vector3(3.0, 3.0, 3.0);
 
 // Creation rim target — HDR neon yellow matching the complete/delete
 // treatment so all three pulse-rim highlights share the same brightness
@@ -311,6 +348,9 @@ export function LilyPad({
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
+  // Story 2.8: ref to the GlowSource shader material. useFrame writes
+  // uColor + uStrength uniforms each frame alongside the pad/rim updates.
+  const glowMatRef = useRef<THREE.ShaderMaterial>(null);
   const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
   // Initial phase — in priority order:
   //   1. Recently-created (isRecent) → 'forming' (no staggering — the user
@@ -554,6 +594,11 @@ export function LilyPad({
         if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
         if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
       }
+      // Story 2.8: snap water glow to zero alongside the body-tint
+      // reset so the halo doesn't linger after a cancelled sequence.
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uStrength.value = 0;
+      }
     }
 
     // Transition into the completion sequence. Same store-anchor pattern as
@@ -597,6 +642,9 @@ export function LilyPad({
         if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
         if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
       }
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uStrength.value = 0;
+      }
     }
 
     const phase = phaseRef.current;
@@ -623,6 +671,10 @@ export function LilyPad({
           const padMat = padMeshRef.current.material as THREE.ShaderMaterial;
           if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
           if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
+        }
+        // Story 2.8: same hygiene on the water glow uniform.
+        if (glowMatRef.current) {
+          glowMatRef.current.uniforms.uStrength.value = 0;
         }
         const store = usePondStore.getState();
         store.finishCompletion(todo.id);
@@ -676,6 +728,25 @@ export function LilyPad({
         mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
       }
 
+      // Story 2.8: water glow tracks the same cubic ease-in — additive
+      // HDR halo on the water surface that builds with the pulse and
+      // peaks as the pad disappears. Color LERPS (never snaps) from
+      // whatever it was on the previous frame (ambient pad-color, or
+      // the sustained focused halo if the user just clicked Complete)
+      // toward COMPLETE_PAD_TINT at ~6% per frame — no visible
+      // green→disappear→red discontinuity. Strength ramps from the
+      // AMBIENT baseline up to PAD_TINT_MAX so there's also no dip at
+      // t=0 (totalT³ starts at 0 but we lerp between ambient and peak).
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uColor.value.lerp(COMPLETE_PAD_TINT, 0.06);
+        const totalT = Math.min(t / COMPLETING_TOTAL, 1);
+        glowMatRef.current.uniforms.uStrength.value = THREE.MathUtils.lerp(
+          AMBIENT_GLOW_STRENGTH,
+          PAD_TINT_MAX,
+          totalT * totalT * totalT,
+        );
+      }
+
       // Ripple: fire exactly once at the dissolve start.
       if (
         !completingRippleFired.current &&
@@ -726,6 +797,9 @@ export function LilyPad({
           if (padMat.uniforms?.uFlashStrength) padMat.uniforms.uFlashStrength.value = 0;
           if (padMat.uniforms?.uFlashColor) padMat.uniforms.uFlashColor.value.set(0, 0, 0);
         }
+        if (glowMatRef.current) {
+          glowMatRef.current.uniforms.uStrength.value = 0;
+        }
         const store = usePondStore.getState();
         store.finishDeletion(todo.id);
         store.finishCompletion(todo.id);
@@ -761,6 +835,21 @@ export function LilyPad({
         mat.uniforms.uFlashColor.value.copy(DELETE_PAD_TINT);
         const totalT = Math.min(t / DELETING_TOTAL, 1);
         mat.uniforms.uFlashStrength.value = totalT * totalT * totalT * PAD_TINT_MAX;
+      }
+
+      // Story 2.8: water glow mirrors the body tint — DELETE_PAD_TINT,
+      // same cubic-eased strength ramp from the ambient baseline. Color
+      // LERPS from prior value (green ambient, or focused white) toward
+      // DELETE_PAD_TINT rather than snapping — no green→disappear→red
+      // seam at the start of the delete sequence.
+      if (glowMatRef.current) {
+        glowMatRef.current.uniforms.uColor.value.lerp(DELETE_PAD_TINT, 0.06);
+        const totalT = Math.min(t / DELETING_TOTAL, 1);
+        glowMatRef.current.uniforms.uStrength.value = THREE.MathUtils.lerp(
+          AMBIENT_GLOW_STRENGTH,
+          PAD_TINT_MAX,
+          totalT * totalT * totalT,
+        );
       }
 
       // Ripple: fire exactly once at the dissolve start.
@@ -859,12 +948,16 @@ export function LilyPad({
             const flashDecay = 1 - flashT;
             rimMat.color.set(color).lerp(FOCUS_RIM_COLOR, flashDecay);
             rimMat.opacity = 0.4 + flashDecay * 0.6;
-            // Skip the normal decay-opacity lerp while the flash drives
-            // the rim.
+            // Glow is NOT written here — it's handled in the unified
+            // glow block below, where the click pop is layered on top
+            // of the sustained focused/ambient baseline so there's no
+            // hand-off seam when the 0.4s flash finishes.
           } else {
-            // Flash ended: snap color back to base and release the ref.
-            // Normal lerp takes over on the next frame.
-            rimMat.color.set(color);
+            // Flash ended: release the ref so the glow block below
+            // drops the overlay and lets the baseline come through.
+            // Rim color is lerped by the `focusFlashStartRef.current === null`
+            // block below via COMPLETION_LERP rather than snapped, so
+            // the rim doesn't pop back abruptly.
             focusFlashStartRef.current = null;
           }
         }
@@ -876,7 +969,73 @@ export function LilyPad({
             targetRimOpacity,
             COMPLETION_LERP,
           );
+          // Smooth the rim color back to base instead of snapping on
+          // flash-end. COMPLETION_LERP (0.05) gives a ~400ms ease that
+          // visually blends with the glow block's overlay decay above.
+          const currentRimColor = rimMat.color;
+          currentRimColor.lerp(colorVec, COMPLETION_LERP);
         }
+      }
+
+      // Story 2.8 follow-up: unified glow write.
+      //
+      //   Baseline (always written):
+      //     `focused === true` → sustained halo oscillating between the
+      //       pad's HDR color and HDR white on a ~2.5s sine cycle at
+      //       FOCUSED_GLOW_STRENGTH. Reads as "alive and selected".
+      //     otherwise → pad's own color at AMBIENT_GLOW_STRENGTH, scaled
+      //       by completion/decay intensity.
+      //
+      //   Overlay (layered on top when focus just landed):
+      //     The 0.4s click-to-focus flash pulls color toward pure white
+      //     and boosts strength toward FOCUS_GLOW_MAX, proportional to
+      //     `flashDecay`. As the flash decays, the overlay smoothly
+      //     yields to the baseline — no hand-off seam at flash-end.
+      if (glowMatRef.current) {
+        const uColor = glowMatRef.current.uniforms.uColor.value;
+        let strength: number;
+
+        if (focused) {
+          const osc =
+            0.5 +
+            0.5 *
+              Math.sin((state.clock.elapsedTime * 2 * Math.PI) / FOCUSED_OSC_PERIOD_S);
+          uColor.set(
+            colorVec.r * AMBIENT_GLOW_HDR_SCALE,
+            colorVec.g * AMBIENT_GLOW_HDR_SCALE,
+            colorVec.b * AMBIENT_GLOW_HDR_SCALE,
+          );
+          uColor.lerp(FOCUS_PAD_GLOW, osc);
+          strength = FOCUSED_GLOW_STRENGTH;
+        } else {
+          const intensity = errorEntry
+            ? DECAY_SATURATION
+            : todo.completed
+            ? 0.4
+            : 1.0;
+          uColor.set(
+            colorVec.r * AMBIENT_GLOW_HDR_SCALE,
+            colorVec.g * AMBIENT_GLOW_HDR_SCALE,
+            colorVec.b * AMBIENT_GLOW_HDR_SCALE,
+          );
+          strength = AMBIENT_GLOW_STRENGTH * intensity;
+        }
+
+        // Layer the click-to-focus flash on top of the baseline when
+        // it's active. The flash ref is cleared in the rim block above
+        // once flashT >= 1, so this overlay naturally disappears.
+        if (focusFlashStartRef.current !== null) {
+          const flashT =
+            (state.clock.elapsedTime - focusFlashStartRef.current) /
+            FOCUS_FLASH_DURATION;
+          if (flashT < 1) {
+            const flashDecay = 1 - flashT;
+            uColor.lerp(FOCUS_PAD_GLOW, flashDecay);
+            strength = THREE.MathUtils.lerp(strength, FOCUS_GLOW_MAX, flashDecay);
+          }
+        }
+
+        glowMatRef.current.uniforms.uStrength.value = strength;
       }
       return;
     }
@@ -951,11 +1110,33 @@ export function LilyPad({
       // Scale pulse
       group.scale.setScalar(1.0 + wave * 0.12 * decay);
       // Rim: fade-blink between yellow glow and normal color
+      const glow = Math.max(0, wave) * decay;
       if (rimRef.current) {
         const mat = rimRef.current.material as THREE.MeshBasicMaterial;
-        const glow = Math.max(0, wave) * decay;
         mat.color.set(color).lerp(CREATION_RIM_COLOR, glow);
         mat.opacity = 0.4 + glow * 0.6;
+      }
+      // Story 2.8: water glow during creation pulse —
+      //   Color flashes green↔gold synced to the wave (gold at crests,
+      //     back toward the pad's own HDR color at troughs).
+      //   Strength grows linearly from 0 to AMBIENT_GLOW_STRENGTH
+      //     across the 1.2s pulse (the "halo growing in" feel) with an
+      //     additive crest boost layered on top so each pulse reads as
+      //     a burst rather than a monotonic ramp.
+      //   At pulse end, strength naturally equals AMBIENT and color is
+      //     at pad HDR — seamless handoff to the resting-branch ambient
+      //     write below.
+      if (glowMatRef.current) {
+        const uColor = glowMatRef.current.uniforms.uColor.value;
+        uColor.set(
+          colorVec.r * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.g * AMBIENT_GLOW_HDR_SCALE,
+          colorVec.b * AMBIENT_GLOW_HDR_SCALE,
+        );
+        uColor.lerp(CREATION_PAD_GLOW, glow);
+        const baseGrowth = t * AMBIENT_GLOW_STRENGTH;
+        const crestBoost = glow * 0.35;
+        glowMatRef.current.uniforms.uStrength.value = baseGrowth + crestBoost;
       }
       if (t >= 1) {
         group.scale.setScalar(1);
@@ -964,6 +1145,9 @@ export function LilyPad({
           mat.color.set(color);
           mat.opacity = 0.4;
         }
+        // No glow zero-out — the pulse formula above already lands at
+        // strength=AMBIENT_GLOW_STRENGTH and color=pad HDR, matching
+        // exactly what the resting branch will write on the next frame.
         group.position.set(posX, DROP_Y_REST, posZ);
         restStartTime.current = 0;
         phaseRef.current = 'resting';
@@ -1044,6 +1228,13 @@ export function LilyPad({
           duration={COMPLETING_EMERGE_END - COMPLETING_EMERGE_START}
         />
       )}
+      {/* Story 2.8: additive HDR halo on the water below the pad. Always
+          mounted (uniforms default to strength=0 → null contribution);
+          useFrame branches above write per-phase color + strength.
+          Rendered last in JSX so `querySelector('mesh')` in existing
+          tests still returns the clickable pad mesh — renderOrder={5}
+          on the material enforces paint-below-pad regardless of JSX order. */}
+      <GlowSource ref={glowMatRef} radius={GLOW_RADIUS} yOffset={GLOW_Y_OFFSET} />
     </group>
   );
 }
