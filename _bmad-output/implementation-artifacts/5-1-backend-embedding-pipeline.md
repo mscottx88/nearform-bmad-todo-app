@@ -1,6 +1,6 @@
 # Story 5.1: Backend Embedding Pipeline
 
-Status: review
+Status: done
 
 > **Scope note:** First story of Epic 5 (Intelligent Search). The database schema (`embedding VECTOR(768)`, `embedding_status` enum-as-string, HNSW index) already landed in the initial migration at [backend/migrations/versions/7af34c6df37c_initial_schema.py:40-52](backend/migrations/versions/7af34c6df37c_initial_schema.py#L40-L52) during Epic 1. What's missing is the *pipeline* that actually populates those columns. This story adds the Google API integration, the thread-based worker, and the POST /api/todos hook that enqueues embedding generation without blocking the response.
 
