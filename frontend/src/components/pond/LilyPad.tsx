@@ -451,7 +451,14 @@ export function LilyPad({
   // shader uniform lerps) reads from this, so preview and commit flow
   // through the same pipeline — no drift between "what's previewed" and
   // "what the pad renders."
-  const color = previewColor ?? todo.color ?? '#00ff88';
+  //
+  // Uses `||` rather than `??` so an empty-string `todo.color` (legacy
+  // backend data, explicit blank update) falls through to the default
+  // `#00ff88` just like the pre-4.1 code did. Valid hexes like
+  // `#000000` remain truthy, so `||` is safe for every real palette
+  // value. ActionPopup's `committedColor={todo.color || '#00ff88'}`
+  // uses the same operator for consistency.
+  const color = previewColor || todo.color || '#00ff88';
   const colorVec = useMemo(() => new THREE.Color(color), [color]);
 
   // Story 4.1: sync the pad shader's `uColor` uniform on every color
@@ -470,8 +477,23 @@ export function LilyPad({
     if (!mesh) return;
     const mat = mesh.material as THREE.ShaderMaterial | undefined;
     if (!mat?.uniforms?.uColor) return;
-    mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
-  }, [colorVec]);
+    // Story 4.1 CR-patch: apply the same `intensity` dimming the
+    // resting-branch lerp uses (completed → 0.4, errorEntry →
+    // DECAY_SATURATION, else 1.0). Without this, the snap writes at
+    // full brightness and the per-frame lerp then pulls back to
+    // `colorVec × intensity` over ~400ms — visible as a pulse-flash
+    // on every hover/unhover of a completed or errored pad.
+    const intensity = errorEntry
+      ? DECAY_SATURATION
+      : todo.completed
+      ? 0.4
+      : 1.0;
+    mat.uniforms.uColor.value.set(
+      colorVec.r * intensity,
+      colorVec.g * intensity,
+      colorVec.b * intensity,
+    );
+  }, [colorVec, todo.completed, errorEntry]);
 
   // Sync target Y to the latest completion state via an effect so we don't
   // mutate a ref during render (react-hooks rule).
@@ -489,7 +511,15 @@ export function LilyPad({
   useEffect(() => {
     const id = todo.id;
     return () => {
-      usePondStore.getState().clearTodoError(id);
+      const store = usePondStore.getState();
+      store.clearTodoError(id);
+      // Story 4.1 CR-patch: belt-and-suspenders preview cleanup for
+      // ANY unmount path (Complete/Delete handlers already clear it
+      // explicitly; this catches paths like a backend refetch dropping
+      // the todo while its popup happens to be closed). Without this,
+      // the `colorPreviews` Map would accumulate stale entries keyed
+      // to pads that no longer exist.
+      store.setColorPreview(id, null);
     };
   }, [todo.id]);
 

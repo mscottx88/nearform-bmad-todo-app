@@ -116,6 +116,10 @@ export function PondScene() {
     if (store.completingTodos.has(popupTodo.id) || store.deletingTodos.has(popupTodo.id)) return;
     const { creatureType, rarity } = completeTodo(popupTodo.id);
     store.startCompletion(popupTodo, creatureType, rarity);
+    // Story 4.1 CR-patch: clear any in-flight hover preview before the
+    // popup unmounts — otherwise the completing dissolve plays in the
+    // previewed hex instead of todo.color.
+    store.setColorPreview(popupTodo.id, null);
     store.closePopup();
   };
 
@@ -128,6 +132,9 @@ export function PondScene() {
     if (store.deletingTodos.has(popupTodo.id) || store.completingTodos.has(popupTodo.id)) return;
     deleteTodo(popupTodo.id);
     store.startDeletion(popupTodo);
+    // Story 4.1 CR-patch: mirror the complete path — clear the hover
+    // preview so the deleting dissolve plays in the committed color.
+    store.setColorPreview(popupTodo.id, null);
     store.closePopup();
   };
 

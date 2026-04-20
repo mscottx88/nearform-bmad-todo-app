@@ -56,6 +56,12 @@
 - `uDropCenter` ripple-uniform collision in `WaterSurface.tsx` — two rapid pad actions share a single ripple slot; story 2.5 aggravates frequency (both Complete and Delete fire through the popup) but the single-slot limit dates from story 1.2. Consider a short ripple queue or multiple uniform slots
 - Camera focus mid-lerp cut-off — when the user clicks Delete before `PondCamera`'s focus-zoom lerp completes (before `ARRIVE_THRESHOLD=0.1`), `closePopup()` nulls `cameraFocus` and the camera stops at a random intermediate position. Pre-existing consequence of the spec's camera-restore drop in 2.3/2.4/2.5 — accepted, but worth re-visiting if UX complains
 
+## Deferred from: code review of story 4-1-popup-color-swatch-neon-selector (2026-04-20)
+
+- `onCommitColor` / `onPreviewColor` inline arrows in `PondScene.tsx` → new identity each PondScene render → ActionPopup's `useEffect([previewColor, onPreviewColor])` re-fires on every ambient store update while the popup is open. Store's no-op guard prevents cascading re-renders but the effect firing pointlessly is wasteful. Fix: `useCallback` the arrows in PondScene, OR strip `onPreviewColor` from the effect's deps (capture via ref). (PondScene.tsx:171-183, ActionPopup.tsx:77-79)
+- `setColorPreview`'s strict-equality no-op guard is case-sensitive (`current.get(todoId) === color`). All palette hexes are lowercased at module scope, so this can't fire today — logged for future robustness if external callers pass uppercase hex. (usePondStore.ts:297)
+- `aria-pressed` / "current" ring compares ONLY to `committedColor`, not to `previewColor ?? committedColor`. While hovering swatch A the pad lerps toward A but A is NOT ringed. Reasonable either way ("ring = your saved choice"); revisit if accessibility feedback surfaces. (PopupColorSwatch.tsx:73)
+
 ## Deferred from: code review of story 2-10-lily-pads-float-on-water (2026-04-20)
 
 - Pad-tilt gradient is evaluated outside the visible pond edge at extreme `posX`/`posZ`. `sampleElevation` has no bounds — samples at `(posX ± 0.35, posZ ± 0.35)` return valid elevation even if the fragment shader's `edgeFade` has faded the water to black at that point. Pads within `TILT_DELTA` of the 20-unit pond edge tilt toward invisible "phantom water." Fix would duplicate the fragment-shader fade in the sampler. (waterElevation.ts sampling, LilyPad.tsx resting tilt block)

@@ -48,6 +48,9 @@ vi.mock('../../stores/usePondStore', () => ({
       // prevent Map-entry leaks. The mock must expose it so the cleanup
       // effect doesn't throw "not a function" during test teardown.
       clearTodoError: vi.fn(),
+      // Story 4.1 CR-patch: LilyPad's unmount cleanup also clears any
+      // lingering color preview. Mirror the pattern above.
+      setColorPreview: vi.fn(),
     }),
   }),
   selectCompleting: () => () => undefined,

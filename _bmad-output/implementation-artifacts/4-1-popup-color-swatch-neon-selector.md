@@ -1,6 +1,6 @@
 # Story 4.1: Popup Color Swatch — Neon Selector
 
-Status: review
+Status: done
 
 > **Replaces** the prior "Color Chameleon & Neon Picker" story from the earlier Epic 4 plan. The chameleon creature and ring-of-sprites picker are removed; color assignment is now an inline sub-panel of the `ActionPopup` (shipped in Story 2.3). `ColorChameleon.tsx` / `ColorPicker.tsx` never landed in this codebase, so there is no removal work — clean slate.
 
@@ -282,3 +282,52 @@ claude-opus-4-7 (1M context) — BMad dev-story skill, same session that landed 
 | Date | Change |
 |------|--------|
 | 2026-04-20 | All 10 tasks implemented; 101/101 tests green; `tsc -b` clean; story moved ready-for-dev → in-progress → review in a single session. Palette extended from 5 to 12 hues in rainbow order (user feedback during dev). Current-color marker added (user feedback during dev).|
+
+### Review Findings (code review session 2026-04-20)
+
+Adversarial review of commit `43cbc4f`. **Acceptance Auditor: 0 violations / 0 deviations / 1 "soft missing" (AC #2 ~100ms hover lerp — spec Dev Notes explicitly concede the instant-snap + resting-branch smoothing approach) / 1 "soft contradiction" (Task 2's wording said `display: none`; implementation uses conditional render, which is functionally equivalent).** Blind Hunter + Edge Case Hunter surfaced 6 real defects + many false positives that I verified independently.
+
+- [x] [Review][Patch] **AC #4 violated at runtime: Escape closes the WHOLE popup, not just the sub-panel.**
+  - **Root cause:** [PopupColorSwatch.tsx:40-51](frontend/src/components/ui/PopupColorSwatch.tsx#L40-L51) adds a window-scope `keydown` listener. [useClosePopupOnEscape.ts:4-26](frontend/src/hooks/useClosePopupOnEscape.ts#L4-L26) is mounted at [App.tsx:31](frontend/src/App.tsx#L31) and ALSO listens window-scope for Escape. On a single Escape keypress BOTH handlers fire — App's `closePopup()` unmounts ActionPopup (and with it the swatch sub-panel) AND our `onCollapse` callback tries to set state on the unmounting component.
+  - **Why the test passed:** `ActionPopup.test.tsx` renders the popup in isolation without `useClosePopupOnEscape` mounted, so the race never surfaces in tests.
+  - **Fix:** mount PopupColorSwatch's listener in the CAPTURE phase (`{ capture: true }`) and call `e.stopImmediatePropagation()` inside the handler. Capture-phase listeners fire before bubble-phase listeners on the same element, so our handler runs first and suppresses the App-level one — sub-panel collapses, popup stays open.
+
+- [x] [Review][Patch] **Preview leak on pad completion/deletion — the dissolve sequence plays in the previewed color.**
+  - **Trigger:** Open popup → "Set Color" → hover a swatch (preview set in store) → click Complete OR Delete on the same popup.
+  - **Location:** [ActionPopup.tsx:209-219](frontend/src/components/ui/ActionPopup.tsx#L209-L219), [PondScene.tsx:109-132](frontend/src/components/pond/PondScene.tsx#L109-L132)
+  - **What happens:** `handleComplete`/`handleDelete` call `closePopup()`; ActionPopup unmounts and PopupColorSwatch unmounts with it. React unmount does NOT synthesize a `mouseLeave` on the hovered swatch, and neither handler clears `colorPreviews.get(id)`. The pad then enters completing/deleting with `color = previewColor ?? todo.color` = previewed hex; the rim writes at [LilyPad.tsx:660, 736, 833](frontend/src/components/pond/LilyPad.tsx#L660) and the `useEffect([colorVec])` at [:468-474](frontend/src/components/pond/LilyPad.tsx#L468) all bake the preview into the dissolve. After unmount the store Map entry persists for the rest of the session.
+  - **Fix (three parts for defense-in-depth):**
+    1. `ActionPopup.tsx` — add an effect gated on `swatchOpen` going false that clears `previewColor` local state (handles toggle-close paths).
+    2. `PondScene.tsx` — `handleComplete` / `handleDelete` call `setColorPreview(id, null)` before `closePopup()` (handles Complete/Delete paths).
+    3. `LilyPad.tsx` — unmount cleanup clears `colorPreviews.get(todo.id)` (belt-and-suspenders for any path that skips 1–2).
+
+- [x] [Review][Patch] **Empty-string color regression: `''` falls through `??` but was handled by the pre-4.1 `||` chain.**
+  - **Location:** [LilyPad.tsx:454](frontend/src/components/pond/LilyPad.tsx#L454)
+  - **What happens:** `const color = previewColor ?? todo.color ?? '#00ff88'` with `todo.color === ''` evaluates to `''` (empty string is not nullish). `new THREE.Color('')` logs a warning and falls back to THREE's default. Pre-4.1 code used `const color = todo.color || '#00ff88'` — empty string was falsy and fell through to the default. Also: [ActionPopup.tsx:211](frontend/src/components/ui/ActionPopup.tsx#L211) uses `todo.color || '#00ff88'` (empty-safe) — the swatch grid would mark `neon lily` as "current" while the pad renders THREE-default white. Inconsistent.
+  - **Fix:** change `??` to `||` in LilyPad's fallback chain. `||` is safe for valid hexes (`#000000` is truthy) and handles both null/undefined AND empty-string.
+
+- [x] [Review][Patch] **Hover preview on a `completed` or `errorEntry` pad flashes at FULL brightness for ~400ms before dimming to the intensity-scaled target.**
+  - **Location:** [LilyPad.tsx:468-474](frontend/src/components/pond/LilyPad.tsx#L468-L474)
+  - **What happens:** The new `useEffect([colorVec])` snaps `uColor.value.set(colorVec.r, .g, .b)` at full brightness regardless of `todo.completed` or `errorEntry`. The resting-frame lerp then pulls `uColor` toward `colorVec * intensity` (intensity = 0.4 for completed, `DECAY_SATURATION` for error) over `COMPLETION_LERP = 0.05`/frame ≈ 400ms. User sees "pulsing flash" on every hover/unhover of a completed or errored pad.
+  - **Fix:** mirror the resting branch's intensity calculation inside the effect and apply it to the snap write.
+
+- [x] [Review][Patch] **Keyboard-activation test uses `fireEvent.click` — doesn't actually test Enter/Space keydown.**
+  - **Location:** [PopupColorSwatch.test.tsx:42-58](frontend/src/components/ui/PopupColorSwatch.test.tsx#L42-L58)
+  - **What happens:** The test name claims "Enter/Space on a focused swatch fires onCommit" but the body uses `fireEvent.click(swatch)`. happy-dom does NOT synthesize `click` from a raw `keyDown('Enter')` the way a real browser does for focused `<button>` elements — so if Enter keyboard activation actually broke (e.g. a future `e.preventDefault()` on `keydown`), this test would still pass.
+  - **Fix:** replace with `fireEvent.keyDown(swatch, { key: 'Enter' })` OR use `@testing-library/user-event`'s `keyboard('{Enter}')` which simulates the full browser chain.
+
+- [x] [Review][Defer] `onCommitColor` / `onPreviewColor` are inline arrows in `PondScene.tsx` — new identity on every PondScene render. ActionPopup's `useEffect([previewColor, onPreviewColor])` depends on `onPreviewColor`, so it re-fires on every ambient PondScene store update while the popup is open. The store's `setColorPreview` has a no-op guard so there's no cascading re-render, but the effect firing pointlessly is wasteful. Fix: `useCallback` the arrows in PondScene, OR strip `onPreviewColor` from the effect's deps (capture it in a ref). Not a functional bug — deferred.
+
+- [x] [Review][Defer] `setColorPreview`'s strict-equality no-op guard in [usePondStore.ts:297](frontend/src/stores/usePondStore.ts#L297) is case-sensitive (`current.get(todoId) === color`). `#00FF88` vs `#00ff88` would miss the guard and write a new Map. Today all swatch hexes are lowercased at module scope so this can't fire; logged for future robustness if external callers pass uppercase hex.
+
+- [x] [Review][Defer] `aria-pressed` / "current" ring compares ONLY to `committedColor`, not to `previewColor ?? committedColor`. While hovering swatch A, the pad visibly lerps toward A, but A is NOT ringed. Could be argued either way — "ring = your saved choice" is a reasonable UX — but `aria-pressed` is then out of step with visual state. Left as-is; revisit if accessibility feedback surfaces.
+
+**Summary:** 0 decision-needed, 5 patches, 3 defers, and the following dismissed as noise after verification:
+- "Swatches two near-identical greens" — `#39ff14` (lime, HSL 112°) and `#00ff88` (mint, 152°) are visually distinct; the `neon lily` name is chosen specifically to aid recognition of the pond's default.
+- "Commit flow color flicker" — the preview-leak-on-commit is actually aligned with AC #5's optimistic-UI intent (pad stays at user-picked color during PATCH; decay visual via 2.6 plumbing signals failure).
+- "Mid-dissolve uColor snap" — resolved transitively by the preview-cleanup patches above (the second patch above).
+- "positionY as worldZ naming" — pre-existing convention across the codebase (`onDropComplete`, every `triggerRipple` caller), not introduced by 4.1.
+- "`useEffect([colorVec])` case-sensitive colorVec churn" — the `useMemo` depends on the `color` STRING, so case variants produce churn but no visible bug; covered by deferred case-insensitive guard.
+- "Optional chain masks future regression" — defensive coding; logged if tests for this regression matter later.
+- Acceptance Auditor's "missing AC #2 ~100ms lerp" — spec's own Dev Notes at line 137 concede the instant-snap + resting-branch smoothing approach.
+- Acceptance Auditor's "Task 2 `display: none` wording" — functionally equivalent to conditional render.

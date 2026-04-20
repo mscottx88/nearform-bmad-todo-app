@@ -78,6 +78,19 @@ export function ActionPopup({
     onPreviewColor?.(previewColor);
   }, [previewColor, onPreviewColor]);
 
+  // Story 4.1 CR-patch: whenever the sub-panel closes (via toggle,
+  // Escape, or commit), clear any lingering hover preview in local
+  // state. The preview-notify effect above then writes null into
+  // the store so the pad reverts to its committed color. Without
+  // this, a keyboard- or touch-driven close path (where the mouse
+  // never fires a `mouseLeave` event on the swatch) would leave
+  // the store preview entry stuck on the last-hovered hex.
+  useEffect(() => {
+    if (!swatchOpen && previewColor !== null) {
+      setPreviewColor(null);
+    }
+  }, [swatchOpen, previewColor]);
+
   // When the sub-panel collapses (Escape, commit, or second click on
   // Set Color), drop any in-flight hover preview so LilyPad reverts
   // to the committed color within one frame (AC #4).

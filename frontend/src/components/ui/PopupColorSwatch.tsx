@@ -53,18 +53,23 @@ export function PopupColorSwatch({
   onCollapse,
 }: PopupColorSwatchProps) {
   const committedLower = committedColor.toLowerCase();
-  // Escape dismisses the sub-panel (AC #4, AC #8). Scoped to the
-  // document while the sub-panel is mounted; the cleanup removes
-  // the listener on unmount so a closed panel doesn't intercept
-  // unrelated Escapes.
+  // Escape dismisses the sub-panel (AC #4, AC #8). Mounted in the
+  // CAPTURE phase with `stopImmediatePropagation` because the app-
+  // level `useClosePopupOnEscape` also listens window-scope for
+  // Escape and would otherwise close the whole popup on the same
+  // keypress. Capture-phase listeners fire before bubble-phase ones
+  // on the same target, so ours runs first and suppresses the
+  // App-level handler — sub-panel collapses, popup stays open.
+  // Cleanup removes the listener on unmount.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCollapse();
-      }
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      onCollapse();
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, { capture: true });
+    return () =>
+      window.removeEventListener('keydown', handler, { capture: true });
   }, [onCollapse]);
 
   return (

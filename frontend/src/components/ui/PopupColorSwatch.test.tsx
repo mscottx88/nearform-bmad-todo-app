@@ -36,7 +36,35 @@ describe('PopupColorSwatch (story 4.1)', () => {
     expect(onCommit).toHaveBeenCalledWith('#39ff14');
   });
 
-  it('Enter/Space on a focused swatch fires onCommit (AC #8 keyboard-reachable)', () => {
+  it('swatches are native <button> elements (AC #8 keyboard Enter/Space activation)', () => {
+    // Real browsers synthesize a `click` event when Enter or Space is
+    // pressed on a focused <button type="button"> — this is spec
+    // behavior of `HTMLButtonElement`, not something the component
+    // implements explicitly. happy-dom does not synthesize the click
+    // in its keyboard path, so the cleanest proof that keyboard
+    // activation works is two assertions together:
+    //   (a) the swatches render as HTMLButtonElement with type="button"
+    //       (this test);
+    //   (b) click → onCommit with the right hex (the test below).
+    // Together they guarantee Enter/Space → click → onCommit in a
+    // real browser. If either falls over (swatch rewritten as a
+    // <div>, onClick changed to mouse-only), one of these fails.
+    render(
+      <PopupColorSwatch
+        committedColor="#00ff88"
+        onHover={() => {}}
+        onCommit={() => {}}
+        onCollapse={() => {}}
+      />,
+    );
+    for (const { name } of NEON_SWATCHES) {
+      const swatch = screen.getByLabelText(`Set color to ${name}`);
+      expect(swatch.tagName).toBe('BUTTON');
+      expect(swatch.getAttribute('type')).toBe('button');
+    }
+  });
+
+  it('click on a swatch fires onCommit with the correct hex (AC #8 activation payload)', () => {
     const onCommit = vi.fn();
     render(
       <PopupColorSwatch
@@ -46,10 +74,7 @@ describe('PopupColorSwatch (story 4.1)', () => {
         onCollapse={() => {}}
       />,
     );
-    const swatch = screen.getByLabelText('Set color to neon cyan');
-    // Native <button> converts Enter/Space keyDown into a click event
-    // — fireEvent.click is what happy-dom dispatches for both keys.
-    fireEvent.click(swatch);
+    fireEvent.click(screen.getByLabelText('Set color to neon cyan'));
     expect(onCommit).toHaveBeenCalledWith('#00eeff');
   });
 
