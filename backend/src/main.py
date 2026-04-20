@@ -27,6 +27,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "GOOGLE_API_KEY not configured — embedding generation will be "
             "disabled; todos will save with embedding_status='pending'",
         )
+    if not settings.embedding_model.strip():
+        # Empty/whitespace-only model name → every embedding call 400s at
+        # Google and burns 3 retries per todo before operators notice. Fail
+        # fast instead: a blank model name is always a misconfiguration.
+        raise RuntimeError(
+            "EMBEDDING_MODEL is empty or whitespace — refusing to start; "
+            "set a valid model name (e.g. 'gemini-embedding-001') in the environment",
+        )
     try:
         yield
     finally:

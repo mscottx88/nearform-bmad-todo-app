@@ -48,6 +48,13 @@ MAX_CANDIDATES_PER_SIDE = 50
 # ≤ ~30 pads at once; 20 is plenty.
 RESULT_LIMIT = 20
 
+# Per-request HTTP timeout for the query-embedding call on the search
+# path. The background worker keeps the service's 15 s default because
+# retries give it headroom; the search path is a single-shot call where
+# the user is actively waiting, so we bound at 1.5 s and gracefully fall
+# back to FTS-only if Google is slow.
+SEARCH_EMBED_TIMEOUT_MS = 1_500
+
 
 def hybrid_search(db: Session, query_text: str) -> SearchResponse:
     q = query_text.strip()
@@ -65,7 +72,10 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
     # enriched format as embedding_worker for grep-ability.
     query_vec: list[float] | None = None
     try:
-        query_vec = embedding_service.generate_embedding(q)
+        query_vec = embedding_service.generate_embedding(
+            q,
+            timeout_ms=SEARCH_EMBED_TIMEOUT_MS,
+        )
     except Exception as exc:  # noqa: BLE001 - any embedding failure → FTS-only
         logger.warning(
             "search_embedding_failed exc=%s code=%s status=%s",

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import AfterValidator
 from pydantic_core import PydanticCustomError
 from sqlalchemy.orm import Session
@@ -35,7 +35,15 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 @router.get("", response_model=SearchResponse)
 def search(
+    request: Request,
     q: QParam,
     db: Session = Depends(get_db),
 ) -> SearchResponse:
+    # FastAPI's scalar `str` binding silently takes the last value when
+    # a client sends `?q=a&q=b`. Surface that as a 422 so callers notice.
+    if len(request.query_params.getlist("q")) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Multiple values for 'q' are not allowed",
+        )
     return search_service.hybrid_search(db, q)

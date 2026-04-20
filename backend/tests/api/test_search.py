@@ -141,6 +141,38 @@ def test_search_does_not_return_completed_or_deleted(
     assert response.json()["results"] == []
 
 
+def test_search_rejects_duplicate_q_param(client: TestClient) -> None:
+    # FastAPI would otherwise silently take the last `q` value. Surface
+    # the ambiguity as a 422 so clients know something's off.
+    response = client.get("/api/search?q=foo&q=bar")
+    assert response.status_code == 422
+    assert "multiple values" in response.json()["detail"].lower()
+
+
+def test_search_passes_short_timeout_to_embedding_service(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    # Verify the search path uses the tight timeout (SEARCH_EMBED_TIMEOUT_MS)
+    # rather than the default 15s — a slow embedding endpoint shouldn't
+    # pin a search request at the worker's budget.
+    from src.services import search_service
+
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ) as mock_gen:
+        response = client.get("/api/search", params={"q": "review"})
+
+    assert response.status_code == 200
+    mock_gen.assert_called_once()
+    call_kwargs = mock_gen.call_args.kwargs
+    assert call_kwargs["timeout_ms"] == search_service.SEARCH_EMBED_TIMEOUT_MS
+    assert call_kwargs["timeout_ms"] < 15_000  # tighter than worker's default
+
+
 def test_search_openapi_schema_includes_endpoint(client: TestClient) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200

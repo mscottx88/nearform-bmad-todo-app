@@ -48,6 +48,24 @@ def test_create_todo_empty_text(client: TestClient) -> None:
     assert response.json()["error"] == "validation_error"
 
 
+def test_create_todo_whitespace_only_text(client: TestClient) -> None:
+    # min_length=1 lets "   " through; the field_validator rejects it.
+    response = client.post("/api/todos", json={"text": "   "})
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_update_todo_whitespace_only_text(client: TestClient) -> None:
+    create_resp = client.post("/api/todos", json={"text": "valid"})
+    todo_id = create_resp.json()["id"]
+    response = client.patch(
+        f"/api/todos/{todo_id}",
+        json={"text": "   \t\n"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
 def test_list_todos_empty(client: TestClient) -> None:
     response = client.get("/api/todos")
     assert response.status_code == 200

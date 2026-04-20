@@ -37,15 +37,26 @@ def _get_client() -> genai.Client:
     return _client
 
 
-def generate_embedding(text: str) -> list[float]:
+def generate_embedding(text: str, *, timeout_ms: int | None = None) -> list[float]:
+    """Return a 768-dim embedding for `text`.
+
+    `timeout_ms` overrides the client-level HTTP timeout for this single
+    call — used by the search path (tight budget, 1.5 s) while the
+    background worker keeps the 15 s client default (retries give it
+    headroom). The override is passed via `EmbedContentConfig.http_options`
+    so it doesn't mutate the shared client.
+    """
     if not settings.google_api_key:
         raise EmbeddingApiKeyMissingError()
 
     client = _get_client()
+    config = types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSION)
+    if timeout_ms is not None:
+        config.http_options = types.HttpOptions(timeout=timeout_ms)
     response = client.models.embed_content(
         model=settings.embedding_model,
         contents=text,
-        config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSION),
+        config=config,
     )
 
     embeddings = getattr(response, "embeddings", None) or []
