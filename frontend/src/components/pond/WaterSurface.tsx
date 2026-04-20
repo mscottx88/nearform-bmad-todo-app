@@ -45,16 +45,36 @@ const CLICK_AMPLITUDE_MAX = 0.7;
 // second) never evict an in-flight ripple during its ~4s lifetime.
 const CLICK_SLOTS = 8;
 
-// Phase velocity of the expanding wavefront in world units/sec. Used by
-// both JS (hard cutoff when the front has traveled past the pond) and
-// the shader mask (gates elevation to dist ≤ front). Must match the
-// ratio `speed / freq` used in the shader's ambient ripple call below:
-// speed=2.2, freq=0.9 → phase velocity ≈ 2.44 units/sec. Bumped from
-// the previous combo so the wavefront is visibly expanding, not glacial.
+// Phase velocity of the expanding wavefront in world units/sec. Passed
+// to the shader as `uAmbientWavefrontSpeed` (story 2.9 AC #6 — was a
+// template-literal injection pre-2.9, fragile across precision changes
+// and runtime tunability). Matches the ambient ripple's `speed / freq`
+// ratio (speed=2.2, freq=0.9 → ≈ 2.44) so the leading-edge mask and the
+// underlying sine wave propagate at the same rate. Click ripples derive
+// their wavefront speed from `speed / freq` inside the shader (AC #1).
 const AMBIENT_WAVEFRONT_SPEED = 2.44;
+
+// Click ripple slots: round-robin overwrite above ~2 Hz sustained click
+// rate (8 slots × ~4s visibility window). Accepted tradeoff — no observed
+// UX complaints, and clicks >2Hz are outside realistic use. Raise to 12
+// if user-visible eviction reports land. Story 2.9 AC #9.
+//
+// Ambient ripple slots: with AMBIENT_SLOTS=3, up to 14s visibility, and
+// 2.5–7s cadence, the oldest ambient gets overwritten every ~2.5s at
+// minimum cadence. Accepted because ambients are non-semantic (no user
+// intent tied to a specific ripple). Raise to 5 if visible "stutter"
+// surfaces. Story 2.9 AC #10.
 
 const vertexShader = /* glsl */ `
   uniform float uTime;
+  // Story 2.9 AC #6: migrated from a JS template-literal injection to a
+  // proper uniform so precision isn't truncated via toFixed and so the
+  // value could in theory be tuned at runtime. Only the ambient ripple
+  // uses this explicit front speed (ambient's wavefront is deliberately
+  // slower-than-the-wave for a languid feel); click ripples derive their
+  // front speed from speed/freq inside ripple() to keep the leading edge
+  // locked to the wave crest (AC #1).
+  uniform float uAmbientWavefrontSpeed;
 
   #define CLICK_SLOTS ${CLICK_SLOTS}
   uniform vec2 uDropCenter[CLICK_SLOTS];
@@ -76,6 +96,13 @@ const vertexShader = /* glsl */ `
   // leadingEdge smoothstep gates elevation to dist <= wavefrontRadius,
   // so the ripple actually begins at the center and visibly radiates
   // outward, which is what a real water disturbance looks like.
+  //
+  // Story 2.9 AC #1: by default the wavefront propagates at the wave's
+  // own phase velocity (speed/freq) so the leading edge stays locked to
+  // the crest. Callers that want a deliberately-mismatched front (e.g.
+  // the ambient ripple's slow, languid front while the wave oscillates
+  // faster beneath it) pass a non-zero wavefrontOverride; otherwise the
+  // override is 0.0 and the function derives the rate internally.
   float ripple(
     vec2 pos,
     vec2 center,
@@ -83,13 +110,16 @@ const vertexShader = /* glsl */ `
     float speed,
     float decay,
     float elapsed,
-    float wavefrontSpeed
+    float wavefrontOverride
   ) {
     float dist = length(pos - center);
     float wave = sin(dist * freq - uTime * speed);
     float falloff = exp(-dist * decay);
     // Wavefront radius at this moment; a 0.6-unit soft edge prevents a
     // hard ring pop at the leading edge.
+    float wavefrontSpeed = wavefrontOverride > 0.0
+      ? wavefrontOverride
+      : speed / freq;
     float front = elapsed * wavefrontSpeed;
     float leadingEdge = 1.0 - smoothstep(front, front + 0.6, dist);
     return wave * falloff * leadingEdge;
@@ -120,18 +150,20 @@ const vertexShader = /* glsl */ `
         2.2,
         0.035,
         elapsed,
-        ${AMBIENT_WAVEFRONT_SPEED.toFixed(2)}
+        uAmbientWavefrontSpeed
       );
       float fade = exp(-elapsed * uAmbientDecayRate[i]);
       elevation += r * uAmbientAmplitude[i] * fade;
     }
 
     // Impact ripples from pad drops OR user clicks — "rock in the pond".
-    // Fast-expanding wavefront (speed 7.0 world units/sec vs ambient 2.44)
-    // with low spatial decay so the ring travels to the far edges of the
-    // pond. Short wavelength + fast oscillation gives a crisp, punchy
-    // feel. A brief central splash pulse is layered on top for the
-    // instantaneous impact feedback that a real rock would produce.
+    // Wavefront propagates at the wave's own phase velocity (speed/freq
+    // = 5.5/1.3 ≈ 4.23 units/sec; story 2.9 AC #1 — pre-2.9 this was
+    // hardcoded at 7.0, racing ahead of the wave crest). Low spatial
+    // decay lets the ring travel to the far edges of the pond. Short
+    // wavelength + fast oscillation gives a crisp, punchy feel. A brief
+    // central splash pulse is layered on top for the instantaneous
+    // impact feedback that a real rock would produce.
     //
     // Each slot is an independent click — a new click occupies the next
     // slot (round-robin in JS) instead of overwriting the previous one,
@@ -148,6 +180,7 @@ const vertexShader = /* glsl */ `
       vec2 center = uDropCenter[i];
       float amp = uDropAmplitude[i];
 
+      // wavefrontOverride = 0.0 → ripple() derives speed/freq internally.
       float dropRipple = ripple(
         pos.xy,
         center,
@@ -155,7 +188,7 @@ const vertexShader = /* glsl */ `
         5.5,
         0.025,
         dropElapsed,
-        7.0
+        0.0
       );
       float dropFade = exp(-dropElapsed * 1.1);
       elevation += dropRipple * amp * dropFade;
@@ -201,6 +234,10 @@ function createUniforms() {
     uTime: { value: 0 },
     uGlowIntensity: { value: 1.0 },
     uNeonColor: { value: new THREE.Vector3(0.0, 0.933, 1.0) },
+    // Story 2.9 AC #6: explicit ambient wavefront speed (was a template-
+    // literal injection pre-2.9). Click ripples don't need a counterpart
+    // — their front speed is derived from speed/freq inside the shader.
+    uAmbientWavefrontSpeed: { value: AMBIENT_WAVEFRONT_SPEED },
     // Per-slot click arrays — a new click takes the next slot (round-robin)
     // instead of overwriting an in-flight ripple, so animations always
     // complete. See CLICK_SLOTS.
@@ -243,8 +280,6 @@ export function WaterSurface() {
   const meshRef = useRef<THREE.Mesh>(null);
   const [uniforms] = useState(createUniforms);
   const glowIntensity = usePondStore((s) => s.glowIntensity);
-  const dropRipple = usePondStore((s) => s.dropRipple);
-  const lastRippleRef = useRef<number>(0);
   // Ambient ripples are scheduled by JS setTimeout and queued here; the
   // next useFrame tick stamps the uniforms into the next available slot
   // using a round-robin index. Ref (not state) to avoid re-renders from
@@ -266,31 +301,30 @@ export function WaterSurface() {
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uGlowIntensity.value = glowIntensity;
 
-    if (dropRipple && dropRipple.time !== lastRippleRef.current) {
-      // The water plane is rotated -90° about X (mesh `rotation={[-Math.PI/2, 0, 0]}`),
-      // so world-Z maps to LOCAL -Y in the plane geometry. The shader
-      // compares `pos.xy` (local) against `uDropCenter`, so the world-Z
-      // we got from `triggerRipple(x, z)` must be negated here. Without
-      // this, the ripple appears at the mirrored-across-origin position
-      // — which is why creation drops only "worked" at world (0, 0),
-      // their default position before a user drags them.
-      //
-      // Round-robin into the next click slot so rapid clicks don't
-      // overwrite an in-flight ripple — each splash gets to finish its
-      // full animation. With CLICK_SLOTS=8 and a 4s window, only clicking
-      // faster than ~2Hz will evict the oldest in-flight ripple.
-      const clickSlot = nextClickSlotRef.current;
+    // Story 2.9 AC #2: drain the ripple queue. Each enqueued ripple lands
+    // in its own click slot, so two `triggerRipple` calls on the same JS
+    // tick now both apply (pre-2.9 a single-slot `dropRipple` field
+    // coalesced simultaneous writes into one). Read imperatively via
+    // getState() to avoid a re-render on every enqueue. The shader
+    // plane is rotated -90° about X, so world-Z → local-Y needs a flip
+    // at uniform-write time; the store holds world coords throughout.
+    const storeState = usePondStore.getState();
+    const queued = storeState.dropRipples;
+    if (queued.length > 0) {
       const dropCenters =
         material.uniforms.uDropCenter.value as THREE.Vector2[];
       const dropTimes = material.uniforms.uDropTime.value as number[];
       const dropAmps = material.uniforms.uDropAmplitude.value as number[];
-      dropCenters[clickSlot].set(dropRipple.x, -dropRipple.z);
-      dropTimes[clickSlot] = state.clock.elapsedTime;
-      dropAmps[clickSlot] =
-        CLICK_AMPLITUDE_MIN +
-        Math.random() * (CLICK_AMPLITUDE_MAX - CLICK_AMPLITUDE_MIN);
-      nextClickSlotRef.current = (clickSlot + 1) % CLICK_SLOTS;
-      lastRippleRef.current = dropRipple.time;
+      for (const { worldX, worldZ } of queued) {
+        const clickSlot = nextClickSlotRef.current;
+        dropCenters[clickSlot].set(worldX, -worldZ);
+        dropTimes[clickSlot] = state.clock.elapsedTime;
+        dropAmps[clickSlot] =
+          CLICK_AMPLITUDE_MIN +
+          Math.random() * (CLICK_AMPLITUDE_MAX - CLICK_AMPLITUDE_MIN);
+        nextClickSlotRef.current = (clickSlot + 1) % CLICK_SLOTS;
+      }
+      storeState.drainRipples();
     }
 
     if (pendingAmbientRef.current) {
@@ -300,7 +334,7 @@ export function WaterSurface() {
       const times = material.uniforms.uAmbientTime.value as number[];
       const decays = material.uniforms.uAmbientDecayRate.value as number[];
       const amps = material.uniforms.uAmbientAmplitude.value as number[];
-      // Same world-Z → local-Y flip as dropCenter.
+      // Same world-Z → local-Y flip as the click-ripple drain above.
       centers[slot].set(x, -z);
       times[slot] = state.clock.elapsedTime;
       decays[slot] = decayRate;
@@ -313,7 +347,10 @@ export function WaterSurface() {
   // Schedule occasional ambient ripples at random positions across the
   // pond. Chain setTimeouts so each delay is independently randomized
   // (setInterval gives fixed cadence, which reads as mechanical). A
-  // ~20% skip chance on each tick creates occasional longer calms.
+  // ~20% skip chance on each tick creates occasional longer calms —
+  // EXCEPT on the very first scheduled tick (story 2.9 AC #4), where
+  // the skip check is bypassed so the pond is guaranteed to show a
+  // ripple by ≈ AMBIENT_RIPPLE_FIRST_DELAY_MS on cold load.
   useEffect(() => {
     let timeoutId: number | undefined;
     const queueOne = () => {
@@ -330,32 +367,50 @@ export function WaterSurface() {
           Math.random() * (AMBIENT_AMPLITUDE_MAX - AMBIENT_AMPLITUDE_MIN),
       };
     };
-    const schedule = (delayMs: number) => {
+    const schedule = (delayMs: number, isFirst: boolean) => {
       timeoutId = window.setTimeout(() => {
-        if (Math.random() >= AMBIENT_SKIP_PROBABILITY) {
+        // AC #4: always queue the first ripple; skip-probability only
+        // applies from the second tick onward (pathological RNG could
+        // otherwise leave the pond frozen for 8s+ after load).
+        if (isFirst || Math.random() >= AMBIENT_SKIP_PROBABILITY) {
           queueOne();
         }
         const nextDelay =
           AMBIENT_RIPPLE_MIN_DELAY_MS +
           Math.random() *
             (AMBIENT_RIPPLE_MAX_DELAY_MS - AMBIENT_RIPPLE_MIN_DELAY_MS);
-        schedule(nextDelay);
+        schedule(nextDelay, false);
       }, delayMs);
     };
-    schedule(AMBIENT_RIPPLE_FIRST_DELAY_MS);
+    schedule(AMBIENT_RIPPLE_FIRST_DELAY_MS, true);
     return () => {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      // Story 2.9 AC #7: also drop any pending ambient queued between
+      // the last scheduler fire and cleanup. pendingAmbientRef is per-
+      // instance today so this is theoretical, but if anyone refactors
+      // to a shared ref the leak would become real.
+      pendingAmbientRef.current = null;
     };
   }, []);
 
   // Click anywhere on the water surface → radiating ripple at the click
-  // point. R3F's raycaster hands us the world-space intersection as
-  // `e.point`; pass `(x, z)` to triggerRipple so the shader's uDropCenter
-  // gets the right position on the water plane. Lily-pad clicks
+  // point OR close an open popup (story 2.9 AC #3). R3F's raycaster
+  // hands us the world-space intersection as `e.point`. Lily-pad clicks
   // stopPropagation before this fires, so clicking a pad does NOT ripple
   // the water — only empty-water clicks do.
+  //
+  // Popup-open guard: if the Action Popup is open (activePopupTodoId
+  // set), an empty-water click reads as "dismiss the popup" rather
+  // than "ripple AND leave the popup hanging." Read via getState() so
+  // this handler doesn't subscribe to activePopupTodoId changes (which
+  // would trigger a re-render on every open/close).
   const handleWaterClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-    usePondStore.getState().triggerRipple(e.point.x, e.point.z);
+    const store = usePondStore.getState();
+    if (store.activePopupTodoId !== null) {
+      store.closePopup();
+      return;
+    }
+    store.triggerRipple(e.point.x, e.point.z);
   }, []);
 
   return (

@@ -16,10 +16,18 @@ const getWindowSize = () =>
     ? { width: window.innerWidth, height: window.innerHeight }
     : { width: 1920, height: 1080 };
 
-interface RippleEvent {
-  x: number;
-  z: number;
-  time: number;
+// Story 2.9: ripple queue entry. Holds WORLD coordinates (matches the
+// argument names on `triggerRipple(worldX, worldZ)`). The shader uses
+// plane-local coords, so `WaterSurface.useFrame` flips world-Z → local-Y
+// when writing into the uniform — the store never sees local coords.
+//
+// `time` field removed vs the pre-2.9 shape: the store no longer serves
+// as a change-detection marker (the queue length and identity handle
+// that). All ripple timestamps are stamped from the R3F clock inside
+// `WaterSurface.useFrame` at drain time.
+export interface RippleEvent {
+  worldX: number;
+  worldZ: number;
 }
 
 interface FocusTarget {
@@ -63,7 +71,13 @@ interface PondState {
   atmosphereMode: AtmosphereMode | 'base';
   glowIntensity: number;
   viewportSize: { width: number; height: number };
-  dropRipple: RippleEvent | null;
+  // Story 2.9: queue of pending ripples, drained FIFO by
+  // `WaterSurface.useFrame` each tick. Multiple `triggerRipple` calls
+  // within the same JS tick (previously coalesced into a single slot)
+  // now all apply — one ripple per enqueue. `WaterSurface` reads this
+  // imperatively via `usePondStore.getState()` (no subscription) to
+  // avoid a re-render on every enqueue.
+  dropRipples: RippleEvent[];
   cameraFocus: FocusTarget | null;
   activePopupTodoId: string | null;
   completingTodos: Map<string, CompletingEntry>;
@@ -71,7 +85,21 @@ interface PondState {
   errorTodos: Map<string, TodoErrorEntry>;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
-  triggerRipple: (x: number, z: number) => void;
+  /**
+   * Enqueue a water ripple at world coordinates.
+   *
+   * @param worldX  World-space X (R3F scene coords).
+   * @param worldZ  World-space Z (R3F scene coords). The WaterSurface
+   *                plane is rotated -90° about X so world-Z maps to
+   *                plane-local -Y; that flip happens inside WaterSurface
+   *                at uniform-write time, NOT here.
+   *
+   * Safe to call multiple times per tick — each call enqueues a
+   * distinct ripple that lands in its own shader slot.
+   */
+  triggerRipple: (worldX: number, worldZ: number) => void;
+  /** Drain the ripple queue — called by WaterSurface after applying. */
+  drainRipples: () => void;
   focusCamera: (x: number, z: number, zoom?: number) => void;
   openPopup: (todoId: string, x: number, z: number) => void;
   closePopup: () => void;
@@ -89,7 +117,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   atmosphereMode: 'base',
   glowIntensity: GLOW_INTENSITY.base,
   viewportSize: getWindowSize(),
-  dropRipple: null,
+  dropRipples: [],
   cameraFocus: null,
   activePopupTodoId: null,
   completingTodos: new Map(),
@@ -106,8 +134,12 @@ export const usePondStore = create<PondState>((set, get) => ({
   setViewportSize: (width: number, height: number) =>
     set({ viewportSize: { width: Math.max(1, width), height: Math.max(1, height) } }),
 
-  triggerRipple: (x: number, z: number) =>
-    set({ dropRipple: { x, z, time: performance.now() / 1000 } }),
+  triggerRipple: (worldX: number, worldZ: number) =>
+    set((state) => ({
+      dropRipples: [...state.dropRipples, { worldX, worldZ }],
+    })),
+
+  drainRipples: () => set({ dropRipples: [] }),
 
   focusCamera: (x: number, z: number, zoom?: number) =>
     set({ cameraFocus: { x, z, zoom } }),

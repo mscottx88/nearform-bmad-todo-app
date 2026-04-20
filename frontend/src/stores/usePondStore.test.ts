@@ -26,7 +26,7 @@ describe('usePondStore', () => {
     usePondStore.setState({
       activePopupTodoId: null,
       cameraFocus: null,
-      dropRipple: null,
+      dropRipples: [],
       completingTodos: new Map(),
       deletingTodos: new Map(),
       errorTodos: new Map(),
@@ -43,10 +43,41 @@ describe('usePondStore', () => {
     });
   });
 
-  describe('triggerRipple', () => {
-    it('records the ripple coordinates', () => {
+  describe('triggerRipple / dropRipples queue (story 2.9 AC #2)', () => {
+    it('enqueues a ripple with world coordinates', () => {
       usePondStore.getState().triggerRipple(1, 2);
-      expect(usePondStore.getState().dropRipple).toMatchObject({ x: 1, z: 2 });
+      const queue = usePondStore.getState().dropRipples;
+      expect(queue).toHaveLength(1);
+      expect(queue[0]).toEqual({ worldX: 1, worldZ: 2 });
+    });
+
+    it('two synchronous calls produce two queued ripples (no coalesce)', () => {
+      // Pre-2.9 regression guard: the old single-slot `dropRipple` field
+      // collapsed simultaneous writes into one. The queue must preserve
+      // both calls so the shader can apply them to distinct slots.
+      const { triggerRipple } = usePondStore.getState();
+      triggerRipple(1, 2);
+      triggerRipple(3, 4);
+      const queue = usePondStore.getState().dropRipples;
+      expect(queue).toHaveLength(2);
+      expect(queue[0]).toEqual({ worldX: 1, worldZ: 2 });
+      expect(queue[1]).toEqual({ worldX: 3, worldZ: 4 });
+    });
+
+    it('drainRipples empties the queue', () => {
+      usePondStore.getState().triggerRipple(1, 2);
+      usePondStore.getState().triggerRipple(3, 4);
+      usePondStore.getState().drainRipples();
+      expect(usePondStore.getState().dropRipples).toEqual([]);
+    });
+
+    it('post-drain triggerRipple starts a fresh queue', () => {
+      usePondStore.getState().triggerRipple(1, 2);
+      usePondStore.getState().drainRipples();
+      usePondStore.getState().triggerRipple(5, 6);
+      const queue = usePondStore.getState().dropRipples;
+      expect(queue).toHaveLength(1);
+      expect(queue[0]).toEqual({ worldX: 5, worldZ: 6 });
     });
   });
 
