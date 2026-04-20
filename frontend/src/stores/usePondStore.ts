@@ -83,6 +83,14 @@ interface PondState {
   completingTodos: Map<string, CompletingEntry>;
   deletingTodos: Map<string, DeletingEntry>;
   errorTodos: Map<string, TodoErrorEntry>;
+  /**
+   * Story 4.1: transient per-pad color preview. Set by ActionPopup
+   * while the user hovers a swatch (via `setColorPreview`); cleared
+   * on unhover or commit. LilyPad reads this via `selectColorPreview`
+   * to live-preview body + rim color before the user commits.
+   * Session-only; not persisted.
+   */
+  colorPreviews: Map<string, string>;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -132,6 +140,13 @@ interface PondState {
   finishDeletion: (todoId: string) => void;
   setTodoError: (todoId: string, operation: TodoErrorOperation, error: Error) => void;
   clearTodoError: (todoId: string) => void;
+
+  /**
+   * Story 4.1: set or clear the color preview for a todo. Pass a
+   * hex string to set; pass `null` to clear. No-op if the entry is
+   * already in the desired state. Preview is session-only.
+   */
+  setColorPreview: (todoId: string, color: string | null) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -144,6 +159,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   completingTodos: new Map(),
   deletingTodos: new Map(),
   errorTodos: new Map(),
+  colorPreviews: new Map(),
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -281,6 +297,24 @@ export const usePondStore = create<PondState>((set, get) => ({
     next.delete(todoId);
     set({ errorTodos: next });
   },
+
+  setColorPreview: (todoId: string, color: string | null) => {
+    // Story 4.1: no-op when the desired state is already in place
+    // (prevents unnecessary map churn on repeated hover-unhover events
+    // from React's synthetic-event coalescing).
+    const current = get().colorPreviews;
+    if (color === null) {
+      if (!current.has(todoId)) return;
+      const next = new Map(current);
+      next.delete(todoId);
+      set({ colorPreviews: next });
+    } else {
+      if (current.get(todoId) === color) return;
+      const next = new Map(current);
+      next.set(todoId, color);
+      set({ colorPreviews: next });
+    }
+  },
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook
@@ -304,3 +338,13 @@ export const selectTodoError =
   (todoId: string) =>
   (s: PondState): TodoErrorEntry | undefined =>
     s.errorTodos.get(todoId);
+
+// Story 4.1: color-preview selector. LilyPad subscribes via
+// `usePondStore(selectColorPreview(todo.id))` to get the currently-
+// hovered swatch color (or null when nothing is being previewed).
+// The subscription re-renders only when THIS pad's preview changes,
+// not on every other pad's hover activity.
+export const selectColorPreview =
+  (todoId: string) =>
+  (s: PondState): string | null =>
+    s.colorPreviews.get(todoId) ?? null;

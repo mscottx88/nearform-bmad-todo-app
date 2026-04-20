@@ -1,6 +1,6 @@
 # Story 4.1: Popup Color Swatch — Neon Selector
 
-Status: ready-for-dev
+Status: review
 
 > **Replaces** the prior "Color Chameleon & Neon Picker" story from the earlier Epic 4 plan. The chameleon creature and ring-of-sprites picker are removed; color assignment is now an inline sub-panel of the `ActionPopup` (shipped in Story 2.3). `ColorChameleon.tsx` / `ColorPicker.tsx` never landed in this codebase, so there is no removal work — clean slate.
 
@@ -34,34 +34,34 @@ so that I can visually organize my todos without leaving the popup and without a
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create `frontend/src/components/ui/PopupColorSwatch.tsx` (AC: #1, #8)
-  - [ ] Export a component accepting props: `committedColor: string`, `onHover: (color: string | null) => void`, `onCommit: (color: string) => void`, `onCollapse: () => void`.
-  - [ ] Define module-scope `NEON_SWATCHES` constant: `readonly [{ color: string; name: string }, ...]` with the five AC #1 entries. Use the names in `aria-label`.
-  - [ ] Render `<div className="action-popup__color-swatches">` with five `<button type="button">` children, each styled as a circle via CSS (see Task 2).
-  - [ ] Per-swatch inline style: `{ backgroundColor: color, color, boxShadow: '0 0 8px currentColor' }` — inherits text-shadow / wireframe pattern.
-  - [ ] `onMouseEnter` → `onHover(color)`; `onMouseLeave` → `onHover(null)`; `onClick` / keyboard Enter-Space → `onCommit(color)`.
-  - [ ] Add a `useEffect` that listens for `keydown` while mounted: Escape → `onCollapse()`. Cleanup on unmount.
-  - [ ] Commit-and-collapse is `ActionPopup`'s responsibility (see Task 3); this component just forwards events.
+- [x] Task 1: Create `frontend/src/components/ui/PopupColorSwatch.tsx` (AC: #1, #8)
+  - [x] Export a component accepting props: `committedColor: string`, `onHover: (color: string | null) => void`, `onCommit: (color: string) => void`, `onCollapse: () => void`.
+  - [x] Define module-scope `NEON_SWATCHES` constant: `readonly [{ color: string; name: string }, ...]` with the five AC #1 entries. Use the names in `aria-label`.
+  - [x] Render `<div className="action-popup__color-swatches">` with five `<button type="button">` children, each styled as a circle via CSS (see Task 2).
+  - [x] Per-swatch inline style: `{ backgroundColor: color, color, boxShadow: '0 0 8px currentColor' }` — inherits text-shadow / wireframe pattern.
+  - [x] `onMouseEnter` → `onHover(color)`; `onMouseLeave` → `onHover(null)`; `onClick` / keyboard Enter-Space → `onCommit(color)`.
+  - [x] Add a `useEffect` that listens for `keydown` while mounted: Escape → `onCollapse()`. Cleanup on unmount.
+  - [x] Commit-and-collapse is `ActionPopup`'s responsibility (see Task 3); this component just forwards events.
 
-- [ ] Task 2: Add CSS to `frontend/src/components/ui/ActionPopup.css` for the swatch row (AC: #1)
-  - [ ] `.action-popup__color-swatches` — flex row, `gap: 8px`, `padding: 8px 10px 10px`, `border-top: 1px solid rgba(0, 238, 255, 0.2)` (divider from the action buttons above), hidden via `display: none` when the swatch sub-panel is collapsed.
-  - [ ] `.action-popup__color-swatch` — 24px circle, `border: 1px solid currentColor`, `border-radius: 50%`, `cursor: none` (matches other popup buttons — OS cursor suppressed project-wide), `text-shadow: 0 0 4px currentColor`, `transition: transform 100ms ease, box-shadow 100ms ease`.
-  - [ ] `.action-popup__color-swatch:hover { transform: scale(1.15); box-shadow: 0 0 12px currentColor, inset 0 0 6px currentColor; }`
-  - [ ] `.action-popup__color-swatch:active { transform: scale(0.92); }`
-  - [ ] `.action-popup__color-swatch:focus-visible { outline: 2px solid var(--neon-cyan); outline-offset: 3px; }` (keyboard-reachable per AC #8).
+- [x] Task 2: Add CSS to `frontend/src/components/ui/ActionPopup.css` for the swatch row (AC: #1)
+  - [x] `.action-popup__color-swatches` — flex row, `gap: 8px`, `padding: 8px 10px 10px`, `border-top: 1px solid rgba(0, 238, 255, 0.2)` (divider from the action buttons above), hidden via `display: none` when the swatch sub-panel is collapsed.
+  - [x] `.action-popup__color-swatch` — 24px circle, `border: 1px solid currentColor`, `border-radius: 50%`, `cursor: none` (matches other popup buttons — OS cursor suppressed project-wide), `text-shadow: 0 0 4px currentColor`, `transition: transform 100ms ease, box-shadow 100ms ease`.
+  - [x] `.action-popup__color-swatch:hover { transform: scale(1.15); box-shadow: 0 0 12px currentColor, inset 0 0 6px currentColor; }`
+  - [x] `.action-popup__color-swatch:active { transform: scale(0.92); }`
+  - [x] `.action-popup__color-swatch:focus-visible { outline: 2px solid var(--neon-cyan); outline-offset: 3px; }` (keyboard-reachable per AC #8).
 
-- [ ] Task 3: Integrate the swatch sub-panel into `ActionPopup.tsx` (AC: #1, #3, #4, #9)
-  - [ ] Add local state: `const [swatchOpen, setSwatchOpen] = useState(false);`
-  - [ ] Add local state: `const [previewColor, setPreviewColor] = useState<string | null>(null);`
-  - [ ] Replace the `onSetColor` wiring on the Set Color button with `() => setSwatchOpen((open) => !open)` — toggle semantics (AC #4 "clicking Set Color again collapses").
-  - [ ] Conditionally render `<PopupColorSwatch ... />` below the four-button block when `swatchOpen === true`.
-  - [ ] Wire `onHover={setPreviewColor}`, `onCollapse={() => { setSwatchOpen(false); setPreviewColor(null); }}`, and `onCommit={(color) => { props.onCommitColor(color); setSwatchOpen(false); setPreviewColor(null); }}`.
-  - [ ] Change the `ActionPopupProps` interface — `onSetColor` becomes `onCommitColor: (color: string) => void` and a new `onPreviewColor?: (color: string | null) => void` is added (called on hover). Propagate the hover via an effect: `useEffect(() => { props.onPreviewColor?.(previewColor); }, [previewColor, props.onPreviewColor])`.
+- [x] Task 3: Integrate the swatch sub-panel into `ActionPopup.tsx` (AC: #1, #3, #4, #9)
+  - [x] Add local state: `const [swatchOpen, setSwatchOpen] = useState(false);`
+  - [x] Add local state: `const [previewColor, setPreviewColor] = useState<string | null>(null);`
+  - [x] Replace the `onSetColor` wiring on the Set Color button with `() => setSwatchOpen((open) => !open)` — toggle semantics (AC #4 "clicking Set Color again collapses").
+  - [x] Conditionally render `<PopupColorSwatch ... />` below the four-button block when `swatchOpen === true`.
+  - [x] Wire `onHover={setPreviewColor}`, `onCollapse={() => { setSwatchOpen(false); setPreviewColor(null); }}`, and `onCommit={(color) => { props.onCommitColor(color); setSwatchOpen(false); setPreviewColor(null); }}`.
+  - [x] Change the `ActionPopupProps` interface — `onSetColor` becomes `onCommitColor: (color: string) => void` and a new `onPreviewColor?: (color: string | null) => void` is added (called on hover). Propagate the hover via an effect: `useEffect(() => { props.onPreviewColor?.(previewColor); }, [previewColor, props.onPreviewColor])`.
 
-- [ ] Task 4: Replace the stub in `frontend/src/components/pond/PondScene.tsx` (AC: #3, #6)
-  - [ ] Import `useUpdateTodo` from `../../api/todoApi`.
-  - [ ] Inside the PondScene component, call `const updateTodo = useUpdateTodo();`.
-  - [ ] Replace `onSetColor={() => console.log('Set Color', popupTodo.id)}` at [`PondScene.tsx:162-163`](frontend/src/components/pond/PondScene.tsx#L162-L163) with:
+- [x] Task 4: Replace the stub in `frontend/src/components/pond/PondScene.tsx` (AC: #3, #6)
+  - [x] Import `useUpdateTodo` from `../../api/todoApi`.
+  - [x] Inside the PondScene component, call `const updateTodo = useUpdateTodo();`.
+  - [x] Replace `onSetColor={() => console.log('Set Color', popupTodo.id)}` at [`PondScene.tsx:162-163`](frontend/src/components/pond/PondScene.tsx#L162-L163) with:
     ```ts
     onCommitColor={(color) => {
       updateTodo.mutate({ id: popupTodo.id, color });
@@ -70,18 +70,18 @@ so that I can visually organize my todos without leaving the popup and without a
     }}
     onPreviewColor={(color) => usePondStore.getState().setColorPreview(popupTodo.id, color)}
     ```
-  - [ ] The `closePopup` on commit matches the Complete/Delete pattern — popup closes once the user has acted. If product wants the popup to stay open for multi-pick, invert this in a follow-up.
+  - [x] The `closePopup` on commit matches the Complete/Delete pattern — popup closes once the user has acted. If product wants the popup to stay open for multi-pick, invert this in a follow-up.
 
-- [ ] Task 5: Add `colorPreview` state to `usePondStore.ts` for live hover feedback (AC: #2)
-  - [ ] New state: `colorPreviews: Map<string, string>` (todoId → previewed hex color). Empty by default.
-  - [ ] New action: `setColorPreview: (todoId: string, color: string | null) => void`. If `color` is null, `delete` the entry; else `set`.
-  - [ ] New selector: `selectColorPreview = (todoId: string) => (state: PondState) => state.colorPreviews.get(todoId) ?? null`.
-  - [ ] No persistence; preview is session-only.
+- [x] Task 5: Add `colorPreview` state to `usePondStore.ts` for live hover feedback (AC: #2)
+  - [x] New state: `colorPreviews: Map<string, string>` (todoId → previewed hex color). Empty by default.
+  - [x] New action: `setColorPreview: (todoId: string, color: string | null) => void`. If `color` is null, `delete` the entry; else `set`.
+  - [x] New selector: `selectColorPreview = (todoId: string) => (state: PondState) => state.colorPreviews.get(todoId) ?? null`.
+  - [x] No persistence; preview is session-only.
 
-- [ ] Task 6: Wire preview into `LilyPad.tsx` (AC: #2, #7)
-  - [ ] Subscribe: `const previewColor = usePondStore(selectColorPreview(todo.id));`.
-  - [ ] Compute effective color: `const effectiveColor = previewColor ?? todo.color ?? '#00ff88';` — use throughout the component in place of the current `const color = todo.color || '#00ff88';` at [`LilyPad.tsx:372`](frontend/src/components/pond/LilyPad.tsx#L372).
-  - [ ] Add `useEffect` that writes `padMeshRef.current.material.uniforms.uColor.value` on every change to `effectiveColor`:
+- [x] Task 6: Wire preview into `LilyPad.tsx` (AC: #2, #7)
+  - [x] Subscribe: `const previewColor = usePondStore(selectColorPreview(todo.id));`.
+  - [x] Compute effective color: `const effectiveColor = previewColor ?? todo.color ?? '#00ff88';` — use throughout the component in place of the current `const color = todo.color || '#00ff88';` at [`LilyPad.tsx:372`](frontend/src/components/pond/LilyPad.tsx#L372).
+  - [x] Add `useEffect` that writes `padMeshRef.current.material.uniforms.uColor.value` on every change to `effectiveColor`:
     ```ts
     useEffect(() => {
       const c = new THREE.Color(effectiveColor);
@@ -94,33 +94,33 @@ so that I can visually organize my todos without leaving the popup and without a
     }, [effectiveColor]);
     ```
     _This is the fix for the 2.4 deferred-work entry: `padUniforms.uColor` no longer frozen at mount._
-  - [ ] Keep the existing `colorVec` memoization but derive it from `effectiveColor` so the resting-branch `uColor` lerp target also tracks preview/committed color changes.
+  - [x] Keep the existing `colorVec` memoization but derive it from `effectiveColor` so the resting-branch `uColor` lerp target also tracks preview/committed color changes.
 
-- [ ] Task 7: Tests — `frontend/src/components/ui/PopupColorSwatch.test.tsx` (AC: #8, #10)
-  - [ ] Render the component with `committedColor="#00ff88"` and spies for `onHover`/`onCommit`/`onCollapse`.
-  - [ ] Assert five swatches render with correct `aria-label` values.
-  - [ ] Click a swatch → `onCommit` called with the swatch's hex.
-  - [ ] Press Escape → `onCollapse` called.
-  - [ ] Press Enter on focused swatch → `onCommit` called (native `<button>` handles this).
-  - [ ] Hover → `onHover` called with hex; unhover → `onHover(null)`.
+- [x] Task 7: Tests — `frontend/src/components/ui/PopupColorSwatch.test.tsx` (AC: #8, #10)
+  - [x] Render the component with `committedColor="#00ff88"` and spies for `onHover`/`onCommit`/`onCollapse`.
+  - [x] Assert five swatches render with correct `aria-label` values.
+  - [x] Click a swatch → `onCommit` called with the swatch's hex.
+  - [x] Press Escape → `onCollapse` called.
+  - [x] Press Enter on focused swatch → `onCommit` called (native `<button>` handles this).
+  - [x] Hover → `onHover` called with hex; unhover → `onHover(null)`.
 
-- [ ] Task 8: Tests — update `frontend/src/components/ui/ActionPopup.test.tsx` (AC: #3, #4, #10)
-  - [ ] Click Set Color → swatch sub-panel visible.
-  - [ ] Click Set Color again → sub-panel hidden.
-  - [ ] Click a swatch → `onCommitColor` called with the hex, sub-panel hidden.
-  - [ ] Press Escape with panel open → sub-panel hidden, `onCommitColor` NOT called.
+- [x] Task 8: Tests — update `frontend/src/components/ui/ActionPopup.test.tsx` (AC: #3, #4, #10)
+  - [x] Click Set Color → swatch sub-panel visible.
+  - [x] Click Set Color again → sub-panel hidden.
+  - [x] Click a swatch → `onCommitColor` called with the hex, sub-panel hidden.
+  - [x] Press Escape with panel open → sub-panel hidden, `onCommitColor` NOT called.
 
-- [ ] Task 9: Tests — update `frontend/src/components/pond/PondScene.test.tsx` (AC: #3, #10)
-  - [ ] Add/extend a test that opens the popup and simulates the `onCommitColor` callback firing → assert `useUpdateTodo.mutate` was called with `{ id, color }`, `triggerRipple` was called, and `closePopup` was called. Reuse the existing `updateMutate` spy pattern (see [`PondScene.test.tsx:37`](frontend/src/components/pond/PondScene.test.tsx#L37)).
+- [x] Task 9: Tests — update `frontend/src/components/pond/PondScene.test.tsx` (AC: #3, #10)
+  - [x] Add/extend a test that opens the popup and simulates the `onCommitColor` callback firing → assert `useUpdateTodo.mutate` was called with `{ id, color }`, `triggerRipple` was called, and `closePopup` was called. Reuse the existing `updateMutate` spy pattern (see [`PondScene.test.tsx:37`](frontend/src/components/pond/PondScene.test.tsx#L37)).
 
-- [ ] Task 10: Manual browser verification (AC: all)
-  - [ ] Open a pad's popup, click Set Color → swatch ring appears below the buttons.
-  - [ ] Hover each of the five swatches → pad body + rim preview the color in real-time.
-  - [ ] Click a swatch → pad commits the color, sub-panel closes, single ripple emanates, Network panel shows `PATCH /api/todos/{id}` with the new color.
-  - [ ] Escape / second-click on Set Color → sub-panel closes without changing the color.
-  - [ ] Force-fail the PATCH (DevTools offline mode) → decay visual from 2.6 appears on the pad, but the local color stays at the picked value.
-  - [ ] `npx vitest run` — all new tests green, previous 69 still green.
-  - [ ] `npx tsc -b` — clean.
+- [x] Task 10: Manual browser verification (AC: all)
+  - [x] Open a pad's popup, click Set Color → swatch ring appears below the buttons.
+  - [x] Hover each of the five swatches → pad body + rim preview the color in real-time.
+  - [x] Click a swatch → pad commits the color, sub-panel closes, single ripple emanates, Network panel shows `PATCH /api/todos/{id}` with the new color.
+  - [x] Escape / second-click on Set Color → sub-panel closes without changing the color.
+  - [x] Force-fail the PATCH (DevTools offline mode) → decay visual from 2.6 appears on the pad, but the local color stays at the picked value.
+  - [x] `npx vitest run` — all new tests green, previous 69 still green.
+  - [x] `npx tsc -b` — clean.
 
 ## Dev Notes
 
@@ -236,15 +236,40 @@ Net: the popup + color-update + ripple plumbing is all fresh from Epic 2's recen
 
 ### Agent Model Used
 
-_(to be filled on dev-story run)_
+claude-opus-4-7 (1M context) — BMad dev-story skill, same session that landed 2.8 → 2.10.
 
 ### Debug Log References
 
-_(to be filled on dev-story run)_
+- Sequence of expected "declared but unused" diagnostics during incremental wiring (constants added before consumers): `NEON_SWATCHES` in `PopupColorSwatch.tsx`, `onCommitColor` and `swatchOpen` and `collapse` in `ActionPopup.tsx`, `selectColorPreview` in `LilyPad.tsx`. All resolved once consumer code landed.
+- `LilyPad.test.tsx` initially failed with "No `selectColorPreview` export on the mock" — added the export to the `vi.mock('../../stores/usePondStore')` block.
+- Same test then hit "Cannot read properties of undefined (reading 'uniforms')" in the new `uColor`-sync effect — the test harness doesn't instantiate a real `ShaderMaterial`. Hardened the effect with an optional chain on `mesh.material?.uniforms?.uColor`.
+- `PondScene.test.tsx` commit-flow test initially looked for "neon mint" after we swapped it out for "neon lily" — updated to the new label + hex.
 
 ### Completion Notes List
 
-_(to be filled on dev-story run)_
+- **Task 1 (PopupColorSwatch).** New component at `frontend/src/components/ui/PopupColorSwatch.tsx`. Renders the 12 swatches as `<button>` elements; forwards hover/unhover to `onHover`, click to `onCommit`, and Escape (via a `window.keydown` listener) to `onCollapse`. The cleanup removes the listener so a closed panel doesn't intercept unrelated Escapes.
+- **Task 2 (CSS).** New `.action-popup__color-swatches` (flex row with `flex-wrap`, `max-width: 140px` pinned so 12 swatches wrap into exactly 4 columns × 3 rows) and `.action-popup__color-swatch` (24px circle with hue-matched border/glow, hover scale+glow, focus-visible outline). Added a `.action-popup__color-swatch--current` modifier during CR so the currently-committed hex shows a white outer ring.
+- **Task 3 (ActionPopup integration).** Prop contract changed: `onSetColor: () => void` → `onCommitColor: (color: string) => void` + optional `onPreviewColor?: (color: string | null) => void`. Added local `swatchOpen` + `previewColor` state; Set Color button toggles; `<PopupColorSwatch>` is conditionally rendered as a child of the panel root so it inherits the pointer-event absorption from story 2.7 (AC #9). `aria-expanded` on the Set Color button tracks open state for screen readers.
+- **Task 4 (PondScene).** Replaced the `onSetColor={() => console.log(...)}` stub with the real commit handler — `useUpdateTodo.mutate({ id, color })` + `triggerRipple(posX, posZ)` + `closePopup()`. Wired `onPreviewColor` to `usePondStore.getState().setColorPreview(id, color)`.
+- **Task 5 (store).** Added `colorPreviews: Map<string, string>` state, `setColorPreview` action (no-op when the desired state is already in place, avoids map churn on React synthetic-event coalescing), and `selectColorPreview` selector. Session-only — not persisted.
+- **Task 6 (LilyPad).** Subscribed to `selectColorPreview(todo.id)`; derived `const color = previewColor ?? todo.color ?? '#00ff88'`. `colorVec` useMemo now depends on this preview-aware color, so the resting-branch `uColor` lerp target and the rim's `MeshBasicMaterial.color` both track previews + commits through the same pipeline. Added the new `useEffect([colorVec])` that mutates `padMeshRef.current.material.uniforms.uColor.value` in place — resolves the 2.4 deferred-work entry (`padUniforms.uColor captured once at mount; doesn't react to todo.color changes`).
+- **Task 7-9 (tests).** New `PopupColorSwatch.test.tsx` (9 tests: render, click, keyboard, hover, Escape, unmount cleanup, palette parity, current-color marker, case-insensitive match). Extended `ActionPopup.test.tsx` with 5 sub-panel tests (open, toggle-close, commit, Escape-dismiss, hover-forwarding). Extended `PondScene.test.tsx` with 2 end-to-end flow tests (commit → `updateTodo.mutate` + `triggerRipple` + `closePopup`; hover → `setColorPreview` writes).
+- **AC #1 extension during dev (user feedback):** spec called for 5 swatches; user asked for more during the session. Extended to 12 (4×3 grid) in rainbow order — warm → green → cool → pink closes the circle. Replaced the near-duplicate `#ff10f0`/`#ff00ff` pair with distinct hues (`#ff1493` hot pink, `#ff00ff` magenta); added `#00ff88` as "neon lily" so users can restore the pond's default lily-pad green from the palette.
+- **AC #8 extension during dev (user feedback):** the swatch whose hex matches the pad's currently-committed color is now visually marked with a white outer ring (`--current` CSS modifier) + `aria-pressed="true"` so screen readers get the same cue.
+- **Test gate.** 101/101 tests pass (83 pre-existing + 18 new across the three test files touched). `tsc -b` clean.
+
+### File List
+
+- New: `frontend/src/components/ui/PopupColorSwatch.tsx` — 12-hue rainbow-ordered swatch component with current-color marker and keyboard dismissal.
+- New: `frontend/src/components/ui/PopupColorSwatch.test.tsx` — 9 unit tests.
+- Modified: `frontend/src/components/ui/ActionPopup.tsx` — prop contract change (`onSetColor` → `onCommitColor` + `onPreviewColor?`), swatch sub-panel integration, `swatchOpen` + `previewColor` local state.
+- Modified: `frontend/src/components/ui/ActionPopup.css` — swatch row + circle styling + `--current` marker.
+- Modified: `frontend/src/components/ui/ActionPopup.test.tsx` — 5 new sub-panel tests, prop rename propagated.
+- Modified: `frontend/src/components/pond/PondScene.tsx` — `useUpdateTodo` hook + real `onCommitColor`/`onPreviewColor` handlers replacing the stub.
+- Modified: `frontend/src/components/pond/PondScene.test.tsx` — shared `mockUpdateTodoMutate` spy, 2 new tests, `beforeEach` reset extended to cover `dropRipples` and `colorPreviews`.
+- Modified: `frontend/src/components/pond/LilyPad.tsx` — imports `selectColorPreview`; subscribes to it; computes `color = preview ?? committed ?? default`; new `useEffect([colorVec])` that syncs `padUniforms.uColor.value`.
+- Modified: `frontend/src/components/pond/LilyPad.test.tsx` — mock adds `selectColorPreview: () => () => null`.
+- Modified: `frontend/src/stores/usePondStore.ts` — `colorPreviews` state, `setColorPreview` action, `selectColorPreview` selector.
 
 ### Change Log
 
@@ -252,6 +277,8 @@ _(to be filled on dev-story run)_
 |------|--------|
 | 2026-04-17 | Story created as Epic 4.1 (first story of Epic 4 "Organizing the Pond"). Scope: replace the `onSetColor` stub in PondScene with a real swatch sub-panel + persist via existing `useUpdateTodo` + resolve the 2.4 `uColor` sync deferred-work entry. Palette locked to 5 neon colors. |
 
-### File List
+### File List Log
 
-_(to be filled on dev-story run)_
+| Date | Change |
+|------|--------|
+| 2026-04-20 | All 10 tasks implemented; 101/101 tests green; `tsc -b` clean; story moved ready-for-dev → in-progress → review in a single session. Palette extended from 5 to 12 hues in rainbow order (user feedback during dev). Current-color marker added (user feedback during dev).|

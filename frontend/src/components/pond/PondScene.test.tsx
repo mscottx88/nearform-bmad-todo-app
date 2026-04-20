@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PondScene } from './PondScene';
@@ -32,9 +32,13 @@ vi.mock('@react-three/drei', () => ({
 // Test-configurable `useTodos` — the default fixture returns empty, but
 // individual tests can override via `mockUseTodosData` before rendering.
 let mockUseTodosData: Todo[] = [];
+// Shared spy for `useUpdateTodo().mutate` — reset in beforeEach so
+// individual tests (e.g. the story-4.1 commit-flow test) can assert
+// what PondScene dispatches when a swatch is committed.
+const mockUpdateTodoMutate = vi.fn();
 vi.mock('../../api/todoApi', () => ({
   useTodos: () => ({ data: mockUseTodosData, isLoading: false }),
-  useUpdateTodo: () => ({ mutate: vi.fn() }),
+  useUpdateTodo: () => ({ mutate: mockUpdateTodoMutate }),
 }));
 
 vi.mock('../../api/creatureApi', () => ({
@@ -77,12 +81,15 @@ function makeTodo(id: string): Todo {
 describe('PondScene', () => {
   beforeEach(() => {
     mockUseTodosData = [];
+    mockUpdateTodoMutate.mockReset();
     usePondStore.setState({
       activePopupTodoId: null,
       cameraFocus: null,
       completingTodos: new Map(),
       deletingTodos: new Map(),
       errorTodos: new Map(),
+      dropRipples: [],
+      colorPreviews: new Map(),
     });
   });
 
@@ -185,5 +192,65 @@ describe('PondScene', () => {
     // mount would NOT re-trigger the cascade.
     expect(getByTestId('lily-pad-a').getAttribute('data-drop-delay-ms')).toBe('0');
     expect(getByTestId('lily-pad-b').getAttribute('data-drop-delay-ms')).toBe('0');
+  });
+
+  it('color-swatch commit: mutate, ripple, and closePopup all fire (story 4.1 AC #3)', () => {
+    // Seed a single todo and open its popup so PondScene renders the
+    // ActionPopup. The LilyPad mock renders a <div>, but the popup
+    // lives at the scene level (outside the mocked LilyPad) so its
+    // buttons + swatch sub-panel are real DOM for this test.
+    const todoA = makeTodo('a');
+    todoA.positionX = 3;
+    todoA.positionY = 4;
+    mockUseTodosData = [todoA];
+    usePondStore.setState({ activePopupTodoId: 'a' });
+
+    const queryClient = makeTestClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    // Open the swatch sub-panel.
+    fireEvent.click(screen.getByRole('button', { name: /set color/i }));
+    // Commit the lily swatch (pond's default green, palette row 2).
+    fireEvent.click(screen.getByLabelText('Set color to neon lily'));
+
+    // AC #3a-b: PATCH /api/todos/{id} fires with the new color.
+    expect(mockUpdateTodoMutate).toHaveBeenCalledTimes(1);
+    expect(mockUpdateTodoMutate).toHaveBeenCalledWith({
+      id: 'a',
+      color: '#00ff88',
+    });
+    // AC #3d: ripple emanates from the pad's world (x, z) — assert
+    // via the store's queue (drained each frame by WaterSurface).
+    const queued = usePondStore.getState().dropRipples;
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toEqual({ worldX: 3, worldZ: 4 });
+    // AC #3c: popup closes.
+    expect(usePondStore.getState().activePopupTodoId).toBeNull();
+  });
+
+  it('color-swatch hover: setColorPreview writes to the store slice (story 4.1 AC #2)', () => {
+    const todoA = makeTodo('a');
+    mockUseTodosData = [todoA];
+    usePondStore.setState({ activePopupTodoId: 'a' });
+
+    const queryClient = makeTestClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PondScene />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /set color/i }));
+    const swatch = screen.getByLabelText('Set color to neon green');
+
+    fireEvent.mouseEnter(swatch);
+    expect(usePondStore.getState().colorPreviews.get('a')).toBe('#39ff14');
+
+    fireEvent.mouseLeave(swatch);
+    expect(usePondStore.getState().colorPreviews.has('a')).toBe(false);
   });
 });

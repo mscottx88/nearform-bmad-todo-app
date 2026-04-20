@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
-import { useTodos } from '../../api/todoApi';
+import { useTodos, useUpdateTodo } from '../../api/todoApi';
 import { useCompleteTodo } from '../../hooks/usePopupComplete';
 import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
 import type { Todo } from '../../types';
@@ -27,6 +27,11 @@ export function PondScene() {
   const { data: todos = [], isLoading: isTodosLoading } = useTodos();
   const completeTodo = useCompleteTodo();
   const deleteTodo = useDeleteTodoAction();
+  // Story 4.1: color-swatch commit path. Reuses the existing
+  // useUpdateTodo hook — its onError/onSuccess already wire
+  // setTodoError/clearTodoError (story 2.6 plumbing), so AC #5/#6
+  // fall out of the existing wiring without additional error code.
+  const updateTodo = useUpdateTodo();
 
   // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
   // the first non-empty data set has been rendered, any subsequent mount
@@ -159,8 +164,23 @@ export function PondScene() {
           todo={popupTodo}
           onComplete={handleComplete}
           onDelete={handleDelete}
-          // TODO(Story 4.1): open color swatch panel
-          onSetColor={() => console.log('Set Color', popupTodo.id)}
+          // Story 4.1: commit fires the PATCH, ripples feedback at
+          // the pad's position, and closes the popup — same pattern
+          // as Complete/Delete. useUpdateTodo's onError/onSuccess
+          // drive the decay-on-failure / clear-on-success behavior.
+          onCommitColor={(color) => {
+            updateTodo.mutate({ id: popupTodo.id, color });
+            usePondStore
+              .getState()
+              .triggerRipple(popupTodo.positionX ?? 0, popupTodo.positionY ?? 0);
+            usePondStore.getState().closePopup();
+          }}
+          // Hover-preview — LilyPad subscribes to this via the
+          // colorPreviews store slice and lerps body + rim toward
+          // the previewed hex while the user hovers a swatch.
+          onPreviewColor={(color) =>
+            usePondStore.getState().setColorPreview(popupTodo.id, color)
+          }
           // TODO(Epic 4.2): open group/ungroup flow
           onGroup={() => console.log('Group', popupTodo.id)}
         />

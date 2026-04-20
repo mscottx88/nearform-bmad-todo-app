@@ -9,6 +9,7 @@ import {
   selectCompleting,
   selectDeleting,
   selectTodoError,
+  selectColorPreview,
 } from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 import { GlowSource } from './GlowSource';
@@ -437,11 +438,40 @@ export function LilyPad({
   // lerping handles recovery smoothly when the entry clears — no dedicated
   // recovery-start ref needed.
   const errorEntry = usePondStore(selectTodoError(todo.id));
+  // Story 4.1: transient color preview while the user hovers a swatch
+  // in the Action Popup. Null unless a preview is active. Subscribing
+  // with a memoized selector so only THIS pad re-renders on its own
+  // preview changes, not on every other pad's hover activity.
+  const previewColor = usePondStore(selectColorPreview(todo.id));
 
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
-  const color = todo.color || '#00ff88';
+  // Story 4.1: `effectiveColor` layers the hover-preview on top of the
+  // committed color. Everything downstream (rim material, colorVec for
+  // shader uniform lerps) reads from this, so preview and commit flow
+  // through the same pipeline — no drift between "what's previewed" and
+  // "what the pad renders."
+  const color = previewColor ?? todo.color ?? '#00ff88';
   const colorVec = useMemo(() => new THREE.Color(color), [color]);
+
+  // Story 4.1: sync the pad shader's `uColor` uniform on every color
+  // change — preview hover OR committed change. Fixes the 2.4 deferred-
+  // work entry where `padUniforms.uColor` was frozen at mount. The
+  // resting-branch lerp already reads `colorVec` (now preview-aware)
+  // so its per-frame smoothing picks up seamlessly after the instant
+  // snap here. Mutating `.value` in place avoids re-creating the
+  // uniforms object (which would trigger a shader rebuild).
+  //
+  // Defensive chain: `padMeshRef.current` may exist without a real
+  // ShaderMaterial in unit tests (JSX-stubbed mesh), so guard each
+  // step before touching `.uniforms.uColor.value`.
+  useEffect(() => {
+    const mesh = padMeshRef.current;
+    if (!mesh) return;
+    const mat = mesh.material as THREE.ShaderMaterial | undefined;
+    if (!mat?.uniforms?.uColor) return;
+    mat.uniforms.uColor.value.set(colorVec.r, colorVec.g, colorVec.b);
+  }, [colorVec]);
 
   // Sync target Y to the latest completion state via an effect so we don't
   // mutate a ref during render (react-hooks rule).

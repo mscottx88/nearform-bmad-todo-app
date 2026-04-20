@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-14
-last_updated: 2026-04-20 # story 2.10 code-reviewed, 5 patches applied, moved to done
+last_updated: 2026-04-20 # story 4.1 implemented and moved to review (popup color swatch, 12 rainbow hues, current-color marker)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -76,7 +76,7 @@ development_status:
 
   # Epic 4: Organizing the Pond
   epic-4: in-progress  # opened 2026-04-17 with story 4.1
-  4-1-popup-color-swatch-neon-selector: ready-for-dev  # replaces 4-1-color-chameleon-and-neon-picker; also resolves 2.4 deferred-work uColor-sync entry
+  4-1-popup-color-swatch-neon-selector: review  # all 10 ACs implemented 2026-04-20; 12-hue rainbow palette + current-color marker; 101/101 tests green; ready for CR
   4-2-lily-pad-clustering-and-groups: backlog
   4-3-position-persistence: backlog
   epic-4-retrospective: optional

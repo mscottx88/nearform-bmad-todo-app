@@ -53,6 +53,9 @@ vi.mock('../../stores/usePondStore', () => ({
   selectCompleting: () => () => undefined,
   selectDeleting: () => () => undefined,
   selectTodoError: () => () => undefined,
+  // Story 4.1: preview selector returns null so effectiveColor falls
+  // back to todo.color in this test harness.
+  selectColorPreview: () => () => null,
 }));
 
 const mockTodo: Todo = {
