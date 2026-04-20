@@ -1,6 +1,6 @@
 # Story 5.2: Hybrid Search API
 
-Status: review
+Status: done
 
 > **Scope note:** Second story of Epic 5 (Intelligent Search). Builds directly on Story 5.1's embedding pipeline: this story adds a new `GET /api/search` endpoint that combines PostgreSQL full-text search (GIN index on `to_tsvector('english', text)`) with pgvector cosine-similarity search (HNSW index on `embedding VECTOR(768)`). Both indexes landed in the initial migration at [backend/migrations/versions/7af34c6df37c_initial_schema.py:40-52](backend/migrations/versions/7af34c6df37c_initial_schema.py#L40-L52). Query-side embedding generation reuses `embedding_service.generate_embedding` from Story 5.1. Frontend integration (type-anywhere search UI, surface/submerge animation, 300 ms debounce) lands in Story 5.3.
 
@@ -57,12 +57,12 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
   - [x] No new `SearchRequest` model — the `q` query param is validated directly on the route via `Query(..., min_length=1, max_length=500)`.
 
 - [x] Task 2: New service module `backend/src/services/search_service.py` (AC: #2, #3, #4, #7, #8)
-  - [ ] Module constants: `FTS_WEIGHT = 0.3`, `VECTOR_WEIGHT = 0.7`, `MAX_CANDIDATES_PER_SIDE = 50`, `RESULT_LIMIT = 20`. Each with a one-line comment on why.
-  - [ ] `hybrid_search(db: Session, query_text: str) -> SearchResponse` — the public entry point. Strips `query_text`, runs FTS + (optional) vector, merges, returns.
-  - [ ] Private helper `_run_fts(db, q: str) -> dict[UUID, tuple[Todo, float]]` — runs the FTS SQL, returns a dict keyed by `todo.id` with `(todo, normalised_score)`. Uses `websearch_to_tsquery('english', :q)` and `ts_rank_cd / (1 + ts_rank_cd)` for `[0,1]` normalisation. Filters `deleted=false AND completed=false AND archived=false`. `LIMIT 50`.
-  - [ ] Private helper `_run_vector(db, query_vec: list[float]) -> dict[UUID, tuple[Todo, float]]` — runs pgvector cosine similarity. Filter includes `embedding IS NOT NULL AND embedding_status = 'complete'` + the same active-row filter. Computes `1 - (embedding <=> :query_vec) AS similarity`. `LIMIT 50`. Uses `bindparam("query_vec", type_=Vector(768))` for safe parameter binding.
-  - [ ] Private helper `_merge(fts: dict, vec: dict) -> list[SearchResult]` — iterates the union of keys; for each, computes `FTS_WEIGHT * fts_score + VECTOR_WEIGHT * vec_score` (0.0 for the missing term); determines `match_type` from which dict(s) contained the key (`"keyword"` if only in fts, `"semantic"` if only in vec, `"hybrid"` if both); sorts desc by score then `created_at` desc; slices to `RESULT_LIMIT`.
-  - [ ] `hybrid_search` orchestration:
+  - [x] Module constants: `FTS_WEIGHT = 0.3`, `VECTOR_WEIGHT = 0.7`, `MAX_CANDIDATES_PER_SIDE = 50`, `RESULT_LIMIT = 20`. Each with a one-line comment on why.
+  - [x] `hybrid_search(db: Session, query_text: str) -> SearchResponse` — the public entry point. Strips `query_text`, runs FTS + (optional) vector, merges, returns.
+  - [x] Private helper `_run_fts(db, q: str) -> dict[UUID, tuple[Todo, float]]` — runs the FTS SQL, returns a dict keyed by `todo.id` with `(todo, normalised_score)`. Uses `websearch_to_tsquery('english', :q)` and `ts_rank_cd / (1 + ts_rank_cd)` for `[0,1]` normalisation. Filters `deleted=false AND completed=false AND archived=false`. `LIMIT 50`.
+  - [x] Private helper `_run_vector(db, query_vec: list[float]) -> dict[UUID, tuple[Todo, float]]` — runs pgvector cosine similarity. Filter includes `embedding IS NOT NULL AND embedding_status = 'complete'` + the same active-row filter. Computes `1 - (embedding <=> :query_vec) AS similarity`. `LIMIT 50`. Uses `bindparam("query_vec", type_=Vector(768))` for safe parameter binding.
+  - [x] Private helper `_merge(fts: dict, vec: dict) -> list[SearchResult]` — iterates the union of keys; for each, computes `FTS_WEIGHT * fts_score + VECTOR_WEIGHT * vec_score` (0.0 for the missing term); determines `match_type` from which dict(s) contained the key (`"keyword"` if only in fts, `"semantic"` if only in vec, `"hybrid"` if both); sorts desc by score then `created_at` desc; slices to `RESULT_LIMIT`.
+  - [x] `hybrid_search` orchestration:
     ```python
     q = query_text.strip()
     fts_map = _run_fts(db, q)
@@ -82,7 +82,7 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
     results = _merge(fts_map, vec_map)
     return SearchResponse(query=q, results=results, vector_search_unavailable=vector_unavailable)
     ```
-  - [ ] Strict mypy. No `async` anywhere.
+  - [x] Strict mypy. No `async` anywhere.
 
 - [x] Task 3: New route module `backend/src/api/search.py` (AC: #1, #5, #6, #7, #10)
   - [x] `router = APIRouter(prefix="/api/search", tags=["search"])`.
@@ -94,27 +94,27 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
   - [x] Added `from src.api.search import router as search_router` and `app.include_router(search_router)` next to the existing `todos_router` and `creatures_router` include lines.
 
 - [x] Task 5: Unit tests — `backend/tests/services/test_search_service.py` (AC: #9)
-  - [ ] Use existing `db_session` fixture from `conftest.py`. Seed a small set of todos with varied `text`, `completed`, `deleted`, and hand-crafted `embedding` values (use `[0.0] * 768` with a single position set to differentiate vectors — full random vectors aren't necessary when the math is deterministic).
-  - [ ] Patch `embedding_service.generate_embedding` to return a known `list[float]` so the vector query has a predictable ordering.
-  - [ ] `test_hybrid_search_keyword_only_hits_FTS` — query matches text of one todo but no embeddings are set up; assert only that todo is returned with `vector_search_unavailable=False` (because the embed call succeeded and returned a vector, but no rows had `embedding_status='complete'`), `score ≤ 0.3` (capped by FTS weight), and `match_type == "keyword"`.
-  - [ ] `test_hybrid_search_semantic_only_hits_vector` — query text has no word overlap with any todo; one todo has an embedding near the query's embedding (dot product engineered to be ~1.0 after normalisation). Assert that todo appears with `score ~ 0.7 * similarity` and `match_type == "semantic"`.
-  - [ ] `test_hybrid_search_mixed_returns_combined` — one todo matches both FTS and vector; its score should exceed either weight alone and `match_type == "hybrid"`.
-  - [ ] `test_hybrid_search_excludes_deleted` — seed a deleted todo whose text matches `q`; assert it is NOT in results.
-  - [ ] `test_hybrid_search_excludes_completed` — seed a completed todo whose text matches; assert NOT in results.
-  - [ ] `test_hybrid_search_pending_embedding_not_in_vector_results` — seed a todo with `embedding_status='pending'` (and NULL `embedding`); assert it can still appear via FTS but never contributes a vector term.
-  - [ ] `test_hybrid_search_embedding_service_failure_falls_back_to_fts` — patch `generate_embedding` to raise `EmbeddingApiKeyMissingError()`; assert response has `vector_search_unavailable=True` and only FTS hits are returned, and the WARNING log line is emitted.
-  - [ ] `test_hybrid_search_result_limit_respected` — seed 30 todos that all match `q`; assert `len(results) == 20` (RESULT_LIMIT).
-  - [ ] `test_hybrid_search_candidate_limit_respected` — seed 60 todos all matching; assert each side's `LIMIT 50` is respected by checking the count of candidates before merge (either expose `_run_fts`/`_run_vector` directly or set `RESULT_LIMIT` via monkeypatch for the test).
-  - [ ] `test_hybrid_search_empty_query_after_strip_raises` — call `hybrid_search(db, "   ")`; assert it raises `ValueError` OR returns an empty-result response. **Pick one and document in Dev Notes**; the route layer should surface 422 either way.
+  - [x] Use existing `db_session` fixture from `conftest.py`. Seed a small set of todos with varied `text`, `completed`, `deleted`, and hand-crafted `embedding` values (use `[0.0] * 768` with a single position set to differentiate vectors — full random vectors aren't necessary when the math is deterministic).
+  - [x] Patch `embedding_service.generate_embedding` to return a known `list[float]` so the vector query has a predictable ordering.
+  - [x] `test_hybrid_search_keyword_only_hits_FTS` — query matches text of one todo but no embeddings are set up; assert only that todo is returned with `vector_search_unavailable=False` (because the embed call succeeded and returned a vector, but no rows had `embedding_status='complete'`), `score ≤ 0.3` (capped by FTS weight), and `match_type == "keyword"`.
+  - [x] `test_hybrid_search_semantic_only_hits_vector` — query text has no word overlap with any todo; one todo has an embedding near the query's embedding (dot product engineered to be ~1.0 after normalisation). Assert that todo appears with `score ~ 0.7 * similarity` and `match_type == "semantic"`.
+  - [x] `test_hybrid_search_mixed_returns_combined` — one todo matches both FTS and vector; its score should exceed either weight alone and `match_type == "hybrid"`.
+  - [x] `test_hybrid_search_excludes_deleted` — seed a deleted todo whose text matches `q`; assert it is NOT in results.
+  - [x] `test_hybrid_search_excludes_completed` — seed a completed todo whose text matches; assert NOT in results.
+  - [x] `test_hybrid_search_pending_embedding_not_in_vector_results` — seed a todo with `embedding_status='pending'` (and NULL `embedding`); assert it can still appear via FTS but never contributes a vector term.
+  - [x] `test_hybrid_search_embedding_service_failure_falls_back_to_fts` — patch `generate_embedding` to raise `EmbeddingApiKeyMissingError()`; assert response has `vector_search_unavailable=True` and only FTS hits are returned, and the WARNING log line is emitted.
+  - [x] `test_hybrid_search_result_limit_respected` — seed 30 todos that all match `q`; assert `len(results) == 20` (RESULT_LIMIT).
+  - [x] `test_hybrid_search_candidate_limit_respected` — seed 60 todos all matching; assert each side's `LIMIT 50` is respected by checking the count of candidates before merge (either expose `_run_fts`/`_run_vector` directly or set `RESULT_LIMIT` via monkeypatch for the test).
+  - [x] `test_hybrid_search_empty_query_after_strip_raises` — call `hybrid_search(db, "   ")`; assert it raises `ValueError` OR returns an empty-result response. **Picked `ValueError`** — matches the spec's preferred shape for a programmer-error path (the route's pydantic layer catches the whitespace case first anyway).
 
 - [x] Task 6: Integration tests — `backend/tests/api/test_search.py` (AC: #9, #10)
-  - [ ] `test_search_missing_q_param` → 422.
-  - [ ] `test_search_empty_q` — `?q=` → 422 (from pydantic `min_length=1`).
-  - [ ] `test_search_too_long_q` — 501-char `q` → 422.
-  - [ ] `test_search_whitespace_only_q` — `?q=%20%20` → 422 after strip.
-  - [ ] `test_search_returns_expected_shape` — seed a todo, patch `generate_embedding`, call `/api/search?q=...`, assert JSON keys + types match `SearchResponse`.
-  - [ ] `test_search_graceful_degradation_without_api_key` — patch `embedding_service.generate_embedding` to raise `EmbeddingApiKeyMissingError`, call search; assert HTTP 200, `vector_search_unavailable: true`, and FTS hits still present.
-  - [ ] `test_search_does_not_return_completed_or_deleted` — seed a completed and a deleted todo whose text matches; assert neither appears.
+  - [x] `test_search_missing_q_param` → 422.
+  - [x] `test_search_empty_q` — `?q=` → 422 (from pydantic `min_length=1`).
+  - [x] `test_search_too_long_q` — 501-char `q` → 422.
+  - [x] `test_search_whitespace_only_q` — `?q=%20%20` → 422 after strip.
+  - [x] `test_search_returns_expected_shape` — seed a todo, patch `generate_embedding`, call `/api/search?q=...`, assert JSON keys + types match `SearchResponse`.
+  - [x] `test_search_graceful_degradation_without_api_key` — patch `embedding_service.generate_embedding` to raise `EmbeddingApiKeyMissingError`, call search; assert HTTP 200, `vector_search_unavailable: true`, and FTS hits still present.
+  - [x] `test_search_does_not_return_completed_or_deleted` — seed a completed and a deleted todo whose text matches; assert neither appears.
 
 - [x] Task 7: Run full backend test suite + quality gates (AC: #9)
   - [x] `cd backend && uv run pytest -v` — all green (62 passed; 43 pre-existing + 19 new).
