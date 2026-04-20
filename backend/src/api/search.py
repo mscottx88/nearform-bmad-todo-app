@@ -15,9 +15,11 @@ def _non_whitespace(value: str) -> str:
     # `?q=%20` into a 422 with the standard validation_error envelope.
     # Using PydanticCustomError (not ValueError) so the error context
     # stays JSON-serialisable when the global validation_error_handler
-    # calls `exc.errors()`.
+    # calls `exc.errors()`. Using a custom code (not "value_error") so
+    # the frontend can render a specific "please enter a search term"
+    # message distinct from other generic validation failures.
     if not value.strip():
-        raise PydanticCustomError("value_error", "Query cannot be empty")
+        raise PydanticCustomError("query_blank", "Query cannot be empty")
     return value
 
 

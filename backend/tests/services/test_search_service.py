@@ -216,9 +216,11 @@ def test_hybrid_search_embedding_service_failure_falls_back_to_fts(
     assert len(resp.results) == 1
     assert resp.results[0].todo.id == todo.id
     assert resp.results[0].match_type == "keyword"
-    # WARNING logged with exception type (no PII).
+    # WARNING logged with exception type (no PII). The log name is
+    # `search_embedding_failed` (distinct from `search_vector_query_failed`
+    # which would mean the SQL side failed, not the external API).
     assert any(
-        "search_vector_unavailable" in rec.message
+        "search_embedding_failed" in rec.message
         and "EmbeddingApiKeyMissingError" in rec.message
         for rec in caplog.records
     )
@@ -271,6 +273,76 @@ def test_hybrid_search_candidate_limit_respected(
         resp = search_service.hybrid_search(db_session, "widget")
 
     assert len(resp.results) == search_service.MAX_CANDIDATES_PER_SIDE
+
+
+def test_hybrid_search_combined_score_within_epsilon(db_session: Session) -> None:
+    # Pin the merge math: observe each side's score directly, then verify
+    # the response's combined score equals FTS_WEIGHT * fts + VECTOR_WEIGHT
+    # * vec to within a small epsilon. Satisfies AC #9's
+    # "score-ordering-correctness … to within a small epsilon".
+    from src.services import search_service
+
+    todo = _seed_todo(
+        db_session,
+        "Review Q2 roadmap",
+        embedding=_vec(3),
+        embedding_status="complete",
+    )
+    query_vec = _vec(3)  # cosine similarity 1.0 against _vec(3)
+
+    fts_map = search_service._run_fts(db_session, "review")
+    vec_map = search_service._run_vector(db_session, query_vec)
+
+    assert todo.id in fts_map
+    assert todo.id in vec_map
+    _, fts_normalised = fts_map[todo.id]
+    _, vec_sim = vec_map[todo.id]
+
+    expected_score = (
+        search_service.FTS_WEIGHT * fts_normalised
+        + search_service.VECTOR_WEIGHT * vec_sim
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=query_vec,
+    ):
+        resp = search_service.hybrid_search(db_session, "review")
+
+    assert len(resp.results) == 1
+    assert resp.results[0].todo.id == todo.id
+    assert resp.results[0].match_type == "hybrid"
+    assert resp.results[0].score == pytest.approx(expected_score, abs=1e-4)
+
+
+def test_hybrid_search_tie_break_deterministic_by_id(
+    db_session: Session,
+) -> None:
+    # Two todos with identical text (→ identical fts_score) and no
+    # embeddings; vector branch contributes nothing so combined scores
+    # are equal. created_at also sorts equal when rows are inserted in
+    # the same second under the server-default. Tertiary id tie-break
+    # must yield deterministic order across repeated invocations.
+    # (Using "xylophone" not "same" — the latter is a Postgres English
+    # stopword and is stripped by websearch_to_tsquery.)
+    from src.services import search_service
+
+    todo_a = _seed_todo(db_session, "xylophone widget")
+    todo_b = _seed_todo(db_session, "xylophone widget")
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(99),
+    ):
+        resp1 = search_service.hybrid_search(db_session, "xylophone")
+        resp2 = search_service.hybrid_search(db_session, "xylophone")
+
+    # Both responses must be in the exact same order, regardless of
+    # insertion order or internal set/dict ordering.
+    ids1 = [r.todo.id for r in resp1.results]
+    ids2 = [r.todo.id for r in resp2.results]
+    assert ids1 == ids2
+    assert {todo_a.id, todo_b.id} == set(ids1)
 
 
 def test_hybrid_search_empty_result_set_returns_empty_list(

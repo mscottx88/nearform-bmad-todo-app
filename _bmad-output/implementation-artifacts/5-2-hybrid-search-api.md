@@ -122,6 +122,42 @@ So that typing "docs" surfaces my "update README" todo (semantic) and "Review Q2
   - [x] `cd backend && uv run mypy --strict src/` — clean (25 source files).
   - [ ] Manual smoke (optional, requires live Postgres + optional API key): `GET /api/search?q=test` via `curl` or HTTPie. **Deferred to user — the automated test suite exercises the real SQL path (FTS + pgvector) against the live Postgres used for tests, including the fallback branch.**
 
+### Review Findings
+
+Code review run 2026-04-20. Three parallel layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor). 6 patches, 7 deferred, 10 dismissed as noise/false-positive/explicitly-in-scope.
+
+**Patches (applied):**
+
+- [x] [Review][Patch] `_run_fts` and `_run_vector` second-stage ORM re-fetch now re-applies `deleted=False, completed=False, archived=False`. Defence-in-depth + closes the small TOCTOU window. [search_service.py:108-118, 148-158]
+- [x] [Review][Patch] Split the broad `try/except` into two: `generate_embedding` failures log `search_embedding_failed`; `_run_vector` failures log `search_vector_query_failed` and call `db.rollback()` first so a failed-transaction session isn't returned to the pool dirty. [search_service.py:55-85]
+- [x] [Review][Patch] New test `test_hybrid_search_combined_score_within_epsilon` observes each side's score directly, then asserts the response's combined score equals `FTS_WEIGHT * fts + VECTOR_WEIGHT * vec` within `abs=1e-4`. Satisfies AC #9's "to within a small epsilon" clause. [test_search_service.py]
+- [x] [Review][Patch] Tie-break sort now uses `(score, created_at, todo.id)` as the key. New test `test_hybrid_search_tie_break_deterministic_by_id` pins that two repeated searches yield identical ordering even when score and `created_at` collide. [search_service.py:203-207, test_search_service.py]
+- [x] [Review][Patch] `PydanticCustomError` code changed from `"value_error"` to `"query_blank"` so the frontend (Story 5.3) can distinguish "please enter a search term" from generic validation failures. [api/search.py:16]
+- [x] [Review][Patch] `_run_vector` now skips non-finite similarities (`math.isfinite` guard) and logs `search_non_finite_similarity` with the todo id. Prevents a NaN vector (from Google or pgvector) propagating through `max(0.0, min(1.0, NaN))` into a 500. [search_service.py:162-171]
+
+**Deferred (real, not this story's scope):**
+
+- [x] [Review][Defer] No search-path-specific HTTP timeout — the embedding call inherits 5.1's 15 s `HttpOptions.timeout`, so worst-case search latency is 15 s, not the 300 ms UX budget. Explicitly called out in this story's Dev Notes § Out of scope. A slow-but-not-failing Google API pins the user. Fix: pass a per-call `HttpOptions(timeout=1500 ms)` on the search path, or wrap the embedding call in a `concurrent.futures.ThreadPoolExecutor.submit(...).result(timeout=1.5)`.
+- [x] [Review][Defer] Two round-trips per side (4 total per request) — rank IDs in SQL, then re-hydrate ORM. Spec's "preferred alternative." Could become one SQL with a `returning=Todo` join if profiling shows latency.
+- [x] [Review][Defer] Per-side `MAX_CANDIDATES_PER_SIDE = 50` cap means a todo at #60 in BOTH rankings never reaches `_merge`. At scale (thousands of active todos) moderately-relevant dual-signal matches become invisible. Current corpus is small — not a correctness bug today.
+- [x] [Review][Defer] Empty tsquery (stop-words only, emoji-only, non-English, punctuation-only) returns empty FTS results with no signal to the client — user can't tell "no matches" from "tsquery was unsupported". Fix: return a `tsquery_unsupported: true` flag (or similar) when `websearch_to_tsquery` is empty.
+- [x] [Review][Defer] Duplicate `?q=a&q=b` silently takes last value (FastAPI's default scalar-string behaviour). No user-visible error. Cosmetic.
+- [x] [Review][Defer] `SearchResponse.query` echoes the server-stripped value, not the client's raw input. If the UI uses `response.query` to display "results for X", X may differ from what the user typed (trimmed whitespace). Minor UX.
+- [x] [Review][Defer] `_seed_todo` test helper sets `embedding` + `embedding_status` atomically on the ORM instance, bypassing the embedding-worker path that produces them in production. If the worker later adds a post-write invariant (e.g., `updated_at` bump), these fixtures drift. Harmless today; flag for test-hygiene sweep.
+
+**Dismissed (false positive / in-spec / noise):**
+
+- Dismissed: tests use `EmbeddingApiKeyMissingError` while the service catches generically — tests still verify observable behaviour (fallback + log format), and the most likely failure mode is specifically covered.
+- Dismissed: `ts_rank_cd / (1+x)` biases merge toward vector — real mathematical observation, but the 0.3/0.7 weights are a design choice explicitly documented in the Dev Notes § Hybrid-scoring algorithm rationale; not a bug.
+- Dismissed: HNSW index plan choice can be fragile — purely operational; not a current bug, no way to test against it without profiling.
+- Dismissed: `test_hybrid_search_candidate_limit_respected` uses `monkeypatch` on `RESULT_LIMIT` — intentional, isolates the per-side cap from the final cap for unambiguous test semantics.
+- Dismissed: `QParam` mixing `Query(...)` + `AfterValidator(...)` — current FastAPI/pydantic versions handle this cleanly; integration tests verify behaviour; fragility concern is speculative.
+- Dismissed: `ts_rank_cd=0` still returns a match with `score≈0` — within spec; no minimum-score threshold is defined in ACs. Let the frontend filter if it wants.
+- Dismissed: `"Query too long"` message text differs from spec wording — spec message strings are guidance, not mandate; envelope + 422 status are correct per AC #5 and tests cover both.
+- Dismissed: FTS `ORDER BY fts_score DESC` can't index-scan — Postgres MUST compute `ts_rank_cd` over all GIN-matched rows. Standard pattern; unavoidable without materialised ranking columns.
+- Dismissed: `created_at` nullable concern — SQLAlchemy 2 `Mapped[datetime]` declares non-None at type level AND the DB column has `server_default=func.now()`. The tertiary-id sort in patch #4 incidentally hardens this anyway.
+- Dismissed: Acceptance Auditor's "ORDER BY fts_score DESC may sequential-scan" — explicitly marked as informational by the auditor itself (spec does not forbid this on FTS side).
+
 ## Dev Notes
 
 ### Hybrid-scoring algorithm rationale
@@ -415,3 +451,4 @@ Claude Opus 4.7 (1M context) — `claude-opus-4-7[1m]`.
 |------|--------|
 | 2026-04-20 | Story created as Epic 5.2 (second story of Epic 5 "Intelligent Search"). Scope: `GET /api/search?q=...` hybrid endpoint combining Postgres FTS (GIN/`to_tsvector('english', text)` via `websearch_to_tsquery`) and pgvector cosine-similarity (HNSW/`vector_cosine_ops`). Reuses 5.1's `generate_embedding`. Graceful degradation to FTS-only on any embedding failure. Thread-based (no async). FTS weight 0.3, vector weight 0.7; merged/sorted to top 20. |
 | 2026-04-20 | Story implemented. 5 new files (`schemas/search.py`, `services/search_service.py`, `api/search.py`, `tests/services/test_search_service.py`, `tests/api/test_search.py`) + 1 modified (`main.py` router wire-up). 19 new tests (11 service + 8 integration). 62/62 pytest, ruff clean, mypy --strict clean. Status → review. |
+| 2026-04-20 | Code review (3 adversarial layers). 6 patches applied, 7 items deferred, 10 dismissed. Fixes: defence-in-depth filter on ORM re-fetch, split try/except for embedding vs vector-query failure domains + db.rollback on vector errors, score-to-epsilon test (AC #9), tertiary id sort for deterministic tie-break, distinct `query_blank` error code for 5.3's UI, `math.isfinite` guard in vector per-row loop. 2 new tests added. 64/64 pytest, ruff clean, mypy --strict clean. Status stays → review pending user ack. |

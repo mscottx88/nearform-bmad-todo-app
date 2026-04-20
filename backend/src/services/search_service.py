@@ -18,6 +18,7 @@ Thread-based only — async/await prohibited (see CLAUDE.md).
 """
 
 import logging
+import math
 import uuid
 from typing import cast
 
@@ -57,19 +58,36 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
 
     vector_unavailable = False
     vec_map: dict[uuid.UUID, tuple[Todo, float]] = {}
+    # Split try blocks so the two failure domains (embedding service vs.
+    # pgvector/SQL) log distinctly — otherwise a DB error inside _run_vector
+    # is mis-attributed to the external embedding service in operator logs.
+    # Do NOT log `q` (potential PII); log exception metadata only, same
+    # enriched format as embedding_worker for grep-ability.
+    query_vec: list[float] | None = None
     try:
         query_vec = embedding_service.generate_embedding(q)
-        vec_map = _run_vector(db, query_vec)
-    except Exception as exc:  # noqa: BLE001 - any failure → FTS-only fallback
-        # Do NOT log `q` (potential PII). Log exception metadata only,
-        # same enriched format as the embedding worker for grep-ability.
+    except Exception as exc:  # noqa: BLE001 - any embedding failure → FTS-only
         logger.warning(
-            "search_vector_unavailable exc=%s code=%s status=%s",
+            "search_embedding_failed exc=%s code=%s status=%s",
             type(exc).__name__,
             getattr(exc, "code", "?"),
             getattr(exc, "status", "?"),
         )
         vector_unavailable = True
+
+    if query_vec is not None:
+        try:
+            vec_map = _run_vector(db, query_vec)
+        except Exception as exc:  # noqa: BLE001 - pgvector/SQL failure → FTS-only
+            # Rollback to clear any half-applied transaction state before
+            # the session returns to the pool; otherwise the next request
+            # on this connection sees PendingRollbackError.
+            db.rollback()
+            logger.warning(
+                "search_vector_query_failed exc=%s",
+                type(exc).__name__,
+            )
+            vector_unavailable = True
 
     results = _merge(fts_map, vec_map)
     return SearchResponse(
@@ -106,7 +124,19 @@ def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:
         return {}
 
     ids_to_raw: dict[uuid.UUID, float] = {row.id: float(row.fts_score) for row in rows}
-    todos = db.query(Todo).filter(Todo.id.in_(ids_to_raw.keys())).all()
+    # Defence-in-depth: re-apply the active-row filter on ORM re-fetch so
+    # a concurrent soft-delete/complete/archive between the two queries
+    # can't resurface a tombstoned row.
+    todos = (
+        db.query(Todo)
+        .filter(
+            Todo.id.in_(ids_to_raw.keys()),
+            Todo.deleted == False,  # noqa: E712
+            Todo.completed == False,  # noqa: E712
+            Todo.archived == False,  # noqa: E712
+        )
+        .all()
+    )
 
     out: dict[uuid.UUID, tuple[Todo, float]] = {}
     for todo in todos:
@@ -145,14 +175,35 @@ def _run_vector(
         return {}
 
     ids_to_sim: dict[uuid.UUID, float] = {row.id: float(row.similarity) for row in rows}
-    todos = db.query(Todo).filter(Todo.id.in_(ids_to_sim.keys())).all()
+    # Same defence-in-depth filter as _run_fts.
+    todos = (
+        db.query(Todo)
+        .filter(
+            Todo.id.in_(ids_to_sim.keys()),
+            Todo.deleted == False,  # noqa: E712
+            Todo.completed == False,  # noqa: E712
+            Todo.archived == False,  # noqa: E712
+        )
+        .all()
+    )
 
     out: dict[uuid.UUID, tuple[Todo, float]] = {}
     for todo in todos:
+        raw_sim = ids_to_sim[todo.id]
+        # NaN/Infinity guard — Python's max/min propagate NaN through
+        # `a if a >= b else b`, so clamping alone can't sanitise. A
+        # corrupt vector would otherwise trip `Field(ge=0.0, le=1.0)`
+        # as a 500 downstream.
+        if not math.isfinite(raw_sim):
+            logger.warning(
+                "search_non_finite_similarity todo_id=%s",
+                todo.id,
+            )
+            continue
         # Cosine similarity is natively in [-1, 1]; clamp negatives to 0
-        # so the downstream Field(ge=0.0, le=1.0) constraint always
-        # holds even on pathological embeddings.
-        sim = max(0.0, min(1.0, ids_to_sim[todo.id]))
+        # so the downstream Field constraint always holds even on
+        # pathological embeddings.
+        sim = max(0.0, min(1.0, raw_sim))
         out[todo.id] = (todo, sim)
     return out
 
@@ -189,8 +240,11 @@ def _merge(
 
         scored.append((todo, combined, match_type))
 
-    # Sort by score desc, tie-break by created_at desc (most recent first).
-    scored.sort(key=lambda t: (t[1], t[0].created_at), reverse=True)
+    # Sort by score desc, tie-break by created_at desc, then todo.id desc.
+    # The id tertiary key keeps ordering deterministic when rows share
+    # BOTH score and created_at (e.g., bulk-inserted demo data sharing a
+    # single server-default now() timestamp).
+    scored.sort(key=lambda t: (t[1], t[0].created_at, t[0].id), reverse=True)
     top = scored[:RESULT_LIMIT]
 
     return [
