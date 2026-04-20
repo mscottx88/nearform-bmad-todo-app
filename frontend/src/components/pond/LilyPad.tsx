@@ -402,6 +402,13 @@ export function LilyPad({
   // as waitStartRef, completingStartTimeRef, etc.).
   const focusFlashPendingRef = useRef(false);
   const focusFlashStartRef = useRef<number | null>(null);
+  // Story 2.10 CR-patch: per-pad lerped elevation contribution, used
+  // only during settling + pulsing. The raw elevation at the pad's
+  // own impact-ripple center oscillates at ~5.5 rad/s and has an
+  // exp(-10t) splash spike — writing it directly to position.y each
+  // frame reads as a visible jitter. Lerping at RIDE_LERP acts as a
+  // low-pass filter (same smoothing resting already has on position.y).
+  const rideElevRef = useRef(0);
   // Story 2.8 follow-up: anchor for the sustained focused-halo oscillation
   // (AC #10). Stamped lazily on the first useFrame tick where `focused` is
   // true and this ref is null — keeps the osc phase reproducible ("starts
@@ -1276,8 +1283,22 @@ export function LilyPad({
       // settling + pulsing (the two landing phases); dropping,
       // completing, deleting, and terminal states remain un-sampled
       // because their own animation fully owns y.
-      const elev = usePondStore.getState().sampleElevation(posX, posZ);
-      group.position.set(posX, DROP_Y_REST + bounce + elev, posZ);
+      //
+      // Elevation is LERPED (not hard-written) because the pad sits
+      // at its own ripple's epicenter, where sin(-t*5.5) oscillates
+      // rapidly and splash=exp(-10t) spikes sharply. RIDE_LERP acts
+      // as a low-pass filter — matches resting's smoothing.
+      const rawElev = usePondStore.getState().sampleElevation(posX, posZ);
+      rideElevRef.current = THREE.MathUtils.lerp(
+        rideElevRef.current,
+        rawElev,
+        RIDE_LERP,
+      );
+      group.position.set(
+        posX,
+        DROP_Y_REST + bounce + rideElevRef.current,
+        posZ,
+      );
       if (t >= 1) {
         phaseTimer.current = 0;
         phaseRef.current = 'pulsing';
@@ -1291,9 +1312,16 @@ export function LilyPad({
       // Story 2.10 CR-patch: ride the water during the pulse too —
       // the impact ripple from the drop is still radiating outward
       // during this 1.2s window and the pad should bob on it.
+      // Shares `rideElevRef` with settling for continuity across the
+      // settling→pulsing boundary (no snap on transition).
       {
-        const elev = usePondStore.getState().sampleElevation(posX, posZ);
-        group.position.y = DROP_Y_REST + elev;
+        const rawElev = usePondStore.getState().sampleElevation(posX, posZ);
+        rideElevRef.current = THREE.MathUtils.lerp(
+          rideElevRef.current,
+          rawElev,
+          RIDE_LERP,
+        );
+        group.position.y = DROP_Y_REST + rideElevRef.current;
       }
       // Rim: fade-blink between yellow glow and normal color
       const glow = Math.max(0, wave) * decay;
@@ -1334,14 +1362,17 @@ export function LilyPad({
         // No glow zero-out — the pulse formula above already lands at
         // strength=AMBIENT_GLOW_STRENGTH and color=pad HDR, matching
         // exactly what the resting branch will write on the next frame.
-        // Story 2.10 CR-patch: seed position.y with the water elevation
-        // at the pad's position so the first resting frame doesn't
-        // lerp UP through a wave crest — in particular, the creation
-        // ripple emitted by this pad (via onDropComplete) is peaking
-        // near the pad at this exact moment, so a non-seeded lerp
-        // would leave the pad below water for ~8 frames.
-        const elev = usePondStore.getState().sampleElevation(posX, posZ);
-        group.position.set(posX, targetY.current + elev, posZ);
+        // Story 2.10 CR-patch: seed position.y from the already-lerped
+        // `rideElevRef` (not raw elev) so the pulsing→resting handoff
+        // is continuous — pulsing's last written y was
+        // `DROP_Y_REST + rideElevRef.current`, and the seed below
+        // lands at the equivalent `targetY + rideElevRef.current`.
+        // No snap.
+        group.position.set(
+          posX,
+          targetY.current + rideElevRef.current,
+          posZ,
+        );
         restStartTime.current = 0;
         phaseRef.current = 'resting';
       }
