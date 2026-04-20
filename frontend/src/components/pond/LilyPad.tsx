@@ -131,6 +131,18 @@ const FOCUSED_GLOW_STRENGTH = 0.22;
 // white on a sine wave. Period is long enough to read as "alive" but
 // slow enough not to feel frantic — ~2.5s per cycle.
 const FOCUSED_OSC_PERIOD_S = 2.5;
+// Story 2.10: pad-floats-on-water lerp rates and tilt constants.
+// RIDE_LERP = 0.08 → ~130ms to reach 90% of a new target height,
+// matching the "smooth but responsive" feel of a floating object.
+// TILT_DELTA = 0.35 (≈ PAD_RADIUS / 3) = the half-width we sample
+// gradients across so the tilt reflects the pad-sized region, not a
+// pointwise slope at the center.
+// TILT_MAX_RADIANS = 15° cap per axis; extreme wave crests shouldn't
+// flip the pad on its side.
+const RIDE_LERP = 0.08;
+const TILT_DELTA = 0.35;
+const TILT_MAX_RADIANS = (Math.PI * 15) / 180;
+const TILT_LERP = 0.08;
 // Vector3-typed mirrors of the THREE.Color creation/focus HDR rim targets,
 // so the GlowSource shader uniform (vec3) can consume them via .copy()
 // without per-frame object allocation.
@@ -693,6 +705,16 @@ export function LilyPad({
 
     const phase = phaseRef.current;
 
+    // Story 2.10: in non-resting phases, lerp tilt back toward 0 so the
+    // pad doesn't stay crooked during pulse, dissolve, drop, settle, etc.
+    // The resting branch below writes tilt targets from the water
+    // gradient; every other phase zeros it out. `rotation.y` (set once
+    // at phase-init time) is preserved — only the x/z tilt is touched.
+    if (phase !== 'resting') {
+      group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, 0, TILT_LERP);
+      group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, 0, TILT_LERP);
+    }
+
     // Terminal state: dissolve finished, awaiting unmount. Don't re-walk
     // descendants every frame, don't restore anything.
     if (phase === 'completed' || phase === 'deleted') return;
@@ -960,13 +982,57 @@ export function LilyPad({
       group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
       group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
       group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
-      // Smooth transition between active/completed Y + gentle bob
-      const restY = THREE.MathUtils.lerp(
-        group.position.y - Math.sin(t * 0.5 + seed) * 0.01 * ramp,
-        targetY.current,
-        COMPLETION_LERP,
+
+      // Story 2.10: pad rides the water surface. Sample elevation at
+      // the pad's (x, z) world position and lerp `position.y` toward
+      // `targetY.current + elevation`. `targetY.current` still drives
+      // the active/completed base height; water motion rides on top.
+      // Replaces the fake 0.01-amplitude sine bob that predated the
+      // sampler. Sampler is registered by WaterSurface on mount; before
+      // that it returns 0 (flat water) — harmless fallback.
+      const samplePond = usePondStore.getState().sampleElevation;
+      const elevation = samplePond(posX, posZ);
+      group.position.y = THREE.MathUtils.lerp(
+        group.position.y,
+        targetY.current + elevation,
+        RIDE_LERP,
       );
-      group.position.y = restY + Math.sin(t * 0.5 + seed) * 0.01 * ramp;
+
+      // Story 2.10: tilt the pad toward the local water gradient via
+      // central differences at ±TILT_DELTA around the pad center.
+      // Small-angle alignment of pad +Y with water normal
+      // (-df/dx, 1, -df/dz):
+      //   rotation.z = +atan(dydx)   → +x wave-rise → +x corner up
+      //   rotation.x = -atan(dydz)   → +z wave-rise → +z corner up
+      // Both clamped to ±15° per axis (TILT_MAX_RADIANS) so extreme
+      // crests can't flip the pad; lerped at TILT_LERP for smoothness.
+      // No allocations: raw numbers only, no Vector2/Quaternion.
+      const elevXPlus = samplePond(posX + TILT_DELTA, posZ);
+      const elevXMinus = samplePond(posX - TILT_DELTA, posZ);
+      const elevZPlus = samplePond(posX, posZ + TILT_DELTA);
+      const elevZMinus = samplePond(posX, posZ - TILT_DELTA);
+      const dydx = (elevXPlus - elevXMinus) / (2 * TILT_DELTA);
+      const dydz = (elevZPlus - elevZMinus) / (2 * TILT_DELTA);
+      const targetTiltZ = THREE.MathUtils.clamp(
+        Math.atan(dydx),
+        -TILT_MAX_RADIANS,
+        TILT_MAX_RADIANS,
+      );
+      const targetTiltX = THREE.MathUtils.clamp(
+        -Math.atan(dydz),
+        -TILT_MAX_RADIANS,
+        TILT_MAX_RADIANS,
+      );
+      group.rotation.x = THREE.MathUtils.lerp(
+        group.rotation.x,
+        targetTiltX,
+        TILT_LERP,
+      );
+      group.rotation.z = THREE.MathUtils.lerp(
+        group.rotation.z,
+        targetTiltZ,
+        TILT_LERP,
+      );
 
       // Desaturate pad shader when completed OR when the pad is in error decay.
       // Decay takes precedence — a completed pad with a failed mutation reads

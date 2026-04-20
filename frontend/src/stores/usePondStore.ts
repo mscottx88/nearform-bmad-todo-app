@@ -100,6 +100,27 @@ interface PondState {
   triggerRipple: (worldX: number, worldZ: number) => void;
   /** Drain the ripple queue — called by WaterSurface after applying. */
   drainRipples: () => void;
+
+  /**
+   * Sample the water surface elevation at a world-space (x, z) point.
+   * WaterSurface registers the real implementation on mount; until then
+   * the default no-op returns 0 (treating the water as flat). Callers
+   * can safely invoke from anywhere in the scene (LilyPad uses this to
+   * ride the waves). Never allocates.
+   *
+   * Story 2.10.
+   */
+  sampleElevation: (worldX: number, worldZ: number) => number;
+  /**
+   * WaterSurface registers its sampler on mount via this action, and
+   * resets to a no-op on unmount. Imperative pattern (not a React
+   * subscription) to keep the per-frame read path allocation-free.
+   */
+  registerElevationSampler: (
+    fn: (worldX: number, worldZ: number) => number,
+  ) => void;
+  /** Reset the sampler to the no-op default (called by WaterSurface unmount). */
+  unregisterElevationSampler: () => void;
   focusCamera: (x: number, z: number, zoom?: number) => void;
   openPopup: (todoId: string, x: number, z: number) => void;
   closePopup: () => void;
@@ -140,6 +161,18 @@ export const usePondStore = create<PondState>((set, get) => ({
     })),
 
   drainRipples: () => set({ dropRipples: [] }),
+
+  // Story 2.10: elevation sampler. Default is a no-op returning 0
+  // (flat water) — WaterSurface overrides this on mount via
+  // `registerElevationSampler`. Stored as a plain function reference
+  // on state (NOT a selector-exposed value) so LilyPad.useFrame can
+  // call it imperatively via `usePondStore.getState().sampleElevation`
+  // without subscribing. The function itself is mutated via set().
+  sampleElevation: () => 0,
+
+  registerElevationSampler: (fn) => set({ sampleElevation: fn }),
+
+  unregisterElevationSampler: () => set({ sampleElevation: () => 0 }),
 
   focusCamera: (x: number, z: number, zoom?: number) =>
     set({ cameraFocus: { x, z, zoom } }),

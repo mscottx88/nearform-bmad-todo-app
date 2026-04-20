@@ -3,6 +3,12 @@ import { useFrame } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import { usePondStore } from "../../stores/usePondStore";
+import {
+  sampleElevation,
+  type ElevationInputs,
+  type RippleSlot,
+  type AmbientRippleSlot,
+} from "./waterElevation";
 
 // Number of concurrent ambient ripple "slots" in the shader. Each slot is
 // an independent expanding wavefront. With 3 slots plus randomized
@@ -293,6 +299,34 @@ export function WaterSurface() {
   const nextAmbientSlotRef = useRef<number>(0);
   const nextClickSlotRef = useRef<number>(0);
 
+  // Story 2.10: elevation-sampler input buffer. Pre-allocated once and
+  // mutated in place each useFrame tick so `sampleElevation()` reads
+  // fresh state without the hot path allocating. LilyPad.useFrame
+  // reads the sampler from the store and calls it per pad per frame.
+  const elevationInputsRef = useRef<ElevationInputs>({
+    clickSlots: Array.from(
+      { length: CLICK_SLOTS },
+      (): RippleSlot => ({
+        centerX: 0,
+        centerY: 0,
+        startTime: 0,
+        amplitude: 0,
+      }),
+    ),
+    ambientSlots: Array.from(
+      { length: AMBIENT_SLOTS },
+      (): AmbientRippleSlot => ({
+        centerX: 0,
+        centerY: 0,
+        startTime: 0,
+        amplitude: 0,
+        decayRate: 0,
+      }),
+    ),
+    ambientWavefrontSpeed: AMBIENT_WAVEFRONT_SPEED,
+    elapsedTime: 0,
+  });
+
   useFrame((state) => {
     const mesh = meshRef.current;
     if (!mesh || !mesh.material) return;
@@ -300,6 +334,37 @@ export function WaterSurface() {
     if (!material.uniforms) return;
     material.uniforms.uTime.value = state.clock.elapsedTime;
     material.uniforms.uGlowIntensity.value = glowIntensity;
+
+    // Story 2.10: refresh the elevation-sampler input buffer from the
+    // uniform arrays. Mutate in place — no allocations. LilyPads call
+    // `sampleElevation` via the store's imperative handle during their
+    // own useFrame tick (same R3F frame, guaranteed-fresh state).
+    {
+      const buf = elevationInputsRef.current;
+      buf.elapsedTime = state.clock.elapsedTime;
+      const uClickCenters = material.uniforms.uDropCenter.value as THREE.Vector2[];
+      const uClickTimes = material.uniforms.uDropTime.value as number[];
+      const uClickAmps = material.uniforms.uDropAmplitude.value as number[];
+      for (let i = 0; i < CLICK_SLOTS; i++) {
+        const slot = buf.clickSlots[i];
+        slot.centerX = uClickCenters[i].x;
+        slot.centerY = uClickCenters[i].y;
+        slot.startTime = uClickTimes[i];
+        slot.amplitude = uClickAmps[i];
+      }
+      const uAmbCenters = material.uniforms.uAmbientCenter.value as THREE.Vector2[];
+      const uAmbTimes = material.uniforms.uAmbientTime.value as number[];
+      const uAmbAmps = material.uniforms.uAmbientAmplitude.value as number[];
+      const uAmbDecay = material.uniforms.uAmbientDecayRate.value as number[];
+      for (let i = 0; i < AMBIENT_SLOTS; i++) {
+        const slot = buf.ambientSlots[i];
+        slot.centerX = uAmbCenters[i].x;
+        slot.centerY = uAmbCenters[i].y;
+        slot.startTime = uAmbTimes[i];
+        slot.amplitude = uAmbAmps[i];
+        slot.decayRate = uAmbDecay[i];
+      }
+    }
 
     // Story 2.9 AC #2: drain the ripple queue. Each enqueued ripple lands
     // in its own click slot, so two `triggerRipple` calls on the same JS
@@ -343,6 +408,21 @@ export function WaterSurface() {
       pendingAmbientRef.current = null;
     }
   });
+
+  // Story 2.10: register the elevation sampler with the store on mount
+  // so any consumer (LilyPad.useFrame, future floating creatures) can
+  // sample the water surface imperatively. Closes over the ref whose
+  // contents are updated by the useFrame tick above, so callers always
+  // read the latest uniform state without allocating. Reset to a no-op
+  // (returns 0 = flat water) on unmount.
+  useEffect(() => {
+    const sampler = (worldX: number, worldZ: number): number =>
+      sampleElevation(worldX, worldZ, elevationInputsRef.current);
+    usePondStore.getState().registerElevationSampler(sampler);
+    return () => {
+      usePondStore.getState().unregisterElevationSampler();
+    };
+  }, []);
 
   // Schedule occasional ambient ripples at random positions across the
   // pond. Chain setTimeouts so each delay is independently randomized
