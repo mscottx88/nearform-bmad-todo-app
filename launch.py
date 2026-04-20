@@ -8,7 +8,6 @@ Usage:
 """
 
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import time
@@ -70,28 +69,34 @@ def start_frontend(script_dir: Path) -> subprocess.Popen[bytes]:
     return frontend_process
 
 
-def stop_process(
-    process: subprocess.Popen[bytes], name: str, use_ctrl_c: bool = False,
-) -> None:
-    """Stop a process gracefully, with fallback to kill.
+def stop_process(process: subprocess.Popen[bytes], name: str) -> None:
+    """Stop a process and its entire child tree.
 
-    Args:
-        process: Process to stop
-        name: Process name for logging
-        use_ctrl_c: Whether to send CTRL_C_EVENT on Windows
+    On Windows, shell=True wraps the real server in cmd.exe — `.terminate()`
+    only kills the wrapper, leaving uvicorn/node orphaned and holding
+    stdin/stdout pipes to the terminal (which then hangs). `taskkill /F /T`
+    terminates the whole process tree, reaching the grandchild.
     """
+    if process.poll() is not None:
+        return
     print(f"Stopping {name}...")
     try:
-        if use_ctrl_c and sys.platform == "win32":
-            process.send_signal(signal.CTRL_C_EVENT)
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
             process.terminate()
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            print(f"[WARN] {name} didn't stop gracefully, killing...")
+            process.kill()
+            process.wait(timeout=5)
         print(f"[OK] {name} stopped")
-    except subprocess.TimeoutExpired:
-        print(f"[WARN] {name} didn't stop gracefully, killing...")
-        process.kill()
-        print(f"[OK] {name} killed")
     except (OSError, ValueError) as e:
         print(f"[WARN] Error stopping {name}: {e}")
         process.kill()
@@ -123,9 +128,16 @@ def monitor_processes(
 
 
 def main() -> NoReturn:
-    """Launch all development servers with graceful shutdown."""
+    """Launch all development servers with graceful shutdown.
+
+    The `finally` block is the only reliable cleanup path — `SystemExit`
+    raised from `monitor_processes` (one child died) would otherwise skip
+    the `except` clauses, leaking the surviving child and hanging the
+    terminal on its open stdout/stderr pipes.
+    """
     backend_process: subprocess.Popen[bytes] | None = None
     frontend_process: subprocess.Popen[bytes] | None = None
+    exit_code = 0
 
     try:
         print("=" * 60)
@@ -156,31 +168,28 @@ def main() -> NoReturn:
         print()
 
         monitor_processes(backend_process, frontend_process)
-        sys.exit(0)
 
     except KeyboardInterrupt:
         print("\n")
         print("=" * 60)
         print("Shutting down servers...")
         print("=" * 60)
-
-        if backend_process is not None:
-            stop_process(backend_process, "backend server")
-
-        if frontend_process is not None:
-            stop_process(frontend_process, "frontend server", use_ctrl_c=True)
-
-        print()
-        print("All servers stopped. Goodbye!")
-        sys.exit(0)
-
+    except SystemExit as e:
+        # Raised by monitor_processes when a child dies; fall through to
+        # finally for cleanup of whichever child is still alive.
+        exit_code = e.code if isinstance(e.code, int) else 1
     except (subprocess.SubprocessError, OSError) as e:
         print(f"\n[ERROR] Process error: {e}")
+        exit_code = 1
+    finally:
         if backend_process is not None:
-            backend_process.kill()
+            stop_process(backend_process, "backend server")
         if frontend_process is not None:
-            frontend_process.kill()
-        sys.exit(1)
+            stop_process(frontend_process, "frontend server")
+        print()
+        print("All servers stopped. Goodbye!")
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
