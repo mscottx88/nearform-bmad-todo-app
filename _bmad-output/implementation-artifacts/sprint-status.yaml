@@ -24,8 +24,13 @@
 #   - done: Story completed
 #
 # Retrospective Status:
-#   - optional: Can be completed but not required
+#   - pending: Required but not yet completed. All epics MUST retrospect before closing.
 #   - done: Retrospective has been completed
+#
+# Rationale for required (not optional): retrospectives are the drain mechanism
+# for deferred-work.md — without them, CR-deferred items accumulate indefinitely
+# because no process sweeps them. An epic cannot transition to 'done' while its
+# retrospective is 'pending'.
 #
 # WORKFLOW NOTES:
 # ===============
@@ -33,6 +38,9 @@
 # - Stories can be worked in parallel if team capacity allows
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Before marking an epic 'done', run bmad-retrospective to triage this epic's [OPEN]
+#   entries in deferred-work.md and flip each to [PROMOTED → X-Y], [RETIRED], or keep
+#   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
 last_updated: 2026-04-20 # story 5.2 done (6 CR patches applied, 64/64 tests, 7 items deferred)
@@ -48,7 +56,7 @@ development_status:
   1-2-3d-pond-scene-with-water-surface: done
   1-3-custom-neon-snake-cursor: done
   1-4-empty-pond-state-and-design-system: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: pending
 
   # Epic 2: Todo Life on the Pond
   # Stories renumbered 2026-04-16 to resolve forward dependency — Action Popup primitive (2.3) now precedes
@@ -66,27 +74,27 @@ development_status:
   2-10-lily-pads-float-on-water: done  # code-reviewed + 5 patches applied (4 CR findings + 1 AC #3 amendment for settling/pulsing ride); 85/85 tests green
   # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
   #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
-  epic-2-retrospective: optional
+  epic-2-retrospective: pending
 
   # Epic 3: Exploring the Pond
   epic-3: backlog
   3-1-interactive-camera-controls: backlog
   3-2-atmosphere-mode-toggle: backlog
-  epic-3-retrospective: optional
+  epic-3-retrospective: pending
 
   # Epic 4: Organizing the Pond
   epic-4: in-progress  # opened 2026-04-17 with story 4.1
   4-1-popup-color-swatch-neon-selector: done  # 5 CR patches applied (Escape race, preview leak, empty-string, completed-pad flash, keyboard test); 102/102 tests green
   4-2-lily-pad-clustering-and-groups: backlog
   4-3-position-persistence: backlog
-  epic-4-retrospective: optional
+  epic-4-retrospective: pending
 
   # Epic 5: Intelligent Search
   epic-5: in-progress  # opened 2026-04-20 with story 5.1
   5-1-backend-embedding-pipeline: done  # thread-based embedding pipeline; CR applied 8 patches (shutdown-race, HTTP timeout, rollback, soft-delete skip, etc.); 43/43 tests
   5-2-hybrid-search-api: done  # CR applied 6 patches (defence-in-depth filter, split try/except + rollback, score-to-epsilon test, tertiary id sort, distinct error code, NaN guard); 64/64 tests, 7 items deferred
   5-3-type-anywhere-search-with-surface-submerge: backlog
-  epic-5-retrospective: optional
+  epic-5-retrospective: pending
 
   # Epic 6: REMOVED (2026-04-16) — trash lizard, auto-archive, and first-run tutorial dropped from scope per PRD simplification
 
@@ -94,9 +102,9 @@ development_status:
   epic-7: backlog
   7-1-ecosystem-manager-and-ambient-creatures: backlog
   7-2-creature-rarity-and-casino-celebrations: backlog
-  epic-7-retrospective: optional
+  epic-7-retrospective: pending
 
   # Epic 8: The Soundscape
   epic-8: backlog
   8-1-ambient-audio-and-interaction-sounds: backlog
-  epic-8-retrospective: optional
+  epic-8-retrospective: pending
