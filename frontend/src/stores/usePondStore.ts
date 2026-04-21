@@ -198,8 +198,11 @@ interface PondState {
     vectorUnavailable: boolean;
   }) => void;
   /**
-   * Reset the full search slice AND clear `cameraFocus` so the pond
-   * animates back to its resting pose. Called on Escape (AC #12).
+   * Reset the full search slice. Does NOT touch `cameraFocus` —
+   * search doesn't move the camera in the first place (per user
+   * directive: the pond view stays put during search so every pad
+   * stays visible), so clearing wouldn't have anything to undo.
+   * Called on Escape (AC #12).
    */
   clearSearch: () => void;
 }
@@ -404,9 +407,6 @@ export const usePondStore = create<PondState>((set, get) => ({
       searchResults: new Map(),
       searchAllMatches: false,
       vectorSearchUnavailable: false,
-      // AC #12: also clear cameraFocus so the lerp loop restores to
-      // default. Mirrors closePopup's cameraFocus reset.
-      cameraFocus: null,
     }),
 }));
 

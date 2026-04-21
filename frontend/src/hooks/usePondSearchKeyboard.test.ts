@@ -76,14 +76,18 @@ describe('usePondSearchKeyboard', () => {
     unmount();
   });
 
-  it('Escape clears the full search state', () => {
+  it('Escape clears the full search state without touching the camera', () => {
+    // Invariant: search must never touch cameraFocus in either
+    // direction. A sentinel cameraFocus (set by some other source
+    // like popupOpen) must survive an Escape-clears-search keystroke.
+    const sentinelFocus = { x: 1, z: 2, zoom: 10 };
     usePondStore.setState({
       searchQuery: 'review',
       searchActive: true,
       searchResults: new Map([
         ['todo-1', { score: 0.9, matchType: 'hybrid' as const }],
       ]),
-      cameraFocus: { x: 1, z: 2, zoom: 10 },
+      cameraFocus: sentinelFocus,
     });
     const { unmount } = renderHook(() => usePondSearchKeyboard());
     dispatch('Escape');
@@ -91,7 +95,7 @@ describe('usePondSearchKeyboard', () => {
     expect(state.searchQuery).toBe('');
     expect(state.searchActive).toBe(false);
     expect(state.searchResults.size).toBe(0);
-    expect(state.cameraFocus).toBeNull();
+    expect(state.cameraFocus).toEqual(sentinelFocus);
     unmount();
   });
 

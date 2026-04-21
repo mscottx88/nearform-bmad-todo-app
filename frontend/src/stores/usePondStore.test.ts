@@ -355,7 +355,11 @@ describe('usePondStore', () => {
       expect(state.vectorSearchUnavailable).toBe(true);
     });
 
-    it('clearSearch resets all four search slices + cameraFocus', () => {
+    it('clearSearch resets all five search slices and leaves cameraFocus alone', () => {
+      // Invariant: search must never touch the camera in either
+      // direction — not set it and not clear it. A sentinel
+      // cameraFocus must survive clearSearch().
+      const sentinelFocus = { x: 1, z: 2, zoom: 10 };
       usePondStore.setState({
         searchQuery: 'zebra',
         searchActive: true,
@@ -364,7 +368,7 @@ describe('usePondStore', () => {
         ]),
         searchAllMatches: true,
         vectorSearchUnavailable: true,
-        cameraFocus: { x: 1, z: 2, zoom: 10 },
+        cameraFocus: sentinelFocus,
       });
       usePondStore.getState().clearSearch();
       const state = usePondStore.getState();
@@ -373,7 +377,7 @@ describe('usePondStore', () => {
       expect(state.searchResults.size).toBe(0);
       expect(state.searchAllMatches).toBe(false);
       expect(state.vectorSearchUnavailable).toBe(false);
-      expect(state.cameraFocus).toBeNull();
+      expect(state.cameraFocus).toEqual(sentinelFocus);
     });
 
     it('selectSearchHit returns the hit for a matched todo', async () => {

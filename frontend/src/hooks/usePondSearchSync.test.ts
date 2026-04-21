@@ -225,7 +225,13 @@ describe('usePondSearchSync (response handling, real timers)', () => {
     );
   });
 
-  it('auto-frames the camera at the centroid of matched positions', async () => {
+  it('never touches cameraFocus — search leaves the pond view alone', async () => {
+    // Per user direction: searching must NOT zoom or pan the camera;
+    // every pad must stay visible. This pins the invariant — the sync
+    // hook must not dispatch focusCamera regardless of where the
+    // matched pads sit. Seeding a sentinel cameraFocus and verifying
+    // it's unchanged after a response lands guards against a future
+    // "helpful" re-introduction of auto-framing.
     const matchA = makeTodo('a', { positionX: 0, positionY: 0 });
     const matchB = makeTodo('b', { positionX: 4, positionY: 2 });
     vi.spyOn(apiClient, 'get').mockResolvedValue({
@@ -241,51 +247,23 @@ describe('usePondSearchSync (response handling, real timers)', () => {
     });
     renderSync();
 
-    act(() => {
-      usePondStore.setState({ searchQuery: 'x', searchActive: true });
-    });
-
-    await waitFor(
-      () => {
-        expect(usePondStore.getState().cameraFocus).not.toBeNull();
-      },
-      { timeout: 2000 },
-    );
-
-    const focus = usePondStore.getState().cameraFocus;
-    expect(focus?.x).toBeCloseTo(2, 5);
-    expect(focus?.z).toBeCloseTo(1, 5);
-    expect(focus?.zoom ?? 0).toBeGreaterThanOrEqual(8);
-  });
-
-  it('leaves cameraFocus untouched when every match has null positions', async () => {
-    const match = makeTodo('a', { positionX: null, positionY: null });
-    vi.spyOn(apiClient, 'get').mockResolvedValue({
-      data: {
-        query: 'x',
-        results: [{ todo: match, score: 0.9, matchType: 'hybrid' }],
-        vectorSearchUnavailable: false,
-        ftsSupported: true,
-      } satisfies SearchResponse,
-    });
-    renderSync();
-
+    const sentinelFocus = { x: 99, z: 99, zoom: 42 };
     act(() => {
       usePondStore.setState({
         searchQuery: 'x',
         searchActive: true,
-        cameraFocus: null,
+        cameraFocus: sentinelFocus,
       });
     });
 
-    // Wait for the response to propagate into the map.
+    // Wait for the response to propagate so we know the sync hook ran.
     await waitFor(
       () => {
-        expect(usePondStore.getState().searchResults.size).toBe(1);
+        expect(usePondStore.getState().searchResults.size).toBe(2);
       },
       { timeout: 2000 },
     );
-    // Camera must still be null — no positioned matches to frame.
-    expect(usePondStore.getState().cameraFocus).toBeNull();
+    // cameraFocus must still be the sentinel — search must not touch it.
+    expect(usePondStore.getState().cameraFocus).toEqual(sentinelFocus);
   });
 });
