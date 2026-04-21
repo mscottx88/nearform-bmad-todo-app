@@ -1098,16 +1098,24 @@ export function LilyPad({
 
       // Story 5.3 (redesigned): compute this frame's search saturation.
       //
-      //   'none'     → searchSaturation = 1.0   (full pad colour)
-      //   'match'    → searchSaturation = score (partial colour;
-      //                                          higher score =
-      //                                          closer to full)
-      //   'nonmatch' → searchSaturation = 0.0   (neutral gray)
+      //   'none'     → searchSaturation = 1.0        (full pad colour)
+      //   'match'    → searchSaturation = sqrt(score)  (see remap below)
+      //   'nonmatch' → searchSaturation = 0.0        (neutral gray)
       //
       // The body-colour lerp site further down interpolates from
       // SEARCH_NEUTRAL_GRAY toward the committed pad colour using
       // this value. Glow strength is scaled by the same saturation
       // so a gray pad has no glow and a strong match glows fully.
+      //
+      // Why sqrt(score) instead of score directly? A moderate match
+      // (ts_rank + semantic ≈ 0.45 typical for "finish" vs. "finish
+      // the todo app …") would otherwise produce ~45% colour / 55%
+      // gray in the body mix, which reads as "still mostly gray" to
+      // the user. sqrt biases the low-middle toward colour so a
+      // score of 0.45 renders at ~67% colour — visibly a match —
+      // while a near-floor 0.30 match still reads as ~55% colour
+      // (not yet full) and a strong 0.85 match lands at ~92% (near
+      // full). Non-match stays at 0 (fully gray) because sqrt(0)=0.
       //
       // All reads from the store happen imperatively here, NOT as
       // React subscriptions, so searchActive/searchAllMatches changes
@@ -1119,8 +1127,8 @@ export function LilyPad({
           searchSaturation = 1;
         } else if (searchHit !== undefined) {
           // score is clamped to [0, 1] by Field(ge=0, le=1) at the
-          // API boundary, so no extra clamp needed here.
-          searchSaturation = searchHit.score;
+          // API boundary, so no extra clamp needed before the sqrt.
+          searchSaturation = Math.sqrt(searchHit.score);
         } else {
           searchSaturation = 0;
         }
