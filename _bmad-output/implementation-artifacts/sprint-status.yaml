@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-20 # story 5.3 drafted (type-anywhere search UI — frontend-only, consumes 5.2's /api/search)
+last_updated: 2026-04-21 # story 5.3 review (142/142 frontend, 83/83 backend after similarity-floor bugfix)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -97,7 +97,7 @@ development_status:
   epic-5: in-progress  # opened 2026-04-20 with story 5.1
   5-1-backend-embedding-pipeline: done  # thread-based embedding pipeline; CR applied 8 patches (shutdown-race, HTTP timeout, rollback, soft-delete skip, etc.); 43/43 tests
   5-2-hybrid-search-api: done  # CR applied 6 patches (defence-in-depth filter, split try/except + rollback, score-to-epsilon test, tertiary id sort, distinct error code, NaN guard); 64/64 tests, 7 items deferred
-  5-3-type-anywhere-search-with-surface-submerge: ready-for-dev  # frontend-only; consumes 5.2's /api/search; window keydown + 300ms debounce + match-rise/non-match-submerge + camera auto-frame + Escape-clear
+  5-3-type-anywhere-search-with-surface-submerge: review  # 9 new frontend files + 7 modified; 40 new tests; also fixed a 5.2 bug (pgvector returned every row — added MIN_VECTOR_SIMILARITY=0.45 floor); 142/142 frontend + 83/83 backend
   5-4-re-embed-on-text-update: backlog  # promoted from 5-1 CR defer — PATCH /api/todos with new text must reset embedding_status to pending and re-enqueue
   5-5-embedding-reaper-for-pending-rows: backlog  # promoted from 5-1 CR defer — startup or scheduled scan that re-enqueues stuck embedding_status='pending' rows older than a threshold
   epic-5-retrospective: pending

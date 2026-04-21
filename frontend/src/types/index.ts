@@ -32,3 +32,23 @@ export interface Creature {
 }
 
 export type AtmosphereMode = 'zen' | 'cyberpunk';
+
+export type SearchMatchType = 'keyword' | 'semantic' | 'hybrid';
+
+export interface SearchHit {
+  score: number;
+  matchType: SearchMatchType;
+}
+
+export interface SearchResult {
+  todo: Todo;
+  score: number;
+  matchType: SearchMatchType;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  vectorSearchUnavailable: boolean;
+  ftsSupported: boolean;
+}

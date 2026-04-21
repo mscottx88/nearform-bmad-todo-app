@@ -1,0 +1,39 @@
+/* Story 5.3: type-anywhere search overlay. HTML, not R3F — positioned
+   fixed in viewport space just above the water-plane centre. The layer
+   is pointer-events: none so click-through to the canvas still works. */
+.pond-search-overlay {
+  position: fixed;
+  top: 15vh;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+  z-index: 900;
+}
+
+.pond-search-overlay--active {
+  opacity: 1;
+}
+
+.pond-search-overlay__query {
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 8px var(--neon-cyan);
+  /* Non-breaking space on empty so layout doesn't collapse during the
+     CSS fade-out. */
+  min-height: 1em;
+}
+
+.pond-search-overlay__badge {
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  margin-top: 0.4em;
+  text-transform: lowercase;
+}

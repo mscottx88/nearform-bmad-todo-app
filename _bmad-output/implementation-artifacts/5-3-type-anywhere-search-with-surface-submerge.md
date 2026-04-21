@@ -1,6 +1,6 @@
 # Story 5.3: Type-Anywhere Search with Surface/Submerge
 
-Status: ready-for-dev
+Status: review
 
 > **Scope note:** Third story of Epic 5 "Intelligent Search". Consumes the `GET /api/search?q=...` endpoint built in Story 5.2 and wires it to the pond UI: typing anywhere (outside a focused element) drives a debounced query; matching pads rise + glow, non-matches submerge + fade, the camera auto-frames the result cluster, and Escape restores everything. No backend changes in this story.
 
@@ -53,8 +53,8 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Extend types + API hook (AC: #2, #3)
-  - [ ] Add `SearchHit`, `SearchResponse` types to [frontend/src/types/index.ts](frontend/src/types/index.ts):
+- [x] Task 1: Extend types + API hook (AC: #2, #3)
+  - [x] Add `SearchHit`, `SearchResponse` types to [frontend/src/types/index.ts](frontend/src/types/index.ts):
     ```ts
     export type SearchMatchType = 'keyword' | 'semantic' | 'hybrid';
     export interface SearchHit { score: number; matchType: SearchMatchType; }
@@ -66,7 +66,7 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
       ftsSupported: boolean;
     }
     ```
-  - [ ] New file `frontend/src/api/searchApi.ts` with `useSearch(query: string, enabled: boolean)`:
+  - [x] New file `frontend/src/api/searchApi.ts` with `useSearch(query: string, enabled: boolean)`:
     ```ts
     export function useSearch(query: string, enabled: boolean) {
       return useQuery({
@@ -81,99 +81,99 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
     }
     ```
 
-- [ ] Task 2: Extend `usePondStore` with search slices (AC: #1, #3, #12)
-  - [ ] New state: `searchQuery: string`, `searchResults: Map<string, SearchHit>`, `searchActive: boolean`. `searchActive` derives from `searchQuery.length > 0`; include it as an explicit flag so LilyPads don't subscribe to the whole query string.
-  - [ ] New actions:
+- [x] Task 2: Extend `usePondStore` with search slices (AC: #1, #3, #12)
+  - [x] New state: `searchQuery: string`, `searchResults: Map<string, SearchHit>`, `searchActive: boolean`. `searchActive` derives from `searchQuery.length > 0`; include it as an explicit flag so LilyPads don't subscribe to the whole query string.
+  - [x] New actions:
     - `appendSearchChar(ch: string)` — appends one character to `searchQuery`; sets `searchActive=true` if transitioning from empty.
     - `backspaceSearch()` — drops the last character; sets `searchActive=false` if the result is empty.
     - `setSearchResults(results: Map<string, SearchHit>)` — replaces the results Map; called by the `useSearch` subscriber hook.
     - `clearSearch()` — resets `searchQuery=""`, `searchResults=new Map()`, `searchActive=false`, and `cameraFocus=null`.
-  - [ ] Constants co-located with the existing `GLOW_INTENSITY` block: `SURFACE_RISE_Y = 0.3`, `SUBMERGE_DROP_Y = -0.8`, `SEARCH_MATCH_GLOW = 0.35`, `SEARCH_NONMATCH_OPACITY = 0.28`, `SEARCH_DEBOUNCE_MS = 300`.
+  - [x] Constants co-located with the existing `GLOW_INTENSITY` block: `SURFACE_RISE_Y = 0.3`, `SUBMERGE_DROP_Y = -0.8`, `SEARCH_MATCH_GLOW = 0.35`, `SEARCH_NONMATCH_OPACITY = 0.28`, `SEARCH_DEBOUNCE_MS = 300`.
 
-- [ ] Task 2b: Rebind the existing new-todo keyboard shortcut (AC: #15)
-  - [ ] Edit [frontend/src/hooks/useKeyboardShortcuts.ts](frontend/src/hooks/useKeyboardShortcuts.ts) — remove the `e.key === 'n' || e.key === 'N' || e.key === '/'` condition and replace with `e.key === 'Enter'`.
-  - [ ] Extend the guard to ALSO return early when `usePondStore.getState().searchActive` is true OR `activePopupTodoId !== null`. Without those guards, pressing Enter mid-search or mid-popup would spawn a new-todo input on top of the existing UI.
-  - [ ] Update the existing test `useKeyboardShortcuts.test.ts` (if it exists; grep first) — assert `Enter` triggers `onOpenInput`, assert `n`/`N`/`/` do NOT, assert Enter during searchActive does NOT, assert Enter with activePopupTodoId set does NOT.
-  - [ ] If `EmptyPondHint` (or any other UI) references the old shortcut keys in visible copy, update the text. Most likely the hint says something like "press N or / to add" — change to "press Enter to add" or keep generic ("type something to get started").
+- [x] Task 2b: Rebind the existing new-todo keyboard shortcut (AC: #15)
+  - [x] Edit [frontend/src/hooks/useKeyboardShortcuts.ts](frontend/src/hooks/useKeyboardShortcuts.ts) — remove the `e.key === 'n' || e.key === 'N' || e.key === '/'` condition and replace with `e.key === 'Enter'`.
+  - [x] Extend the guard to ALSO return early when `usePondStore.getState().searchActive` is true OR `activePopupTodoId !== null`. Without those guards, pressing Enter mid-search or mid-popup would spawn a new-todo input on top of the existing UI.
+  - [x] Update the existing test `useKeyboardShortcuts.test.ts` (if it exists; grep first) — assert `Enter` triggers `onOpenInput`, assert `n`/`N`/`/` do NOT, assert Enter during searchActive does NOT, assert Enter with activePopupTodoId set does NOT.
+  - [x] If `EmptyPondHint` (or any other UI) references the old shortcut keys in visible copy, update the text. Most likely the hint says something like "press N or / to add" — change to "press Enter to add" or keep generic ("type something to get started").
 
-- [ ] Task 3: Global type-anywhere keyboard hook `frontend/src/hooks/usePondSearchKeyboard.ts` (AC: #1, #12, #14)
-  - [ ] Installs a `window` `keydown` listener inside a `useEffect([])`.
-  - [ ] Guards:
+- [x] Task 3: Global type-anywhere keyboard hook `frontend/src/hooks/usePondSearchKeyboard.ts` (AC: #1, #12, #14)
+  - [x] Installs a `window` `keydown` listener inside a `useEffect([])`.
+  - [x] Guards:
     - Event target is `<input>`, `<textarea>`, or contenteditable → return (same check as `useClosePopupOnEscape`).
     - `activePopupTodoId !== null` (popup is open) → return. The popup captures its own keystrokes.
     - Modifier keys pressed (`e.ctrlKey || e.metaKey || e.altKey`) → return. Leaves OS shortcuts alone.
-  - [ ] Dispatch table:
+  - [x] Dispatch table:
     - `e.key === 'Escape'` → `clearSearch()` + stop propagation.
     - `e.key === 'Backspace'` → `backspaceSearch()` + `e.preventDefault()` so the browser's "back" shortcut doesn't fire.
     - `e.key.length === 1` (printable character — letters, digits, punctuation, space) → `appendSearchChar(e.key)` + `e.preventDefault()`.
     - Anything else (arrows, F-keys, Tab, Enter) → return without consuming.
-  - [ ] Mount this hook once in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) at top level.
+  - [x] Mount this hook once in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) at top level.
 
-- [ ] Task 4: Debounced-search subscriber `frontend/src/hooks/usePondSearchSync.ts` (AC: #2, #3, #7, #8, #9, #10)
-  - [ ] Reads `searchQuery` from the store. Applies a 300 ms debounce (plain `useEffect` + `setTimeout` + cleanup; no external debounce lib needed).
-  - [ ] Calls `useSearch(debouncedQuery, enabled=searchActive)`.
-  - [ ] When `data` arrives, builds a `Map<string, SearchHit>` from `data.results` and calls `setSearchResults(map)`. Also:
+- [x] Task 4: Debounced-search subscriber `frontend/src/hooks/usePondSearchSync.ts` (AC: #2, #3, #7, #8, #9, #10)
+  - [x] Reads `searchQuery` from the store. Applies a 300 ms debounce (plain `useEffect` + `setTimeout` + cleanup; no external debounce lib needed).
+  - [x] Calls `useSearch(debouncedQuery, enabled=searchActive)`.
+  - [x] When `data` arrives, builds a `Map<string, SearchHit>` from `data.results` and calls `setSearchResults(map)`. Also:
     - If `data.ftsSupported === false`: set results to an "everything is a match" sentinel (use a special marker; LilyPad distinguishes via a second store flag `searchAllMatches: boolean` rather than faking `results.size === totalTodos`).
     - If `results.length === 0` and `ftsSupported === true`: set empty Map — LilyPads treat all as non-matches.
-  - [ ] After results settle, compute centroid + zoom of matched pads with non-null positions and dispatch `focusCamera(cx, cz, zoom)`. If no matches or all positions are null, leave camera alone. Zoom heuristic: `zoom = max(8, bbox_diagonal * 1.2)`; document the choice in Dev Notes.
+  - [x] After results settle, compute centroid + zoom of matched pads with non-null positions and dispatch `focusCamera(cx, cz, zoom)`. If no matches or all positions are null, leave camera alone. Zoom heuristic: `zoom = max(8, bbox_diagonal * 1.2)`; document the choice in Dev Notes.
 
-- [ ] Task 5: LilyPad submerge/rise behaviour (AC: #4, #5, #6, #13, #14)
-  - [ ] Read from store: `searchActive`, this pad's hit via `searchResults.get(todo.id)`, and the `searchAllMatches` flag. Subscribe precisely — only this todo's hit, not the whole Map, to avoid re-renders on unrelated result changes (use a selector that returns `useShallow` or manual equality).
-  - [ ] Compute `searchMode: 'none' | 'match' | 'nonmatch'`:
+- [x] Task 5: LilyPad submerge/rise behaviour (AC: #4, #5, #6, #13, #14)
+  - [x] Read from store: `searchActive`, this pad's hit via `searchResults.get(todo.id)`, and the `searchAllMatches` flag. Subscribe precisely — only this todo's hit, not the whole Map, to avoid re-renders on unrelated result changes (use a selector that returns `useShallow` or manual equality).
+  - [x] Compute `searchMode: 'none' | 'match' | 'nonmatch'`:
     - `!searchActive` → `'none'` (no influence).
     - `searchAllMatches` → `'match'` (AC #9 path).
     - `searchResults.has(todo.id)` → `'match'`.
     - else → `'nonmatch'`.
-  - [ ] In the existing `useFrame` loop, compute target `extraY` and `extraOpacityDelta` based on `searchMode`. Lerp towards them with the existing frame-damping factor (reuse the same `smoothing` constant that phase/tilt already use for consistency).
-  - [ ] `searchMode === 'nonmatch'` target: `extraY = SUBMERGE_DROP_Y`, body opacity `= SEARCH_NONMATCH_OPACITY`, glow strength `= 0`.
-  - [ ] `searchMode === 'match'` target: `extraY = SURFACE_RISE_Y`, body opacity `= 1.0`, glow strength `= SEARCH_MATCH_GLOW`.
-  - [ ] `searchMode === 'none'` target: `extraY = 0`, body opacity `= 1.0`, glow strength reverts to the existing focused/ambient logic.
-  - [ ] **Hard guard**: if `phase` is `'completing'` or `'deleting'`, skip the search adjustments entirely — the existing dissolve animation is authoritative (AC #5's "dissolve wins" clause).
+  - [x] In the existing `useFrame` loop, compute target `extraY` and `extraOpacityDelta` based on `searchMode`. Lerp towards them with the existing frame-damping factor (reuse the same `smoothing` constant that phase/tilt already use for consistency).
+  - [x] `searchMode === 'nonmatch'` target: `extraY = SUBMERGE_DROP_Y`, body opacity `= SEARCH_NONMATCH_OPACITY`, glow strength `= 0`.
+  - [x] `searchMode === 'match'` target: `extraY = SURFACE_RISE_Y`, body opacity `= 1.0`, glow strength `= SEARCH_MATCH_GLOW`.
+  - [x] `searchMode === 'none'` target: `extraY = 0`, body opacity `= 1.0`, glow strength reverts to the existing focused/ambient logic.
+  - [x] **Hard guard**: if `phase` is `'completing'` or `'deleting'`, skip the search adjustments entirely — the existing dissolve animation is authoritative (AC #5's "dissolve wins" clause).
 
-- [ ] Task 6: Search-text water overlay `frontend/src/components/pond/PondSearchOverlay.tsx` (AC: #11, #10, #12)
-  - [ ] HTML div absolutely-positioned, pointer-events-none, anchored top-center relative to the viewport (`position: fixed; top: 15vh; left: 50%; transform: translateX(-50%);`). Matches the "water surface" visual region.
-  - [ ] Renders `searchQuery` text in monospace with `text-shadow: 0 0 8px #00eeff`, color `#00eeff`, `font-size: 2rem`, `letter-spacing: 0.1em`. Pick the existing `font-family` from TodoInput.tsx for consistency.
-  - [ ] Renders a small secondary line below (smaller font, 50% opacity) with `"semantic search offline"` when `vectorSearchUnavailable === true`. Rendered only while `searchActive`. Blank otherwise.
-  - [ ] Root element has `opacity` bound to `searchActive ? 1 : 0` with `transition: opacity 200ms ease-out` — the dissolve on clear (AC #12).
-  - [ ] Renders NOTHING (returns null) when `searchQuery === ""` AND the transition has completed (use `transitionend` or a simple timer; don't bother animating mount itself — only unmount fade).
-  - [ ] Mounted once in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) outside the R3F `<Canvas>` (it's an HTML overlay, not a 3D element).
+- [x] Task 6: Search-text water overlay `frontend/src/components/pond/PondSearchOverlay.tsx` (AC: #11, #10, #12)
+  - [x] HTML div absolutely-positioned, pointer-events-none, anchored top-center relative to the viewport (`position: fixed; top: 15vh; left: 50%; transform: translateX(-50%);`). Matches the "water surface" visual region.
+  - [x] Renders `searchQuery` text in monospace with `text-shadow: 0 0 8px #00eeff`, color `#00eeff`, `font-size: 2rem`, `letter-spacing: 0.1em`. Pick the existing `font-family` from TodoInput.tsx for consistency.
+  - [x] Renders a small secondary line below (smaller font, 50% opacity) with `"semantic search offline"` when `vectorSearchUnavailable === true`. Rendered only while `searchActive`. Blank otherwise.
+  - [x] Root element has `opacity` bound to `searchActive ? 1 : 0` with `transition: opacity 200ms ease-out` — the dissolve on clear (AC #12).
+  - [x] Renders NOTHING (returns null) when `searchQuery === ""` AND the transition has completed (use `transitionend` or a simple timer; don't bother animating mount itself — only unmount fade).
+  - [x] Mounted once in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) outside the R3F `<Canvas>` (it's an HTML overlay, not a 3D element).
 
-- [ ] Task 7: PondScene wire-up (AC: #1, #11, #14)
-  - [ ] Call `usePondSearchKeyboard()` at top level.
-  - [ ] Call `usePondSearchSync()` at top level (so React Query runs on debounced query).
-  - [ ] Render `<PondSearchOverlay />` outside `<Canvas>`.
-  - [ ] NO other JSX changes. LilyPad's internal `useFrame` reads the store directly; it doesn't need new props.
+- [x] Task 7: PondScene wire-up (AC: #1, #11, #14)
+  - [x] Call `usePondSearchKeyboard()` at top level.
+  - [x] Call `usePondSearchSync()` at top level (so React Query runs on debounced query).
+  - [x] Render `<PondSearchOverlay />` outside `<Canvas>`.
+  - [x] NO other JSX changes. LilyPad's internal `useFrame` reads the store directly; it doesn't need new props.
 
-- [ ] Task 8: Unit tests — `frontend/src/hooks/usePondSearchKeyboard.test.ts` (AC: #1, #14)
-  - [ ] `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))` → store's `searchQuery === 'a'`.
-  - [ ] Sequence `['r', 'e', 'v']` → `searchQuery === 'rev'`.
-  - [ ] `Backspace` after `'rev'` → `'re'`.
-  - [ ] `Escape` at any time → `searchQuery === ''`, `searchResults.size === 0`, `cameraFocus === null`.
-  - [ ] `'a'` with `document.activeElement` set to a fake `<input>` → `searchQuery` unchanged.
-  - [ ] `'a'` with `activePopupTodoId` set in the store → `searchQuery` unchanged.
-  - [ ] `Ctrl+a` → `searchQuery` unchanged.
+- [x] Task 8: Unit tests — `frontend/src/hooks/usePondSearchKeyboard.test.ts` (AC: #1, #14)
+  - [x] `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))` → store's `searchQuery === 'a'`.
+  - [x] Sequence `['r', 'e', 'v']` → `searchQuery === 'rev'`.
+  - [x] `Backspace` after `'rev'` → `'re'`.
+  - [x] `Escape` at any time → `searchQuery === ''`, `searchResults.size === 0`, `cameraFocus === null`.
+  - [x] `'a'` with `document.activeElement` set to a fake `<input>` → `searchQuery` unchanged.
+  - [x] `'a'` with `activePopupTodoId` set in the store → `searchQuery` unchanged.
+  - [x] `Ctrl+a` → `searchQuery` unchanged.
 
-- [ ] Task 9: Unit tests — `frontend/src/hooks/usePondSearchSync.test.ts` (AC: #2, #3, #7, #8, #9, #10)
-  - [ ] Mock `apiClient.get` (MSW or vi.mock). Type a query → wait 300 ms → assert exactly one GET with `params: { q: 'review' }`.
-  - [ ] Type 3 chars rapidly inside the debounce window → assert exactly ONE GET (not three).
-  - [ ] Response with `results: [{todo, score, matchType}]` → `searchResults.get(todo.id)` returns `{score, matchType}`.
-  - [ ] Response with `ftsSupported: false` → `searchAllMatches === true` in the store.
-  - [ ] Response with `results: [], ftsSupported: true` → `searchResults.size === 0` and `searchAllMatches === false`.
-  - [ ] Response with matches having positions → `cameraFocus` is set with centroid + positive zoom.
-  - [ ] Response with all match positions null → `cameraFocus` unchanged.
+- [x] Task 9: Unit tests — `frontend/src/hooks/usePondSearchSync.test.ts` (AC: #2, #3, #7, #8, #9, #10)
+  - [x] Mock `apiClient.get` (MSW or vi.mock). Type a query → wait 300 ms → assert exactly one GET with `params: { q: 'review' }`.
+  - [x] Type 3 chars rapidly inside the debounce window → assert exactly ONE GET (not three).
+  - [x] Response with `results: [{todo, score, matchType}]` → `searchResults.get(todo.id)` returns `{score, matchType}`.
+  - [x] Response with `ftsSupported: false` → `searchAllMatches === true` in the store.
+  - [x] Response with `results: [], ftsSupported: true` → `searchResults.size === 0` and `searchAllMatches === false`.
+  - [x] Response with matches having positions → `cameraFocus` is set with centroid + positive zoom.
+  - [x] Response with all match positions null → `cameraFocus` unchanged.
 
-- [ ] Task 10: Unit tests — store slice tests extension, `frontend/src/stores/usePondStore.test.ts` (AC: #1, #12)
-  - [ ] `appendSearchChar('a')` → `searchQuery === 'a'`, `searchActive === true`.
-  - [ ] `backspaceSearch()` empties → `searchActive === false`.
-  - [ ] `clearSearch()` → all four search slices reset + `cameraFocus === null`.
+- [x] Task 10: Unit tests — store slice tests extension, `frontend/src/stores/usePondStore.test.ts` (AC: #1, #12)
+  - [x] `appendSearchChar('a')` → `searchQuery === 'a'`, `searchActive === true`.
+  - [x] `backspaceSearch()` empties → `searchActive === false`.
+  - [x] `clearSearch()` → all four search slices reset + `cameraFocus === null`.
 
-- [ ] Task 11: Integration test — `frontend/src/components/pond/PondSearchOverlay.test.tsx` (AC: #11, #10, #12)
-  - [ ] Render the overlay with `searchActive=true, searchQuery='hello', vectorSearchUnavailable=false` → text "hello" visible, no offline badge.
-  - [ ] Flip `vectorSearchUnavailable` to true → "semantic search offline" text rendered.
-  - [ ] `searchActive=false` → element has `opacity: 0` style (use `getComputedStyle` or inline-style assertion).
-  - [ ] `searchQuery=''` → after transition ends, element is removed from DOM (optional — if simpler, assert `opacity: 0` only).
+- [x] Task 11: Integration test — `frontend/src/components/pond/PondSearchOverlay.test.tsx` (AC: #11, #10, #12)
+  - [x] Render the overlay with `searchActive=true, searchQuery='hello', vectorSearchUnavailable=false` → text "hello" visible, no offline badge.
+  - [x] Flip `vectorSearchUnavailable` to true → "semantic search offline" text rendered.
+  - [x] `searchActive=false` → element has `opacity: 0` style (use `getComputedStyle` or inline-style assertion).
+  - [x] `searchQuery=''` → after transition ends, element is removed from DOM (optional — if simpler, assert `opacity: 0` only).
 
-- [ ] Task 12: Full gates — `cd frontend && npx tsc --noEmit` clean, `npx vitest run` all green, `npm run build` clean. Manual smoke (optional, live backend): type in the live app, observe pads rise/fall and camera auto-frame.
+- [x] Task 12: Full gates — `cd frontend && npx tsc --noEmit` clean, `npx vitest run` all green, `npm run build` clean. Manual smoke (optional, live backend): type in the live app, observe pads rise/fall and camera auto-frame.
 
 ## Dev Notes
 
@@ -379,19 +379,79 @@ Net: the backend search API is fully baked and stable. Frontend has been quiet s
 
 ### Agent Model Used
 
-_(to be filled on dev-story run)_
+Claude Opus 4.7 (1M context) — `claude-opus-4-7[1m]`.
 
 ### Debug Log References
 
-_(to be filled on dev-story run)_
+- `npx tsc --noEmit` — clean after all changes.
+- `npx vitest run` — 142 passed / 142 total (was 102 at session start; +40 new across 5 test files).
+- `npm run build` — successful; bundle 1,319 kB (gzip 372 kB). No new deps; the size note is pre-existing.
+- Regression: the existing `src/components/pond/LilyPad.test.tsx` mocked `usePondStore` via `vi.mock` and had to gain four extra keys for the new imports (`selectSearchHit`, `SEARCH_MATCH_GLOW`, `SEARCH_NONMATCH_OPACITY`, `SUBMERGE_DROP_Y`, `SURFACE_RISE_Y`) plus `searchActive` / `searchAllMatches` in `getState()`. One-file, ~15-line mock expansion.
 
 ### Completion Notes List
 
-_(to be filled on dev-story run)_
+**Implementation summary:**
+
+- **Types** ([frontend/src/types/index.ts](frontend/src/types/index.ts)) — `SearchMatchType`, `SearchHit`, `SearchResult`, `SearchResponse` mirror the backend schema; casing matches what `apiClient`'s camelcase-keys interceptor produces.
+- **API hook** ([frontend/src/api/searchApi.ts](frontend/src/api/searchApi.ts)) — `useSearch(query, enabled)` with `queryKey=['search', query] as const` and a 30 s `staleTime` so back-and-forth typing returns from cache without a network round-trip.
+- **Store slices** ([frontend/src/stores/usePondStore.ts](frontend/src/stores/usePondStore.ts)) — 5 state fields (`searchQuery`, `searchActive`, `searchResults`, `searchAllMatches`, `vectorSearchUnavailable`) + 4 actions (`appendSearchChar`, `backspaceSearch`, `setSearchResults`, `clearSearch`) + 5 exported constants (`SURFACE_RISE_Y`, `SUBMERGE_DROP_Y`, `SEARCH_MATCH_GLOW`, `SEARCH_NONMATCH_OPACITY`, `SEARCH_DEBOUNCE_MS`) + `selectSearchHit` selector factory. `clearSearch` also resets `cameraFocus` per AC #12.
+- **Keyboard hook** ([frontend/src/hooks/usePondSearchKeyboard.ts](frontend/src/hooks/usePondSearchKeyboard.ts)) — window keydown with the four-guard stack (input focus, popup open, modifier, non-printable). `Backspace` + printable chars are preventDefault'd; `Escape` clears.
+- **Sync hook** ([frontend/src/hooks/usePondSearchSync.ts](frontend/src/hooks/usePondSearchSync.ts)) — plain `useEffect`/`setTimeout` debounce into `useSearch`, then applies response to the store. Centroid heuristic: `zoom = max(8, bboxDiagonal * 1.2)` per the Dev Notes.
+- **LilyPad animation** ([frontend/src/components/pond/LilyPad.tsx](frontend/src/components/pond/LilyPad.tsx)) — three new refs (`searchYOffsetRef`, `searchOpacityRef`, `searchOpacityStateRef`) + a search-mode computation inside the `resting` phase. Y offset rides on top of the existing water-elevation lerp; body opacity fades via `fadePadMaterials` when non-match and restores via `restorePadMaterials` once the lerp returns close to 1.0 (so `LineBasicMaterial` doesn't stay stuck with `transparent=true`). Glow strength is overridden at the final `uStrength` write. Search-mode logic is INSIDE the `resting` phase block, so `completing`/`deleting` phases never see search influence (AC #5 hard guard, automatic via scope).
+- **Overlay** ([frontend/src/components/pond/PondSearchOverlay.tsx](frontend/src/components/pond/PondSearchOverlay.tsx)) — HTML sibling of `<Canvas>`, `position: fixed; top: 15vh`, uses the existing `--neon-cyan` + `--font-mono` CSS tokens, 200 ms opacity transition via class toggle. `aria-hidden` flips with `searchActive` so screen readers don't announce the idle overlay.
+- **PondScene wire-up** ([frontend/src/components/pond/PondScene.tsx](frontend/src/components/pond/PondScene.tsx)) — two new hook calls at the top of the component + the overlay rendered as a sibling of `<Canvas>` inside a fragment. Zero other JSX changes; LilyPad reads the store directly.
+- **Shortcut rebind** ([frontend/src/hooks/useKeyboardShortcuts.ts](frontend/src/hooks/useKeyboardShortcuts.ts)) — Task 2b: `n`/`N`/`/` removed, replaced with `Enter` gated by `!activePopupTodoId && !searchActive`. `EmptyPondHint` already has generic copy ("just start typing...") and didn't need an update.
+
+**Design decisions / deviations from the spec:**
+
+1. **Overlay unmount**: spec suggested `transitionend`-based unmount after the dissolve. Actually-implemented: always-rendered with opacity CSS class toggle. Simpler, no timer, and `aria-hidden` gives the right accessibility semantics. Not visible when opacity=0 (no pointer events either).
+2. **Task 10 spec gap**: spec listed this as a separate task but there was no pre-existing `usePondStore.test.ts` section to extend — I added a full new `describe('search slices', ...)` block with 8 tests at the end of the existing file.
+3. **Opacity-restore discipline**: spec said "lerps to SEARCH_NONMATCH_OPACITY." The actual implementation uses `fadePadMaterials` every frame while in non-match, AND calls `restorePadMaterials` once when lerping back to 1.0 is "done" (≤ 0.005 from target). Without the restore, `LineBasicMaterial`s stay flagged `transparent=true` which the file's own comment calls out as depth-sort-flicker bait. Matches the existing completion-dissolve restore pattern.
+4. **Extra `useKeyboardShortcuts` test suite**: spec's Task 2b said "update the existing test if it exists." None did — created from scratch so the rebind has positive coverage.
+5. **Regression mock update**: the pre-existing `LilyPad.test.tsx` mocks `usePondStore` via `vi.mock` and doesn't use the real module. I added the new store exports (`selectSearchHit`, four search constants, and `searchActive`/`searchAllMatches` in `getState()`) as inert defaults so those tests continue to pass without asserting anything new.
+
+**Backend fix discovered during 5.3 testing (out-of-spec but blocking):**
+
+The user smoke-tested the live UI and reported "matches every lily pad regardless of todo text." Root cause was in Story 5.2's `_run_vector`: pgvector's `ORDER BY embedding <=> :query_vec LIMIT 50` returns the 50 NEAREST rows unconditionally, including weakly-related ones. On a small pond (<50 embedded todos) every todo came back with some weak cosine similarity and surfaced as a match. Patched as part of this story because 5.3's UX depends on it:
+
+- Added `MIN_VECTOR_SIMILARITY = 0.45` constant in `backend/src/services/search_service.py`.
+- Post-filter in Python after the SQL `ORDER BY` (not in the WHERE clause) so the HNSW planner path stays intact.
+- Two regression tests in `backend/tests/services/test_search_service.py` (`..._drops_vector_hits_below_similarity_floor`, `..._keeps_vector_hits_at_or_above_floor`).
+- Full backend suite: 83/83. Ruff + mypy clean.
+
+**What was NOT changed:**
+
+- `/api/search` endpoint shape — no API contract change.
+- [`frontend/src/api/client.ts`](frontend/src/api/client.ts) — reused as-is.
+- [`EmptyPondHint.tsx`](frontend/src/components/ui/EmptyPondHint.tsx) — its copy is already generic, didn't name the old shortcuts.
+- [`PondCamera.tsx`](frontend/src/components/pond/PondCamera.tsx) — reuses the existing `cameraFocus`-driven lerp path.
+- No new dependencies. Debounce is a plain `setTimeout`.
 
 ### File List
 
-_(to be filled on dev-story run)_
+**New:**
+
+- `frontend/src/api/searchApi.ts`
+- `frontend/src/hooks/usePondSearchKeyboard.ts`
+- `frontend/src/hooks/usePondSearchSync.ts`
+- `frontend/src/components/pond/PondSearchOverlay.tsx`
+- `frontend/src/components/pond/PondSearchOverlay.css`
+- `frontend/src/hooks/usePondSearchKeyboard.test.ts`
+- `frontend/src/hooks/usePondSearchSync.test.ts`
+- `frontend/src/hooks/useKeyboardShortcuts.test.ts`
+- `frontend/src/components/pond/PondSearchOverlay.test.tsx`
+
+**Modified:**
+
+- `frontend/src/types/index.ts` — added 4 search types.
+- `frontend/src/stores/usePondStore.ts` — 5 state fields, 4 actions, 5 constants, 1 selector.
+- `frontend/src/stores/usePondStore.test.ts` — 10 new assertions for the search slices.
+- `frontend/src/hooks/useKeyboardShortcuts.ts` — Task 2b rebind.
+- `frontend/src/components/pond/PondScene.tsx` — 2 new hook mounts + overlay sibling.
+- `frontend/src/components/pond/LilyPad.tsx` — 3 refs + search-mode useFrame branch + glow override.
+- `frontend/src/components/pond/LilyPad.test.tsx` — mock extended with new store exports (regression fix, no new behaviour).
+- `backend/src/services/search_service.py` — `MIN_VECTOR_SIMILARITY = 0.45` floor + post-filter (5.2 bug discovered in 5.3 smoke test; see Completion Notes).
+- `backend/tests/services/test_search_service.py` — 2 regression tests for the similarity floor.
 
 ### Change Log
 
@@ -400,3 +460,4 @@ _(to be filled on dev-story run)_
 | 2026-04-20 | Story created as Epic 5.3 (third story of Epic 5 "Intelligent Search"). Scope: frontend-only type-anywhere search UI consuming Story 5.2's `/api/search` endpoint. Window-level keydown capture (no `<input>` element), 300 ms debounce, match-rise/non-match-submerge in LilyPad `useFrame`, camera auto-frame on match centroid, HTML overlay for typed text, Escape-clear with 400 ms restore. Forward-compat with Story 4.2's cluster work. Partial-deferral note on FR20 (cluster-surfacing reduces to per-pad-rise until 4.2 lands). |
 | 2026-04-21 | AC #15 added + Task 2b + Dev Notes section § "The `useKeyboardShortcuts` collision — why rebind new-todo to `Enter`". Pre-existing bare-key shortcut (`n`/`N`/`/` → open new-todo input) would collide with type-anywhere search. Resolution: rebind to `Enter` with searchActive + activePopupTodoId guards. Surfaced by user question "What about when you press 'N'?" during story review. |
 | 2026-04-21 | Dev Notes § "Keyboard-handler audit" added — full scan of 5 keydown listeners in the frontend (useKeyboardShortcuts, useClosePopupOnEscape, PopupColorSwatch, TodoInput, OrbitControls). Only useKeyboardShortcuts collides (already fixed by AC #15); the other four are non-collisions with reasons documented. Surfaced by user question "Are there other bare key bindings to consider?" |
+| 2026-04-21 | Story 5.3 implemented. 9 new files (searchApi.ts, 2 hooks, overlay + CSS, 4 test files) + 7 modified (store + types + keyboard rebind + PondScene + LilyPad + LilyPad test mock + store tests). 40 new tests (10 store + 12 keyboard hook + 9 sync hook + 5 overlay + 4 useKeyboardShortcuts rebind). 142/142 vitest, tsc clean, production build clean. Also: BACKEND fix discovered in smoke test — pgvector k-NN returned every embedded row regardless of similarity, making every pad match; added MIN_VECTOR_SIMILARITY=0.45 floor in `backend/src/services/search_service.py` + 2 regression tests (`test_hybrid_search_drops_vector_hits_below_similarity_floor`, `..._keeps_vector_hits_at_or_above_floor`). Backend 83/83 green. Status → review. |

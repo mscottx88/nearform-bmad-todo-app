@@ -289,4 +289,102 @@ describe('usePondStore', () => {
       expect(selectTodoError('nope')(state)).toBeUndefined();
     });
   });
+
+  // Story 5.3: search slices + actions.
+  describe('search slices', () => {
+    beforeEach(() => {
+      usePondStore.setState({
+        searchQuery: '',
+        searchActive: false,
+        searchResults: new Map(),
+        searchAllMatches: false,
+        vectorSearchUnavailable: false,
+        cameraFocus: null,
+      });
+    });
+
+    it('appendSearchChar adds the char and activates search', () => {
+      usePondStore.getState().appendSearchChar('r');
+      const state = usePondStore.getState();
+      expect(state.searchQuery).toBe('r');
+      expect(state.searchActive).toBe(true);
+    });
+
+    it('appendSearchChar accumulates multiple characters', () => {
+      const { appendSearchChar } = usePondStore.getState();
+      appendSearchChar('r');
+      appendSearchChar('e');
+      appendSearchChar('v');
+      expect(usePondStore.getState().searchQuery).toBe('rev');
+    });
+
+    it('backspaceSearch drops the last character', () => {
+      usePondStore.setState({ searchQuery: 'rev', searchActive: true });
+      usePondStore.getState().backspaceSearch();
+      expect(usePondStore.getState().searchQuery).toBe('re');
+      expect(usePondStore.getState().searchActive).toBe(true);
+    });
+
+    it('backspaceSearch clears searchActive when the query empties', () => {
+      usePondStore.setState({ searchQuery: 'a', searchActive: true });
+      usePondStore.getState().backspaceSearch();
+      const state = usePondStore.getState();
+      expect(state.searchQuery).toBe('');
+      expect(state.searchActive).toBe(false);
+    });
+
+    it('backspaceSearch is a no-op on empty query', () => {
+      usePondStore.getState().backspaceSearch();
+      expect(usePondStore.getState().searchQuery).toBe('');
+      expect(usePondStore.getState().searchActive).toBe(false);
+    });
+
+    it('setSearchResults replaces the results map + flags', () => {
+      const results = new Map([
+        ['todo-1', { score: 0.9, matchType: 'hybrid' as const }],
+      ]);
+      usePondStore.getState().setSearchResults({
+        results,
+        allMatches: false,
+        vectorUnavailable: true,
+      });
+      const state = usePondStore.getState();
+      expect(state.searchResults.size).toBe(1);
+      expect(state.searchResults.get('todo-1')?.matchType).toBe('hybrid');
+      expect(state.searchAllMatches).toBe(false);
+      expect(state.vectorSearchUnavailable).toBe(true);
+    });
+
+    it('clearSearch resets all four search slices + cameraFocus', () => {
+      usePondStore.setState({
+        searchQuery: 'zebra',
+        searchActive: true,
+        searchResults: new Map([
+          ['todo-1', { score: 0.5, matchType: 'keyword' as const }],
+        ]),
+        searchAllMatches: true,
+        vectorSearchUnavailable: true,
+        cameraFocus: { x: 1, z: 2, zoom: 10 },
+      });
+      usePondStore.getState().clearSearch();
+      const state = usePondStore.getState();
+      expect(state.searchQuery).toBe('');
+      expect(state.searchActive).toBe(false);
+      expect(state.searchResults.size).toBe(0);
+      expect(state.searchAllMatches).toBe(false);
+      expect(state.vectorSearchUnavailable).toBe(false);
+      expect(state.cameraFocus).toBeNull();
+    });
+
+    it('selectSearchHit returns the hit for a matched todo', async () => {
+      const { selectSearchHit } = await import('./usePondStore');
+      const results = new Map([
+        ['todo-1', { score: 0.8, matchType: 'semantic' as const }],
+      ]);
+      usePondStore.setState({ searchResults: results });
+      const state = usePondStore.getState();
+      expect(selectSearchHit('todo-1')(state)?.score).toBe(0.8);
+      expect(selectSearchHit('todo-2')(state)).toBeUndefined();
+    });
+  });
 });

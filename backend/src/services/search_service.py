@@ -48,6 +48,17 @@ MAX_CANDIDATES_PER_SIDE = 50
 # ≤ ~30 pads at once; 20 is plenty.
 RESULT_LIMIT = 20
 
+# Minimum vector cosine similarity to accept as a match. Without this
+# floor, pgvector's k-NN ordering returns the top N NEAREST rows
+# unconditionally — including weakly-related and unrelated todos —
+# which on a small pond (<50 todos) surfaces every row as a match.
+# 0.45 on gemini-embedding-001 normalised embeddings separates
+# plausibly-related topics from noise without being so strict that
+# it rejects real semantic matches ("docs" → "update README" at
+# ~0.55, "Q2 review" → "roadmap retrospective" at ~0.60). Tune if
+# real usage shows the floor is too strict or too lax.
+MIN_VECTOR_SIMILARITY = 0.45
+
 # Per-request HTTP timeout for the query-embedding call on the search
 # path. The background worker keeps the service's 15 s default because
 # retries give it headroom; the search path is a single-shot call where
@@ -207,7 +218,20 @@ def _run_vector(
     if not rows:
         return {}
 
-    ids_to_sim: dict[uuid.UUID, float] = {row.id: float(row.similarity) for row in rows}
+    # Drop rows below the MIN_VECTOR_SIMILARITY floor. pgvector's k-NN
+    # returns the top N NEAREST rows regardless of how weak that
+    # "nearest" actually is — on a small corpus this surfaces every
+    # embedded todo as a weak match. Post-filtering in Python
+    # preserves HNSW index usage (the ORDER BY stays untouched) while
+    # cutting noise before merge. Applied here, not at the SQL WHERE
+    # clause, to avoid defeating the HNSW planner.
+    ids_to_sim: dict[uuid.UUID, float] = {
+        row.id: float(row.similarity)
+        for row in rows
+        if float(row.similarity) >= MIN_VECTOR_SIMILARITY
+    }
+    if not ids_to_sim:
+        return {}
     # Same defence-in-depth filter as _run_fts.
     todos = (
         db.query(Todo)

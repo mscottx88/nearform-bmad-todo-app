@@ -398,6 +398,66 @@ def test_hybrid_search_fts_supported_true_for_real_word(
     assert resp.fts_supported is True
 
 
+def test_hybrid_search_drops_vector_hits_below_similarity_floor(
+    db_session: Session,
+) -> None:
+    # Regression: without the MIN_VECTOR_SIMILARITY floor, pgvector's
+    # k-NN ordering returns the top 50 nearest embeddings regardless of
+    # how weak "nearest" is. On a small corpus every embedded todo
+    # surfaces as a noisy match — reported from story 5.3 dev testing
+    # ("search matches every lily pad regardless of text").
+    #
+    # Setup: the todo's embedding is one-hot at index 0; the query
+    # embedding is one-hot at index 500 (both within the 768-dim
+    # range). Orthogonal one-hots → cosine similarity EXACTLY 0,
+    # well below the 0.45 floor. The todo must NOT appear in results
+    # because its text also has no FTS overlap with "nothing".
+    from src.services import search_service
+
+    _seed_todo(
+        db_session,
+        "completely unrelated text",
+        embedding=_vec(0),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(500),
+    ):
+        resp = search_service.hybrid_search(db_session, "nothing")
+
+    # No FTS overlap AND vector similarity below the floor → empty.
+    assert resp.results == []
+
+
+def test_hybrid_search_keeps_vector_hits_at_or_above_floor(
+    db_session: Session,
+) -> None:
+    # Complement of the above: a semantically-strong hit (identical
+    # one-hot vectors → similarity 1.0) stays in results after the
+    # threshold is applied.
+    from src.services import search_service
+
+    todo = _seed_todo(
+        db_session,
+        "completely unrelated text",
+        embedding=_vec(0),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, "nothing")
+
+    # Semantic-only hit with similarity 1.0 still surfaces.
+    assert len(resp.results) == 1
+    assert resp.results[0].todo.id == todo.id
+    assert resp.results[0].match_type == "semantic"
+
+
 def test_hybrid_search_empty_result_set_returns_empty_list(
     db_session: Session,
 ) -> None:

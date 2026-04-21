@@ -6,10 +6,13 @@ import { usePondStore } from '../../stores/usePondStore';
 import { useTodos, useUpdateTodo } from '../../api/todoApi';
 import { useCompleteTodo } from '../../hooks/usePopupComplete';
 import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
+import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
+import { usePondSearchSync } from '../../hooks/usePondSearchSync';
 import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
+import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
 
@@ -19,6 +22,11 @@ import { ActionPopup } from '../ui/ActionPopup';
 const STAGGER_STEP_MS = 100;
 
 export function PondScene() {
+  // Story 5.3: mount once at the PondScene level. Both hooks are
+  // side-effect-only; they don't change PondScene's render output.
+  usePondSearchKeyboard();
+  usePondSearchSync();
+
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
   const completingTodos = usePondStore((s) => s.completingTodos);
@@ -139,6 +147,7 @@ export function PondScene() {
   };
 
   return (
+    <>
     <Canvas
       gl={{ antialias: true, alpha: false }}
       camera={{ fov: 50, near: 0.1, far: 200, position: [0, 15, 20] }}
@@ -202,5 +211,7 @@ export function PondScene() {
         />
       </EffectComposer>
     </Canvas>
+    <PondSearchOverlay />
+    </>
   );
 }

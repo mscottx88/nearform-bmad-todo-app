@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AtmosphereMode, Todo } from '../types';
+import type { AtmosphereMode, SearchHit, Todo } from '../types';
 
 const ATMOSPHERE_MODES: Array<AtmosphereMode | 'base'> = ['base', 'zen', 'cyberpunk'];
 
@@ -10,6 +10,18 @@ const GLOW_INTENSITY: Record<AtmosphereMode | 'base', number> = {
 };
 
 const POPUP_FOCUS_ZOOM = 4;
+
+// Story 5.3: type-anywhere search constants.
+//
+// Match pads rise above resting Y by SURFACE_RISE_Y and glow at
+// SEARCH_MATCH_GLOW (stronger than AMBIENT_GLOW_STRENGTH from LilyPad).
+// Non-match pads lerp to SUBMERGE_DROP_Y (below water) and fade to
+// SEARCH_NONMATCH_OPACITY. Debounce window 300 ms per FR18.
+export const SURFACE_RISE_Y = 0.3;
+export const SUBMERGE_DROP_Y = -0.8;
+export const SEARCH_MATCH_GLOW = 0.35;
+export const SEARCH_NONMATCH_OPACITY = 0.28;
+export const SEARCH_DEBOUNCE_MS = 300;
 
 const getWindowSize = () =>
   typeof window !== 'undefined'
@@ -91,6 +103,30 @@ interface PondState {
    * Session-only; not persisted.
    */
   colorPreviews: Map<string, string>;
+
+  // Story 5.3: type-anywhere search slices.
+  //
+  // `searchQuery` is the raw text the user has typed (not yet
+  // debounced). `searchActive` mirrors `searchQuery.length > 0` as a
+  // standalone flag so LilyPad can subscribe to the boolean without
+  // re-rendering on every keystroke.
+  //
+  // `searchResults` is the derived view of the backend response —
+  // Map<todo.id, SearchHit>. Absence from the map means "non-match"
+  // while `searchActive`.
+  //
+  // `searchAllMatches` is the ftsSupported=false path: every live
+  // todo is treated as a match (AC #9). Distinct from
+  // `searchResults.size === totalTodos` because at ftsSupported=false
+  // we DON'T know the todo list — the flag is the signal.
+  //
+  // `vectorSearchUnavailable` drives the "semantic search offline"
+  // badge in the overlay (AC #10).
+  searchQuery: string;
+  searchActive: boolean;
+  searchResults: Map<string, SearchHit>;
+  searchAllMatches: boolean;
+  vectorSearchUnavailable: boolean;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -147,6 +183,27 @@ interface PondState {
    * already in the desired state. Preview is session-only.
    */
   setColorPreview: (todoId: string, color: string | null) => void;
+
+  // Story 5.3: search actions.
+  /** Append a printable character to `searchQuery`. Sets `searchActive=true`. */
+  appendSearchChar: (ch: string) => void;
+  /** Drop the last character of `searchQuery`. Clears `searchActive` when empty. */
+  backspaceSearch: () => void;
+  /**
+   * Replace the derived search state after a backend response arrives.
+   * Pass `allMatches=true` for the ftsSupported=false path — `results`
+   * may then be empty; every live todo is treated as a match.
+   */
+  setSearchResults: (args: {
+    results: Map<string, SearchHit>;
+    allMatches: boolean;
+    vectorUnavailable: boolean;
+  }) => void;
+  /**
+   * Reset the full search slice AND clear `cameraFocus` so the pond
+   * animates back to its resting pose. Called on Escape (AC #12).
+   */
+  clearSearch: () => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -160,6 +217,11 @@ export const usePondStore = create<PondState>((set, get) => ({
   deletingTodos: new Map(),
   errorTodos: new Map(),
   colorPreviews: new Map(),
+  searchQuery: '',
+  searchActive: false,
+  searchResults: new Map(),
+  searchAllMatches: false,
+  vectorSearchUnavailable: false,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -315,6 +377,39 @@ export const usePondStore = create<PondState>((set, get) => ({
       set({ colorPreviews: next });
     }
   },
+
+  // Story 5.3: search actions.
+  appendSearchChar: (ch: string) =>
+    set((state) => ({
+      searchQuery: state.searchQuery + ch,
+      searchActive: true,
+    })),
+
+  backspaceSearch: () =>
+    set((state) => {
+      if (state.searchQuery.length === 0) return state;
+      const next = state.searchQuery.slice(0, -1);
+      return { searchQuery: next, searchActive: next.length > 0 };
+    }),
+
+  setSearchResults: ({ results, allMatches, vectorUnavailable }) =>
+    set({
+      searchResults: results,
+      searchAllMatches: allMatches,
+      vectorSearchUnavailable: vectorUnavailable,
+    }),
+
+  clearSearch: () =>
+    set({
+      searchQuery: '',
+      searchActive: false,
+      searchResults: new Map(),
+      searchAllMatches: false,
+      vectorSearchUnavailable: false,
+      // AC #12: also clear cameraFocus so the lerp loop restores to
+      // default. Mirrors closePopup's cameraFocus reset.
+      cameraFocus: null,
+    }),
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook
@@ -348,3 +443,15 @@ export const selectColorPreview =
   (todoId: string) =>
   (s: PondState): string | null =>
     s.colorPreviews.get(todoId) ?? null;
+
+// Story 5.3: per-pad search-hit selector. Returns the SearchHit for
+// this todo if the backend ranked it, else undefined. LilyPad can
+// narrow its subscription to just its own hit so one pad's
+// match-status change doesn't re-render every other pad. Paired
+// with `searchActive` and `searchAllMatches` (read separately via
+// targeted selectors or getState() inside useFrame) to compute the
+// 'match' | 'nonmatch' | 'none' mode per frame.
+export const selectSearchHit =
+  (todoId: string) =>
+  (s: PondState): SearchHit | undefined =>
+    s.searchResults.get(todoId);

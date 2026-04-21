@@ -51,6 +51,11 @@ vi.mock('../../stores/usePondStore', () => ({
       // Story 4.1 CR-patch: LilyPad's unmount cleanup also clears any
       // lingering color preview. Mirror the pattern above.
       setColorPreview: vi.fn(),
+      // Story 5.3: LilyPad reads these imperatively inside useFrame to
+      // decide its per-pad search mode. Inactive defaults keep this
+      // test running against the pre-search rendering path.
+      searchActive: false,
+      searchAllMatches: false,
     }),
   }),
   selectCompleting: () => () => undefined,
@@ -59,6 +64,14 @@ vi.mock('../../stores/usePondStore', () => ({
   // Story 4.1: preview selector returns null so effectiveColor falls
   // back to todo.color in this test harness.
   selectColorPreview: () => () => null,
+  // Story 5.3: search-hit selector returns undefined — todo isn't a
+  // match in this test harness.
+  selectSearchHit: () => () => undefined,
+  // Story 5.3: LilyPad imports these constants at module scope.
+  SEARCH_MATCH_GLOW: 0.35,
+  SEARCH_NONMATCH_OPACITY: 0.28,
+  SUBMERGE_DROP_Y: -0.8,
+  SURFACE_RISE_Y: 0.3,
 }));
 
 const mockTodo: Todo = {
