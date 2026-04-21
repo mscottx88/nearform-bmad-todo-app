@@ -1,6 +1,6 @@
 # Story 5.3: Type-Anywhere Search with Surface/Submerge
 
-Status: review
+Status: done
 
 > **Scope note:** Third story of Epic 5 "Intelligent Search". Consumes the `GET /api/search?q=...` endpoint built in Story 5.2 and wires it to the pond UI: typing anywhere (outside a focused element) drives a debounced query; matching pads rise + glow, non-matches submerge + fade, the camera auto-frames the result cluster, and Escape restores everything. No backend changes in this story.
 
