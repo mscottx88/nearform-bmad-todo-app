@@ -24,7 +24,13 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: bash -c 'cd backend && uv run pytest'
+        # DATABASE_URL override points pytest at the test DB so the
+        # `_clean_db` fixture doesn't wipe the developer's dev data
+        # on every commit. The `_safeguard_test_database` session
+        # fixture refuses to run if the DB name doesn't contain
+        # "test"; that guard is what surfaced this bug. Matches
+        # `make test` and ci-backend.yml.
+        entry: bash -c 'cd backend && DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5432/todo_pond_test" uv run pytest'
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false

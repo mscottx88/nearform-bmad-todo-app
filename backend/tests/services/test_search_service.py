@@ -19,6 +19,30 @@ def _vec(index: int, value: float = 1.0) -> list[float]:
     return v
 
 
+def _vec_with_similarity_to_ref(similarity: float) -> list[float]:
+    """Build a 768-dim unit vector with exact cosine `similarity` to `_vec(0)`.
+
+    Math: let reference `a = [1, 0, 0, ..., 0]`. Construct
+    `b = [S, sqrt(1 - S²), 0, 0, ..., 0]`. Then:
+      - `||a|| = ||b|| = 1`
+      - `a · b = S`
+      - `cos(a, b) = S`
+
+    So `_vec_with_similarity_to_ref(0.54)` produces a vector whose
+    cosine similarity to `_vec(0)` is exactly 0.54 — the same value
+    that was observed on production for "create" vs. "buy groceries
+    today", surfaced during live smoke testing. This lets us seed the
+    test DB with embeddings at KNOWN similarities and assert the
+    threshold behaviour without calling the real Google API.
+    """
+    import math
+
+    v = [0.0] * 768
+    v[0] = similarity
+    v[1] = math.sqrt(max(0.0, 1.0 - similarity * similarity))
+    return v
+
+
 def _seed_todo(
     db: Session,
     text: str,
@@ -398,51 +422,94 @@ def test_hybrid_search_fts_supported_true_for_real_word(
     assert resp.fts_supported is True
 
 
-def test_hybrid_search_drops_vector_hits_below_similarity_floor(
+@pytest.mark.parametrize(
+    "similarity,expected_in_results",
+    [
+        (0.30, False),  # deep noise — far below floor
+        (0.50, False),  # mid-noise band
+        (0.54, False),  # EXACT value observed on live "create" vs. "buy groceries"
+        (0.58, False),  # noise-ceiling observed on gemini-embedding-001
+        (0.59, False),  # boundary — just below threshold (0.60)
+        (0.61, True),  # boundary — just above threshold
+        (0.70, True),  # plausibly-related
+        (0.95, True),  # near-identical
+    ],
+)
+def test_hybrid_search_vector_threshold_boundary(
     db_session: Session,
+    similarity: float,
+    expected_in_results: bool,
 ) -> None:
-    # Regression: without the MIN_VECTOR_SIMILARITY floor, pgvector's
-    # k-NN ordering returns the top 50 nearest embeddings regardless of
-    # how weak "nearest" is. On a small corpus every embedded todo
-    # surfaces as a noisy match — reported from story 5.3 dev testing
-    # ("search matches every lily pad regardless of text").
+    # Regression guard for the live "create matches every lily pad"
+    # bug. Seeds a todo whose text has NO overlap with the query, and
+    # whose embedding has EXACT cosine similarity to the query-embed
+    # at the value under test. The only way the todo can surface is
+    # via the vector branch — so this test pins which similarities
+    # pass MIN_VECTOR_SIMILARITY and which get filtered.
     #
-    # Setup: the todo's embedding is one-hot at index 0; the query
-    # embedding is one-hot at index 500 (both within the 768-dim
-    # range). Orthogonal one-hots → cosine similarity EXACTLY 0,
-    # well below the 0.45 floor. The todo must NOT appear in results
-    # because its text also has no FTS overlap with "nothing".
-    from src.services import search_service
-
-    _seed_todo(
-        db_session,
-        "completely unrelated text",
-        embedding=_vec(0),
-        embedding_status="complete",
-    )
-
-    with patch(
-        "src.services.search_service.embedding_service.generate_embedding",
-        return_value=_vec(500),
-    ):
-        resp = search_service.hybrid_search(db_session, "nothing")
-
-    # No FTS overlap AND vector similarity below the floor → empty.
-    assert resp.results == []
-
-
-def test_hybrid_search_keeps_vector_hits_at_or_above_floor(
-    db_session: Session,
-) -> None:
-    # Complement of the above: a semantically-strong hit (identical
-    # one-hot vectors → similarity 1.0) stays in results after the
-    # threshold is applied.
+    # If a future refactor lowers the floor below 0.60, the 0.54 /
+    # 0.58 / 0.59 cases will start returning True and fail here
+    # BEFORE the bug reaches the UI. If the floor is raised above
+    # 0.61, the 0.61 case fails, surfacing that real matches are
+    # being dropped.
     from src.services import search_service
 
     todo = _seed_todo(
         db_session,
         "completely unrelated text",
-        embedding=_vec(0),
+        embedding=_vec_with_similarity_to_ref(similarity),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),  # `_vec_with_similarity_to_ref` is tuned against this
+    ):
+        resp = search_service.hybrid_search(db_session, "zzzzzzz")
+
+    if expected_in_results:
+        assert len(resp.results) == 1
+        assert resp.results[0].todo.id == todo.id
+        assert resp.results[0].match_type == "semantic"
+    else:
+        assert resp.results == [], (
+            f"similarity={similarity} should be below the threshold and "
+            f"filtered out, but {len(resp.results)} result(s) came back"
+        )
+
+
+def test_hybrid_search_noise_scenario_three_unrelated_todos(
+    db_session: Session,
+) -> None:
+    # Direct regression guard for the exact situation the user hit:
+    # three todos, none of which have any textual or semantic
+    # relationship to the query, but whose gemini-embedding-001
+    # cosine similarities to the query happen to sit in the 0.5-0.6
+    # noise band (a quirk of the model — short English phrases pack
+    # into a narrow embedding cone).
+    #
+    # Before the MIN_VECTOR_SIMILARITY floor was introduced AND tuned
+    # to 0.60, all three surfaced as matches on the pond. This test
+    # asserts the correct behaviour: all three get filtered, the UI
+    # goes quiet, the user sees "no matches" via the empty response.
+    from src.services import search_service
+
+    _seed_todo(
+        db_session,
+        "buy groceries today",
+        embedding=_vec_with_similarity_to_ref(0.54),  # ← the real value
+        embedding_status="complete",
+    )
+    _seed_todo(
+        db_session,
+        "finish the todo app before the end of the month",
+        embedding=_vec_with_similarity_to_ref(0.53),
+        embedding_status="complete",
+    )
+    _seed_todo(
+        db_session,
+        "pick up the dry cleaning",
+        embedding=_vec_with_similarity_to_ref(0.42),
         embedding_status="complete",
     )
 
@@ -450,12 +517,101 @@ def test_hybrid_search_keeps_vector_hits_at_or_above_floor(
         "src.services.search_service.embedding_service.generate_embedding",
         return_value=_vec(0),
     ):
-        resp = search_service.hybrid_search(db_session, "nothing")
+        resp = search_service.hybrid_search(db_session, "create")
 
-    # Semantic-only hit with similarity 1.0 still surfaces.
+    assert resp.results == [], (
+        "Three unrelated todos with similarities in the noise band "
+        "(0.42, 0.53, 0.54) should all be filtered — they are "
+        "completely unrelated to the query 'create'. If they come "
+        "back as matches, the pond UI surfaces every lily pad and "
+        "the user sees false positives (reported live on 2026-04-21)."
+    )
+
+
+def test_hybrid_search_keyword_match_survives_below_vector_floor(
+    db_session: Session,
+) -> None:
+    # An FTS-only hit must still surface even when the same row's
+    # embedding similarity is below the vector floor. The vector
+    # filter only affects the vector branch; the keyword branch is
+    # independent. Without this guard, a future refactor that unified
+    # the filters could silently drop keyword matches.
+    from src.services import search_service
+
+    todo = _seed_todo(
+        db_session,
+        "create a wireframe for the new feature",  # `create` keyword match
+        embedding=_vec_with_similarity_to_ref(0.40),  # below floor — noise
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, "create")
+
     assert len(resp.results) == 1
     assert resp.results[0].todo.id == todo.id
+    # Vector branch contributed nothing (below floor) → keyword-only.
+    assert resp.results[0].match_type == "keyword"
+
+
+def test_hybrid_search_semantic_and_keyword_rank_correctly(
+    db_session: Session,
+) -> None:
+    # End-to-end ranking sanity check with a realistic mix:
+    #
+    #   - strong_keyword   : text contains "create", similarity 0.40 (below floor)
+    #                        → keyword-only match
+    #   - strong_semantic  : no word overlap, similarity 0.80 (strong)
+    #                        → semantic-only match, very high score
+    #   - weak_noise       : no word overlap, similarity 0.55 (noise)
+    #                        → FILTERED (below floor)
+    #
+    # Expected order:
+    #   strong_semantic ranks FIRST (0.7 * 0.80 = 0.56)
+    #   strong_keyword  ranks SECOND (0.3 * something < 0.30)
+    #   weak_noise      is absent
+    from src.services import search_service
+
+    strong_keyword = _seed_todo(
+        db_session,
+        "create a wireframe",
+        embedding=_vec_with_similarity_to_ref(0.40),
+        embedding_status="complete",
+    )
+    strong_semantic = _seed_todo(
+        db_session,
+        "make a new design",
+        embedding=_vec_with_similarity_to_ref(0.80),
+        embedding_status="complete",
+    )
+    _seed_todo(
+        db_session,
+        "buy groceries today",
+        embedding=_vec_with_similarity_to_ref(0.55),
+        embedding_status="complete",
+    )
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, "create")
+
+    result_ids = [r.todo.id for r in resp.results]
+    assert strong_semantic.id in result_ids, "strong-semantic should survive"
+    assert strong_keyword.id in result_ids, "keyword-only hit should survive"
+    assert len(resp.results) == 2, (
+        f"noise todo (similarity 0.55) must be filtered — only 2 hits expected, "
+        f"got {len(resp.results)}"
+    )
+    assert resp.results[0].todo.id == strong_semantic.id, (
+        "semantic at 0.80 (score 0.56) must rank above keyword-only (score < 0.30)"
+    )
     assert resp.results[0].match_type == "semantic"
+    assert resp.results[1].match_type == "keyword"
 
 
 def test_hybrid_search_empty_result_set_returns_empty_list(

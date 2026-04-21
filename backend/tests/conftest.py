@@ -2,11 +2,22 @@ import pytest
 from sqlalchemy.orm import Session
 from starlette.testclient import TestClient
 
+from src.config import settings
 from src.database import SessionLocal, get_db
 from src.main import app
 from src.models.creature import Creature
 from src.models.group import GroupMembership
 from src.models.todo import Todo
+from tests._safeguard import require_test_database
+
+
+# Session-scoped autouse fixture — runs once before any test. The
+# logic lives in `tests._safeguard` so it can be imported and tested
+# on its own (see test_safeguard.py) without fighting the fixture
+# machinery.
+@pytest.fixture(scope="session", autouse=True)
+def _safeguard_test_database() -> None:  # type: ignore[misc]
+    require_test_database(settings.database_url)
 
 
 @pytest.fixture(autouse=True)
