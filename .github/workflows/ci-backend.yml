@@ -4,9 +4,16 @@ on:
   push:
     paths:
       - 'backend/**'
+      # Root-level infra that affects the backend integration tests:
+      - 'docker-compose.yml'
+      - 'Makefile'
+      - '.github/workflows/ci-backend.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'docker-compose.yml'
+      - 'Makefile'
+      - '.github/workflows/ci-backend.yml'
 
 jobs:
   backend:
@@ -56,6 +63,14 @@ jobs:
 
       - name: Type check
         run: uv run mypy .
+
+      - name: Apply database migrations
+        # Required before pytest — the test suite seeds and queries real
+        # rows (test_search_service, test_schema_constraints, etc.) and
+        # expects the schema landed in migrations/versions/* to be in
+        # place. Without this step the first test fails with "relation
+        # 'todos' does not exist".
+        run: uv run python -m alembic upgrade head
 
       - name: Test
         run: uv run pytest

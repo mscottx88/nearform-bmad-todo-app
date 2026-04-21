@@ -45,15 +45,15 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` `google_api_key` defaults to empty string with no startup validation — will cause opaque errors when embedding feature is implemented (Story 5.1). *Partially addressed in 5.1: a WARNING is logged at startup; the strict-rejection variant is still open.*
 - `[OPEN]` No authentication or authorization on any API endpoint — unauthenticated write access could trigger unbounded embedding generation/billing
 - `[OPEN]` Soft delete not enforced at query layer — no base filter excludes deleted/archived rows; must be added in service layer (Story 2.1)
-- `[OPEN]` CI backend workflow does not run `alembic upgrade head` before tests — will break when DB integration tests are added
+- `[FIXED PENDING]` CI backend workflow does not run `alembic upgrade head` before tests — will break when DB integration tests are added. Fix: ci-backend.yml now runs `uv run python -m alembic upgrade head` immediately before `pytest`.
 - `[FIXED 8e5a910]` `embedding_status` column is unconstrained String(20) — no DB check constraint for valid values (pending/complete/failed). Fix: migration 3c3ff88ec089 added `ck_todos_embedding_status_values CHECK IN (...)`.
 - `[FIXED 8e5a910]` `Creature.todo_id` FK lacks `ondelete` clause — orphaned creatures possible on hard delete. Fix: migration 3c3ff88ec089 replaced the FK with `ondelete='SET NULL'`.
 - `[FIXED 8e5a910]` `color` field accepts any 7-char string — no check constraint. Fix: migration 3c3ff88ec089 added `ck_todos_color_hex` (regex `^#[0-9a-fA-F]{6}$`).
 - `[OPEN]` `updated_at` uses ORM-level `onupdate` only — raw SQL updates won't trigger it; consider DB trigger
 - `[FIXED 8e5a910]` `database_url` accepted without format validation — malformed URLs cause unhelpful startup crashes. Fix: `Settings._validate_database_url` rejects empty strings and inputs without `'://'`.
 - `[FIXED 8e5a910]` `archive_threshold_days` accepts zero or negative values — no bounds validation. Fix: `Field(default=30, gt=0)`.
-- `[OPEN]` Frontend `VITE_API_URL=/api` is a relative path that only works with Vite dev proxy, not production deployments
-- `[OPEN]` CI workflows only trigger on `backend/**` and `frontend/**` paths — root-level changes (docker-compose, Makefile) go untested
+- `[RETIRED]` Frontend `VITE_API_URL=/api` is a relative path that only works with Vite dev proxy, not production deployments. *Retired: the frontend `apiClient` now hardcodes `baseURL: '/api'` by design (frontend/src/api/client.ts:5-11) — dev uses Vite's proxy, prod is assumed to serve frontend + backend behind a same-origin reverse proxy. Reopen only if a cross-origin deploy (e.g., `app.example.com` frontend + `api.example.com` backend) becomes a real target, which would require re-introducing an env var.*
+- `[FIXED PENDING]` CI workflows only trigger on `backend/**` and `frontend/**` paths — root-level changes (docker-compose, Makefile) go untested. Fix: ci-backend.yml now also triggers on `docker-compose.yml`, `Makefile`, and the workflow file itself; ci-frontend.yml triggers on its own workflow file too.
 
 ## Deferred from: code review of story 2-3-in-scene-action-popup (2026-04-16)
 
@@ -63,7 +63,7 @@ If this file grows faster than it drains, something's wrong with the process, no
 
 ## Deferred from: code review of story 2-4-completion-via-popup-green-flash-and-dissolve (2026-04-17)
 
-- `[OPEN]` `padUniforms.uColor` captured once at LilyPad mount; doesn't react to `todo.color` changes (pre-existing, exposed by this diff) — Story 4.1 (popup color-swatch) will need to wire color-change through the shader uniform
+- `[FIXED 43cbc4f]` `padUniforms.uColor` captured once at LilyPad mount; doesn't react to `todo.color` changes. Fix: Story 4.1 implementation wires a `useEffect([committedColor])` that writes `mat.uniforms.uColor.value` on every color change (LilyPad.tsx:464-494). Verified by grepping the file for the Story 4.1 reference comment.
 - `[OPEN]` Clicking Complete on a pad still in `forming`/`dropping`/`settling`/`pulsing` silently delays the flash up to ~2.1s — pad eventually transitions correctly, but UX polish is needed to either fast-forward the drop or disable Complete until `resting`
 - `[RETIRED]` Tab-backgrounded or computer-sleep mid-sequence collapses the 1.6s animation to an instant jump on resume — rare edge case; fix would detect large R3F clock delta and snap to terminal state without firing `triggerRipple`. *Retired: transient and self-resolving (user sees correct terminal state); reopen if a user actually reports the jump as confusing.*
 - `[RETIRED]` useFrame-driven completion-sequence tests — need a `useFrame` invoker mock with controllable clock advancement to assert flash color, ripple-fired-once, finishCompletion at t=1.60s, and terminal `'completed'` phase. Scaffolding is non-trivial; deferred from story 2.4 code review. *Retired: integration-test territory; reopen if a completion-sequence regression slips past the current test coverage.*
