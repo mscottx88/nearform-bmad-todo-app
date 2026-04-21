@@ -72,6 +72,8 @@ development_status:
   2-8-pad-action-glow-on-water: done  # radial-mask halo + ambient + focused sustain + popup wheel-fwd; code-reviewed 2026-04-20 (12 patches applied)
   2-9-ripple-system-hardening: done  # all 11 ACs implemented + code-reviewed 2026-04-20; 1 decision-needed resolved (close-and-ripple), 4 defers logged
   2-10-lily-pads-float-on-water: done  # code-reviewed + 5 patches applied (4 CR findings + 1 AC #3 amendment for settling/pulsing ride); 85/85 tests green
+  2-11-ripple-system-v2: backlog  # promoted from 2-5/2-6/2-9 CR defers — covers the remaining ripple-slot coalescing, slot eviction, uDropCenter single-slot collision, popup-open water-click guard, two-clock mixing (performance.now vs R3F elapsedTime), ambient skip-probability first-ripple edge, ambient scheduler setTimeout cleanup ghost, GLSL template-literal injection, ripple wavefront speed mismatch
+  2-12-pad-phase-guard: backlog  # promoted from 2-4/2-5 CR defers — block Complete/Delete clicks on pads that aren't in the 'resting' phase (avoid silent 2.1 s UI hang), OR fast-forward the drop on action. Also: finishDeletion/finishCompletion cross-idempotent clear tightened.
   # Superseded (historical, preserved as *.superseded.md in implementation-artifacts/):
   #   2-3-completion-egg-hatch-to-complete — was 'done' pre-2026-04-16; replaced by 2-4 above
   epic-2-retrospective: pending
@@ -87,6 +89,8 @@ development_status:
   4-1-popup-color-swatch-neon-selector: done  # 5 CR patches applied (Escape race, preview leak, empty-string, completed-pad flash, keyboard test); 102/102 tests green
   4-2-lily-pad-clustering-and-groups: backlog
   4-3-position-persistence: backlog
+  4-4-frontend-a11y-sweep: backlog  # promoted from 2-3/2-7 CR defers — prefers-reduced-motion honoured across LilyPad animations; popup ARIA/dialog semantics + focus trap + Escape-to-close + keyboard-navigable action buttons; SVG callout pointer-events fix
+  4-5-react-strict-compliance-sweep: backlog  # promoted from 2-7 CR defer — fix ref mutations/reads during render in PondScene (hasSeenInitialLoadRef) and similar patterns; verify by running the app under <StrictMode> and checking the console is clean
   epic-4-retrospective: pending
 
   # Epic 5: Intelligent Search
