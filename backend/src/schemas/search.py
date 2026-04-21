@@ -17,3 +17,9 @@ class SearchResponse(BaseModel):
     query: str
     results: list[SearchResult]
     vector_search_unavailable: bool
+    # False when `websearch_to_tsquery` returned an empty tsquery — the
+    # query was stop-words-only, emoji-only, punctuation-only, or a
+    # language the FTS configuration (`english`) does not tokenise. The
+    # client can distinguish "your query had no searchable terms" from
+    # "no rows matched your query" and render a helpful empty state.
+    fts_supported: bool = True

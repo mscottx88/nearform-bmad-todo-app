@@ -61,7 +61,12 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
     if not q:
         raise ValueError("Query cannot be empty")
 
-    fts_map = _run_fts(db, q)
+    # Detect empty tsquery up-front (stop-words only, emoji-only, etc.)
+    # so we can (a) skip the FTS SQL entirely and (b) tell the client the
+    # FTS branch contributed nothing because the query was unparseable,
+    # distinct from "FTS ran and found no matches".
+    fts_supported = _fts_supported(db, q)
+    fts_map = _run_fts(db, q) if fts_supported else {}
 
     vector_unavailable = False
     vec_map: dict[uuid.UUID, tuple[Todo, float]] = {}
@@ -100,11 +105,29 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
             vector_unavailable = True
 
     results = _merge(fts_map, vec_map)
+    # Echo the CLIENT's input (pre-strip) so the UI can render "results
+    # for X" without diverging from what the user actually typed.
     return SearchResponse(
-        query=q,
+        query=query_text,
         results=results,
         vector_search_unavailable=vector_unavailable,
+        fts_supported=fts_supported,
     )
+
+
+def _fts_supported(db: Session, q: str) -> bool:
+    """True if `websearch_to_tsquery('english', q)` produces a non-empty tsquery.
+
+    Postgres `numnode` counts the nodes in the parsed tsquery; stop-words,
+    emoji, punctuation, and non-English tokens produce an empty tsquery
+    (numnode=0) that silently matches nothing. Checking up-front lets us
+    skip the FTS SQL AND tell the client why the FTS branch was empty.
+    """
+    row = db.execute(
+        text("SELECT numnode(websearch_to_tsquery('english', :q)) AS n"),
+        {"q": q},
+    ).scalar()
+    return bool((row or 0) > 0)
 
 
 def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:

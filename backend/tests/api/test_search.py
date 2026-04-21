@@ -77,7 +77,12 @@ def test_search_returns_expected_shape(
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"query", "results", "vector_search_unavailable"}
+    assert set(body.keys()) == {
+        "query",
+        "results",
+        "vector_search_unavailable",
+        "fts_supported",
+    }
     assert body["query"] == "review"
     assert body["vector_search_unavailable"] is False
     assert len(body["results"]) == 1

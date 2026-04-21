@@ -345,6 +345,59 @@ def test_hybrid_search_tie_break_deterministic_by_id(
     assert {todo_a.id, todo_b.id} == set(ids1)
 
 
+def test_hybrid_search_echoes_raw_query_input(db_session: Session) -> None:
+    # SearchResponse.query must mirror the client's raw input, including
+    # any leading/trailing whitespace, so the UI's "results for <X>" label
+    # matches what the user typed.
+    from src.services import search_service
+
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    raw = "  review  "
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, raw)
+
+    assert resp.query == raw  # NOT stripped
+
+
+def test_hybrid_search_fts_unsupported_for_stopwords_only(
+    db_session: Session,
+) -> None:
+    # Postgres English stopwords produce an empty tsquery; response must
+    # flag fts_supported=False so the client can distinguish "no matches"
+    # from "your query had no searchable terms".
+    from src.services import search_service
+
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(42),
+    ):
+        resp = search_service.hybrid_search(db_session, "the and of")
+
+    assert resp.fts_supported is False
+
+
+def test_hybrid_search_fts_supported_true_for_real_word(
+    db_session: Session,
+) -> None:
+    from src.services import search_service
+
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, "review")
+
+    assert resp.fts_supported is True
+
+
 def test_hybrid_search_empty_result_set_returns_empty_list(
     db_session: Session,
 ) -> None:
