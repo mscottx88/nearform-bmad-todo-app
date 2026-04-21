@@ -52,12 +52,20 @@ RESULT_LIMIT = 20
 # floor, pgvector's k-NN ordering returns the top N NEAREST rows
 # unconditionally — including weakly-related and unrelated todos —
 # which on a small pond (<50 todos) surfaces every row as a match.
-# 0.45 on gemini-embedding-001 normalised embeddings separates
-# plausibly-related topics from noise without being so strict that
-# it rejects real semantic matches ("docs" → "update README" at
-# ~0.55, "Q2 review" → "roadmap retrospective" at ~0.60). Tune if
-# real usage shows the floor is too strict or too lax.
-MIN_VECTOR_SIMILARITY = 0.45
+#
+# Empirically tuned for `gemini-embedding-001` at 768 dims: the model
+# produces unusually tight embeddings for short English phrases, so
+# two completely unrelated 3-word todos commonly land at 0.50–0.55
+# cosine similarity. A floor of 0.60 sits just above that noise
+# ceiling (observed via live smoke test: "create" vs. "buy groceries
+# today" scored 0.54) while staying below the threshold for
+# plausibly-related pairs like "review Q2 roadmap" vs. "quarterly
+# retrospective" (0.70+). If usage data later shows real matches
+# being dropped, lower to 0.55; if noise still leaks through, raise
+# to 0.65. This floor is model-specific — a switch to a sentence-
+# transformer-style model with a wider similarity distribution would
+# want a much lower value.
+MIN_VECTOR_SIMILARITY = 0.60
 
 # Per-request HTTP timeout for the query-embedding call on the search
 # path. The background worker keeps the service's 15 s default because
