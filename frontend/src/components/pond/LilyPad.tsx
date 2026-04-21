@@ -151,14 +151,6 @@ const TILT_LERP = 0.08;
 const CREATION_PAD_GLOW = new THREE.Vector3(2.5, 1.8, 0.2);
 const FOCUS_PAD_GLOW = new THREE.Vector3(3.0, 3.0, 3.0);
 
-// Story 5.3 redesign: neutral gray used as the "no match" colour
-// during active search. Non-matches lerp fully to this; matches lerp
-// back toward their own pad colour by the match score. Gray is dark
-// enough to read as muted / dormant but not so dark it vanishes into
-// the water. Picked to sit clearly below the weakest pad palette
-// colour on the saturation axis.
-const SEARCH_NEUTRAL_GRAY = new THREE.Vector3(0.25, 0.25, 0.25);
-
 // Creation rim target — HDR neon yellow matching the complete/delete
 // treatment so all three pulse-rim highlights share the same brightness
 // "family". Replaces the prior LDR #ffd700 gold. LDR ~= #ffd700.
@@ -272,21 +264,6 @@ const padFragmentShader = /* glsl */ `
   uniform vec3 uFlashColor;
   uniform float uFlashStrength;
   uniform float uSeed;
-  // Story 5.3: search-mode controls.
-  //
-  //   uSearchActive: 0 = no search running (render the body exactly
-  //     as pre-5.3 did). 1 = a search is live and uSaturation is
-  //     meaningful. A dedicated flag (instead of overloading
-  //     uSaturation) keeps the non-search baseline visually
-  //     unchanged — users should never see their pond get "brighter"
-  //     when they're not searching.
-  //   uSaturation: when uSearchActive > 0, this drives the lerp
-  //     between a neutral gray (non-match) and a color-boosted live
-  //     body (match). Match pads visibly "light up" rather than
-  //     staying as dark as the idle body; non-match pads clearly
-  //     gray out.
-  uniform float uSearchActive;
-  uniform float uSaturation;
   varying vec2 vPos;
 
   void main() {
@@ -326,33 +303,6 @@ const padFragmentShader = /* glsl */ `
     // (resting, waiting, creation) this is a no-op.
     float fs = clamp(uFlashStrength, 0.0, 1.0);
     finalColor = mix(finalColor, uFlashColor, fs);
-
-    // Story 5.3: search-mode body treatment.
-    //
-    // When uSearchActive = 0 (the default, no active search), this
-    // whole block is a no-op and the body renders exactly as the
-    // pre-5.3 shader did. When uSearchActive = 1 (a search is
-    // running), the body lerps between two visibly distinct states
-    // driven by uSaturation:
-    //
-    //   uSaturation = 0 (non-match): flat medium-dark gray. The
-    //     target is visibly brighter than the idle baseColor so the
-    //     "dormant" look is clearly different from a normal pad —
-    //     this was the bug in the first saturation cut, where the
-    //     gray target (0.05) was dark enough to be indistinguishable
-    //     from the already-near-black pad body.
-    //
-    //   uSaturation = 1 (strong match): the body gains a significant
-    //     uColor boost so matches visibly "light up" in their own
-    //     colour. Without this boost, a match pad is just the dark
-    //     idle body — no visible search-state difference.
-    //
-    // The boost is NOT added to the non-search path, so normal
-    // gameplay looks identical to pre-5.3.
-    vec3 searchGray = vec3(0.15);
-    vec3 boostedColor = finalColor + uColor * 0.35;
-    vec3 searchFinalColor = mix(searchGray, boostedColor, clamp(uSaturation, 0.0, 1.0));
-    finalColor = mix(finalColor, searchFinalColor, clamp(uSearchActive, 0.0, 1.0));
 
     // Slightly transparent so overlapping pads don't look harsh
     gl_FragColor = vec4(finalColor, 0.92);
@@ -468,12 +418,13 @@ export function LilyPad({
   // wall-clock time happens to land.
   const focusStartTimeRef = useRef<number | null>(null);
   const prevFocusedRef = useRef(focused);
-  // Story 5.3 (redesigned): lerped search saturation. 1.0 = pad
-  // renders in its committed colour; 0.0 = pad lerps fully to
-  // SEARCH_NEUTRAL_GRAY. Per-frame writes read this ref inside
-  // useFrame so match-status changes fade in/out smoothly rather
-  // than snapping. The body-colour lerp site and the glow-strength
-  // write both read this.
+  // Story 5.3: lerped search saturation, in [0, 1]. 1.0 = pad
+  // glows at its normal ambient/focused strength (no search, or a
+  // strong match); 0.0 = glow snuffed entirely (non-match pads are
+  // visually "dormant"). Consumed only by the glow-strength
+  // multiplier in the glow block — pad body + rim colour are
+  // untouched by search so the pond reads the same as non-search
+  // except for the halo.
   const searchSaturationRef = useRef(1);
   // Text fades in at the END of the arrival animation. Both creation
   // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
@@ -678,14 +629,6 @@ export function LilyPad({
     // gently gains action-color — the ridge remains the primary signal.
     uFlashColor: { value: new THREE.Vector3(0, 0, 0) },
     uFlashStrength: { value: 0 },
-    // Story 5.3: search-mode gate. 0 = not searching (shader
-    // treats the entire search block as a no-op, preserving pre-5.3
-    // visuals). 1 = a search is live and uSaturation is read.
-    uSearchActive: { value: 0 },
-    // Story 5.3: 1.0 = strong match (body boosts toward its own
-    // colour); 0.0 = non-match (body flat medium-gray). Only
-    // read by the shader when uSearchActive > 0.
-    uSaturation: { value: 1 },
   }));
 
   useEffect(() => {
@@ -1127,26 +1070,22 @@ export function LilyPad({
       const seed = driftSeed;
       const ramp = Math.min(t / 3, 1);
 
-      // Story 5.3 (redesigned): compute this frame's search saturation.
+      // Story 5.3: compute this frame's search saturation. The value
+      // only gates the pad's GLOW STRENGTH — pad body colour and rim
+      // are deliberately untouched by search so the pond looks the
+      // same as non-search except for the halo beneath each pad.
       //
-      //   'none'     → searchSaturation = 1.0        (full pad colour)
-      //   'match'    → searchSaturation = sqrt(score)  (see remap below)
-      //   'nonmatch' → searchSaturation = 0.0        (neutral gray)
-      //
-      // The body-colour lerp site further down interpolates from
-      // SEARCH_NEUTRAL_GRAY toward the committed pad colour using
-      // this value. Glow strength is scaled by the same saturation
-      // so a gray pad has no glow and a strong match glows fully.
+      //   'none'     → 1.0        (normal ambient/focused glow)
+      //   'match'    → sqrt(score)  (halo scales with match strength)
+      //   'nonmatch' → 0.0        (halo snuffed — pad is "dormant")
       //
       // Why sqrt(score) instead of score directly? A moderate match
       // (ts_rank + semantic ≈ 0.45 typical for "finish" vs. "finish
-      // the todo app …") would otherwise produce ~45% colour / 55%
-      // gray in the body mix, which reads as "still mostly gray" to
-      // the user. sqrt biases the low-middle toward colour so a
-      // score of 0.45 renders at ~67% colour — visibly a match —
-      // while a near-floor 0.30 match still reads as ~55% colour
-      // (not yet full) and a strong 0.85 match lands at ~92% (near
-      // full). Non-match stays at 0 (fully gray) because sqrt(0)=0.
+      // the todo app …") would otherwise scale the halo to only
+      // ~45% brightness, which reads as barely-lit. sqrt biases the
+      // low-middle upward so a 0.45 match glows at ~67% — visibly a
+      // match — while 0.30 near-floor reads ~55% and 0.85 strong
+      // reads ~92%. Non-match stays at 0 because sqrt(0) = 0.
       //
       // All reads from the store happen imperatively here, NOT as
       // React subscriptions, so searchActive/searchAllMatches changes
@@ -1262,38 +1201,7 @@ export function LilyPad({
             colorVec.g * intensity,
             colorVec.b * intensity,
           );
-          // Story 5.3 (redesigned): pad-color uniform lerps toward
-          // SEARCH_NEUTRAL_GRAY by (1 - saturation). This handles the
-          // portion of the body that uColor drives directly (vein
-          // tint + 1.5% radial gradient). The rest of the body —
-          // dominated by baseColor — is desaturated via the shader's
-          // uSaturation uniform below.
-          targetColor.lerp(
-            SEARCH_NEUTRAL_GRAY,
-            1 - searchSaturationRef.current,
-          );
           mat.uniforms.uColor.value.lerp(targetColor, COMPLETION_LERP);
-        }
-        // Story 5.3: drive the shader's uSaturation + uSearchActive
-        // uniforms. uSearchActive gates the entire search-mode body
-        // treatment so non-search frames render exactly as pre-5.3.
-        // uSaturation drives the match-vs-nonmatch lerp inside that
-        // gated path. Both are lerped smoothly so mode transitions
-        // fade instead of snapping.
-        if (mat.uniforms?.uSaturation) {
-          mat.uniforms.uSaturation.value = THREE.MathUtils.lerp(
-            mat.uniforms.uSaturation.value as number,
-            searchSaturationRef.current,
-            COMPLETION_LERP,
-          );
-        }
-        if (mat.uniforms?.uSearchActive) {
-          const targetSearchActive = searchState.searchActive ? 1 : 0;
-          mat.uniforms.uSearchActive.value = THREE.MathUtils.lerp(
-            mat.uniforms.uSearchActive.value as number,
-            targetSearchActive,
-            COMPLETION_LERP,
-          );
         }
       }
 
@@ -1342,21 +1250,8 @@ export function LilyPad({
           // Smooth the rim color back to base instead of snapping on
           // flash-end. COMPLETION_LERP (0.05) gives a ~400ms ease that
           // visually blends with the glow block's overlay decay above.
-          //
-          // Story 5.3 (redesigned): the rim is the pad's dominant
-          // visible colour (the body shader only uses uColor for an
-          // 8% vein tint). Saturation-lerp the rim target toward a
-          // neutral gray the same way as the body so search
-          // non-matches ACTUALLY look gray.
-          const rimTarget = new THREE.Color(colorVec).lerp(
-            new THREE.Color(
-              SEARCH_NEUTRAL_GRAY.x,
-              SEARCH_NEUTRAL_GRAY.y,
-              SEARCH_NEUTRAL_GRAY.z,
-            ),
-            1 - searchSaturationRef.current,
-          );
-          rimMat.color.lerp(rimTarget, COMPLETION_LERP);
+          const currentRimColor = rimMat.color;
+          currentRimColor.lerp(colorVec, COMPLETION_LERP);
         }
       }
 
