@@ -272,12 +272,20 @@ const padFragmentShader = /* glsl */ `
   uniform vec3 uFlashColor;
   uniform float uFlashStrength;
   uniform float uSeed;
-  // Story 5.3: saturation weight. 1.0 = pad renders normally; 0.0
-  // = pad lerps fully to a neutral-dark gray. Driven per-frame from
-  // the searchSaturationRef in LilyPad's useFrame. Having the shader
-  // apply this to the final colour (rather than just scaling uColor
-  // upstream) is necessary because the body is dominated by a dark
-  // baseColor — muting uColor alone barely reads visually.
+  // Story 5.3: search-mode controls.
+  //
+  //   uSearchActive: 0 = no search running (render the body exactly
+  //     as pre-5.3 did). 1 = a search is live and uSaturation is
+  //     meaningful. A dedicated flag (instead of overloading
+  //     uSaturation) keeps the non-search baseline visually
+  //     unchanged — users should never see their pond get "brighter"
+  //     when they're not searching.
+  //   uSaturation: when uSearchActive > 0, this drives the lerp
+  //     between a neutral gray (non-match) and a color-boosted live
+  //     body (match). Match pads visibly "light up" rather than
+  //     staying as dark as the idle body; non-match pads clearly
+  //     gray out.
+  uniform float uSearchActive;
   uniform float uSaturation;
   varying vec2 vPos;
 
@@ -319,13 +327,32 @@ const padFragmentShader = /* glsl */ `
     float fs = clamp(uFlashStrength, 0.0, 1.0);
     finalColor = mix(finalColor, uFlashColor, fs);
 
-    // Story 5.3: final desaturation pass for search mode. Mix the
-    // fully-composed colour toward a neutral-dark gray based on
-    // (1 - uSaturation). uSaturation defaults to 1.0 so this is a
-    // no-op outside search. The gray target is kept dark so non-match
-    // pads read as "dormant" rather than "spotlit".
-    vec3 searchGray = vec3(0.05);
-    finalColor = mix(searchGray, finalColor, clamp(uSaturation, 0.0, 1.0));
+    // Story 5.3: search-mode body treatment.
+    //
+    // When uSearchActive = 0 (the default, no active search), this
+    // whole block is a no-op and the body renders exactly as the
+    // pre-5.3 shader did. When uSearchActive = 1 (a search is
+    // running), the body lerps between two visibly distinct states
+    // driven by uSaturation:
+    //
+    //   uSaturation = 0 (non-match): flat medium-dark gray. The
+    //     target is visibly brighter than the idle baseColor so the
+    //     "dormant" look is clearly different from a normal pad —
+    //     this was the bug in the first saturation cut, where the
+    //     gray target (0.05) was dark enough to be indistinguishable
+    //     from the already-near-black pad body.
+    //
+    //   uSaturation = 1 (strong match): the body gains a significant
+    //     uColor boost so matches visibly "light up" in their own
+    //     colour. Without this boost, a match pad is just the dark
+    //     idle body — no visible search-state difference.
+    //
+    // The boost is NOT added to the non-search path, so normal
+    // gameplay looks identical to pre-5.3.
+    vec3 searchGray = vec3(0.15);
+    vec3 boostedColor = finalColor + uColor * 0.35;
+    vec3 searchFinalColor = mix(searchGray, boostedColor, clamp(uSaturation, 0.0, 1.0));
+    finalColor = mix(finalColor, searchFinalColor, clamp(uSearchActive, 0.0, 1.0));
 
     // Slightly transparent so overlapping pads don't look harsh
     gl_FragColor = vec4(finalColor, 0.92);
@@ -651,9 +678,13 @@ export function LilyPad({
     // gently gains action-color — the ridge remains the primary signal.
     uFlashColor: { value: new THREE.Vector3(0, 0, 0) },
     uFlashStrength: { value: 0 },
-    // Story 5.3: 1.0 = normal render; 0.0 = pad body mixed fully to
-    // neutral gray. Written per-frame inside the resting branch to
-    // follow searchSaturationRef.
+    // Story 5.3: search-mode gate. 0 = not searching (shader
+    // treats the entire search block as a no-op, preserving pre-5.3
+    // visuals). 1 = a search is live and uSaturation is read.
+    uSearchActive: { value: 0 },
+    // Story 5.3: 1.0 = strong match (body boosts toward its own
+    // colour); 0.0 = non-match (body flat medium-gray). Only
+    // read by the shader when uSearchActive > 0.
     uSaturation: { value: 1 },
   }));
 
@@ -1243,15 +1274,24 @@ export function LilyPad({
           );
           mat.uniforms.uColor.value.lerp(targetColor, COMPLETION_LERP);
         }
-        // Story 5.3: drive the shader's uSaturation uniform. This is
-        // the dominant body-desaturation control — without it, only
-        // the rim visibly changes on search (body is mostly
-        // baseColor, only ~10% influenced by uColor). Lerp smoothly
-        // so search-mode transitions fade instead of snapping.
+        // Story 5.3: drive the shader's uSaturation + uSearchActive
+        // uniforms. uSearchActive gates the entire search-mode body
+        // treatment so non-search frames render exactly as pre-5.3.
+        // uSaturation drives the match-vs-nonmatch lerp inside that
+        // gated path. Both are lerped smoothly so mode transitions
+        // fade instead of snapping.
         if (mat.uniforms?.uSaturation) {
           mat.uniforms.uSaturation.value = THREE.MathUtils.lerp(
             mat.uniforms.uSaturation.value as number,
             searchSaturationRef.current,
+            COMPLETION_LERP,
+          );
+        }
+        if (mat.uniforms?.uSearchActive) {
+          const targetSearchActive = searchState.searchActive ? 1 : 0;
+          mat.uniforms.uSearchActive.value = THREE.MathUtils.lerp(
+            mat.uniforms.uSearchActive.value as number,
+            targetSearchActive,
             COMPLETION_LERP,
           );
         }
