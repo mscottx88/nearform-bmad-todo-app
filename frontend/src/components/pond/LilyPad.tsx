@@ -1263,8 +1263,21 @@ export function LilyPad({
           // Smooth the rim color back to base instead of snapping on
           // flash-end. COMPLETION_LERP (0.05) gives a ~400ms ease that
           // visually blends with the glow block's overlay decay above.
-          const currentRimColor = rimMat.color;
-          currentRimColor.lerp(colorVec, COMPLETION_LERP);
+          //
+          // Story 5.3 (redesigned): the rim is the pad's dominant
+          // visible colour (the body shader only uses uColor for an
+          // 8% vein tint). Saturation-lerp the rim target toward a
+          // neutral gray the same way as the body so search
+          // non-matches ACTUALLY look gray.
+          const rimTarget = new THREE.Color(colorVec).lerp(
+            new THREE.Color(
+              SEARCH_NEUTRAL_GRAY.x,
+              SEARCH_NEUTRAL_GRAY.y,
+              SEARCH_NEUTRAL_GRAY.z,
+            ),
+            1 - searchSaturationRef.current,
+          );
+          rimMat.color.lerp(rimTarget, COMPLETION_LERP);
         }
       }
 
