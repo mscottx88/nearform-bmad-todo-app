@@ -177,6 +177,20 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
 
 ## Dev Notes
 
+### Keyboard-handler audit (all window/element listeners in the frontend)
+
+Comprehensive scan of every `addEventListener('keydown')`, `onKeyDown`, `onKeyPress`, `onKeyUp` in `frontend/src` plus third-party libraries that install window listeners:
+
+| # | Location | Scope | Keys it claims | Collision with type-anywhere search? |
+|---|---|---|---|---|
+| 1 | [useKeyboardShortcuts.ts:15,20](frontend/src/hooks/useKeyboardShortcuts.ts#L15) | window | bare `n`, `N`, `/` | **YES** — printable keys collide. Resolution: Task 2b rebinds to `Enter` with guards. |
+| 2 | [useClosePopupOnEscape.ts:23](frontend/src/hooks/useClosePopupOnEscape.ts#L23) | window | Escape | No collision. Both handlers fire; ours returns early when popup is open (AC #1 popup-open guard) so Escape cleanly closes the popup first, then on a second press clears search. When no popup, ours clears search + the popup hook no-ops on null `activePopupTodoId`. |
+| 3 | [PopupColorSwatch.tsx:65-73](frontend/src/components/ui/PopupColorSwatch.tsx#L65-L73) | window, **capture phase** | Escape | No collision. Mounted only while the color swatch sub-panel is expanded, which requires the popup to be open, which means our search hook's popup-open guard is active. The capture-phase + `stopImmediatePropagation()` means this handler wins the Escape race with `useClosePopupOnEscape` (documented intent — collapses the sub-panel without closing the whole popup). |
+| 4 | [TodoInput.tsx:61](frontend/src/components/ui/TodoInput.tsx#L61) | local element `onKeyDown` | handled on the input, not window | No collision. Fires only when TodoInput has DOM focus, which our hook's input-focus guard catches before any keystroke is consumed. |
+| 5 | drei `OrbitControls` (via `PondCamera.tsx:141`) | window (when `enableKeys=true`, default) | Arrow keys for camera pan | No collision. `ArrowLeft`/`ArrowRight`/`ArrowUp`/`ArrowDown` are NOT printable-char keys (`e.key.length > 1`), so our hook's printable-char filter excludes them. Arrow keys pan the camera; bare letters drive search. |
+
+**Verdict**: once Task 2b rebinds the `useKeyboardShortcuts` shortcut, the frontend has zero remaining bare-printable-key collisions. Escape sharing is intentional and produces the correct cascade semantics.
+
 ### The `useKeyboardShortcuts` collision — why rebind new-todo to `Enter`
 
 The app today has a window-level shortcut: pressing bare `n`/`N`/`/` opens the new-todo input ([useKeyboardShortcuts.ts:15](frontend/src/hooks/useKeyboardShortcuts.ts#L15)). That collides head-on with type-anywhere search: both the existing shortcut AND the new search-keydown handler would fire on `N`, and the user would see the new-todo input open AND `N` appended to their search query. Undefined winner depending on listener registration order.
@@ -385,3 +399,4 @@ _(to be filled on dev-story run)_
 |------|--------|
 | 2026-04-20 | Story created as Epic 5.3 (third story of Epic 5 "Intelligent Search"). Scope: frontend-only type-anywhere search UI consuming Story 5.2's `/api/search` endpoint. Window-level keydown capture (no `<input>` element), 300 ms debounce, match-rise/non-match-submerge in LilyPad `useFrame`, camera auto-frame on match centroid, HTML overlay for typed text, Escape-clear with 400 ms restore. Forward-compat with Story 4.2's cluster work. Partial-deferral note on FR20 (cluster-surfacing reduces to per-pad-rise until 4.2 lands). |
 | 2026-04-21 | AC #15 added + Task 2b + Dev Notes section § "The `useKeyboardShortcuts` collision — why rebind new-todo to `Enter`". Pre-existing bare-key shortcut (`n`/`N`/`/` → open new-todo input) would collide with type-anywhere search. Resolution: rebind to `Enter` with searchActive + activePopupTodoId guards. Surfaced by user question "What about when you press 'N'?" during story review. |
+| 2026-04-21 | Dev Notes § "Keyboard-handler audit" added — full scan of 5 keydown listeners in the frontend (useKeyboardShortcuts, useClosePopupOnEscape, PopupColorSwatch, TodoInput, OrbitControls). Only useKeyboardShortcuts collides (already fixed by AC #15); the other four are non-collisions with reasons documented. Surfaced by user question "Are there other bare key bindings to consider?" |
