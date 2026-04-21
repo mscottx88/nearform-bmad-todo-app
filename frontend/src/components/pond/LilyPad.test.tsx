@@ -67,11 +67,6 @@ vi.mock('../../stores/usePondStore', () => ({
   // Story 5.3: search-hit selector returns undefined — todo isn't a
   // match in this test harness.
   selectSearchHit: () => () => undefined,
-  // Story 5.3: LilyPad imports these constants at module scope.
-  SEARCH_MATCH_GLOW: 0.35,
-  SEARCH_NONMATCH_OPACITY: 0.28,
-  SUBMERGE_DROP_Y: -0.8,
-  SURFACE_RISE_Y: 0.3,
 }));
 
 const mockTodo: Todo = {

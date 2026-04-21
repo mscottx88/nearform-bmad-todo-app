@@ -13,14 +13,12 @@ const POPUP_FOCUS_ZOOM = 4;
 
 // Story 5.3: type-anywhere search constants.
 //
-// Match pads rise above resting Y by SURFACE_RISE_Y and glow at
-// SEARCH_MATCH_GLOW (stronger than AMBIENT_GLOW_STRENGTH from LilyPad).
-// Non-match pads lerp to SUBMERGE_DROP_Y (below water) and fade to
-// SEARCH_NONMATCH_OPACITY. Debounce window 300 ms per FR18.
-export const SURFACE_RISE_Y = 0.3;
-export const SUBMERGE_DROP_Y = -0.8;
-export const SEARCH_MATCH_GLOW = 0.35;
-export const SEARCH_NONMATCH_OPACITY = 0.28;
+// The match-visual itself (pads lerp between SEARCH_NEUTRAL_GRAY and
+// their committed colour by the match score) is implemented in
+// LilyPad.tsx — no exports needed from the store for that since
+// LilyPad reads the ref + SEARCH_NEUTRAL_GRAY locally. The store
+// only owns the debounce window so the keyboard hook and search-sync
+// hook can stay in sync on cadence.
 export const SEARCH_DEBOUNCE_MS = 300;
 
 const getWindowSize = () =>

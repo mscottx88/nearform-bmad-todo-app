@@ -11,10 +11,6 @@ import {
   selectTodoError,
   selectColorPreview,
   selectSearchHit,
-  SEARCH_MATCH_GLOW,
-  SEARCH_NONMATCH_OPACITY,
-  SUBMERGE_DROP_Y,
-  SURFACE_RISE_Y,
 } from '../../stores/usePondStore';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 import { GlowSource } from './GlowSource';
@@ -154,6 +150,14 @@ const TILT_LERP = 0.08;
 // without per-frame object allocation.
 const CREATION_PAD_GLOW = new THREE.Vector3(2.5, 1.8, 0.2);
 const FOCUS_PAD_GLOW = new THREE.Vector3(3.0, 3.0, 3.0);
+
+// Story 5.3 redesign: neutral gray used as the "no match" colour
+// during active search. Non-matches lerp fully to this; matches lerp
+// back toward their own pad colour by the match score. Gray is dark
+// enough to read as muted / dormant but not so dark it vanishes into
+// the water. Picked to sit clearly below the weakest pad palette
+// colour on the saturation axis.
+const SEARCH_NEUTRAL_GRAY = new THREE.Vector3(0.25, 0.25, 0.25);
 
 // Creation rim target — HDR neon yellow matching the complete/delete
 // treatment so all three pulse-rim highlights share the same brightness
@@ -422,19 +426,13 @@ export function LilyPad({
   // wall-clock time happens to land.
   const focusStartTimeRef = useRef<number | null>(null);
   const prevFocusedRef = useRef(focused);
-  // Story 5.3: lerped search-mode offsets. `searchYOffsetRef` rides
-  // on top of `targetY.current` in the resting Y-lerp so matches rise
-  // and non-matches submerge relative to their normal resting height.
-  // `searchOpacityRef` tracks the pad's current body opacity so we
-  // can lerp between 1.0 (default) and SEARCH_NONMATCH_OPACITY
-  // without re-calling fadePadMaterials from rest each frame.
-  // `searchOpacityStateRef` is the sentinel for opacity-mode
-  // transitions: when the mode changes from 'nonmatch' back to
-  // 'match' or 'none', we restore material defaults once instead of
-  // leaving materials flagged transparent=true.
-  const searchYOffsetRef = useRef(0);
-  const searchOpacityRef = useRef(1);
-  const searchOpacityStateRef = useRef<'default' | 'faded'>('default');
+  // Story 5.3 (redesigned): lerped search saturation. 1.0 = pad
+  // renders in its committed colour; 0.0 = pad lerps fully to
+  // SEARCH_NEUTRAL_GRAY. Per-frame writes read this ref inside
+  // useFrame so match-status changes fade in/out smoothly rather
+  // than snapping. The body-colour lerp site and the glow-strength
+  // write both read this.
+  const searchSaturationRef = useRef(1);
   // Text fades in at the END of the arrival animation. Both creation
   // ('forming' → 'dropping') and materialize ('waiting' → 'materializing')
   // paths leave textOpacity=0 until the pad reaches rest; already-settled
@@ -1079,63 +1077,43 @@ export function LilyPad({
       const seed = driftSeed;
       const ramp = Math.min(t / 3, 1);
 
-      // Story 5.3: compute this frame's search-mode offsets.
+      // Story 5.3 (redesigned): compute this frame's search saturation.
       //
-      //   'match'    → rise by SURFACE_RISE_Y, opacity 1.0, glow
-      //                overridden later at the glow-write site.
-      //   'nonmatch' → drop by SUBMERGE_DROP_Y, opacity fades to
-      //                SEARCH_NONMATCH_OPACITY, glow snuffed to 0.
-      //   'none'     → no influence; lerp back toward default (Y=0,
-      //                opacity 1.0) so exiting search mode smoothly
-      //                restores the pond.
+      //   'none'     → searchSaturation = 1.0   (full pad colour)
+      //   'match'    → searchSaturation = score (partial colour;
+      //                                          higher score =
+      //                                          closer to full)
+      //   'nonmatch' → searchSaturation = 0.0   (neutral gray)
+      //
+      // The body-colour lerp site further down interpolates from
+      // SEARCH_NEUTRAL_GRAY toward the committed pad colour using
+      // this value. Glow strength is scaled by the same saturation
+      // so a gray pad has no glow and a strong match glows fully.
       //
       // All reads from the store happen imperatively here, NOT as
       // React subscriptions, so searchActive/searchAllMatches changes
       // don't re-render every pad on every keystroke.
       const searchState = usePondStore.getState();
-      let searchMode: 'match' | 'nonmatch' | 'none' = 'none';
+      let searchSaturation = 1;
       if (searchState.searchActive) {
         if (searchState.searchAllMatches) {
-          searchMode = 'match';
+          searchSaturation = 1;
         } else if (searchHit !== undefined) {
-          searchMode = 'match';
+          // score is clamped to [0, 1] by Field(ge=0, le=1) at the
+          // API boundary, so no extra clamp needed here.
+          searchSaturation = searchHit.score;
         } else {
-          searchMode = 'nonmatch';
+          searchSaturation = 0;
         }
       }
-      const targetSearchY =
-        searchMode === 'match'
-          ? SURFACE_RISE_Y
-          : searchMode === 'nonmatch'
-          ? SUBMERGE_DROP_Y
-          : 0;
-      const targetSearchOpacity = searchMode === 'nonmatch' ? SEARCH_NONMATCH_OPACITY : 1;
-      searchYOffsetRef.current = THREE.MathUtils.lerp(
-        searchYOffsetRef.current,
-        targetSearchY,
+      // Lerp toward the target saturation so mode transitions fade
+      // smoothly rather than snapping. RIDE_LERP gives ~400ms full
+      // traverse at 60fps which matches the UX spec's 400ms restore.
+      searchSaturationRef.current = THREE.MathUtils.lerp(
+        searchSaturationRef.current,
+        searchSaturation,
         RIDE_LERP,
       );
-      searchOpacityRef.current = THREE.MathUtils.lerp(
-        searchOpacityRef.current,
-        targetSearchOpacity,
-        RIDE_LERP,
-      );
-      if (searchMode === 'nonmatch') {
-        fadePadMaterials(group, searchOpacityRef.current);
-        searchOpacityStateRef.current = 'faded';
-      } else if (searchOpacityStateRef.current === 'faded') {
-        // Exiting nonmatch: if we're close enough to fully restored,
-        // flip the material flags back to their defaults once so line
-        // edges stop blending and rims return to their 0.4 resting
-        // opacity. If still mid-lerp, keep writing the lerped value.
-        if (Math.abs(searchOpacityRef.current - 1) < 0.005) {
-          restorePadMaterials(group);
-          searchOpacityRef.current = 1;
-          searchOpacityStateRef.current = 'default';
-        } else {
-          fadePadMaterials(group, searchOpacityRef.current);
-        }
-      }
 
       // Progressive density override: ensure focused pads render at readable size.
       // Decay adds a slow sinusoidal flicker on top of the base target scale.
@@ -1170,7 +1148,7 @@ export function LilyPad({
       const elevation = samplePond(sampleAtX, sampleAtZ);
       group.position.y = THREE.MathUtils.lerp(
         group.position.y,
-        targetY.current + elevation + searchYOffsetRef.current,
+        targetY.current + elevation,
         RIDE_LERP,
       );
 
@@ -1225,6 +1203,16 @@ export function LilyPad({
             colorVec.r * intensity,
             colorVec.g * intensity,
             colorVec.b * intensity,
+          );
+          // Story 5.3 (redesigned): blend toward SEARCH_NEUTRAL_GRAY
+          // by (1 - saturation). During search, non-matches land
+          // fully on gray (saturation=0); matches sit between gray
+          // and their committed colour proportionally to the match
+          // score. When search is inactive saturation=1 so this is
+          // a no-op and the pad renders in its normal colour.
+          targetColor.lerp(
+            SEARCH_NEUTRAL_GRAY,
+            1 - searchSaturationRef.current,
           );
           mat.uniforms.uColor.value.lerp(targetColor, COMPLETION_LERP);
         }
@@ -1349,16 +1337,13 @@ export function LilyPad({
           }
         }
 
-        // Story 5.3: search-mode glow override. 'match' boosts to
-        // SEARCH_MATCH_GLOW (stronger than ambient so matches draw
-        // the eye); 'nonmatch' snuffs the glow to 0 so submerged
-        // pads don't keep lighting up the water plane from below.
-        // 'none' leaves the computed baseline/flash strength alone.
-        if (searchMode === 'match') {
-          strength = Math.max(strength, SEARCH_MATCH_GLOW * intensity);
-        } else if (searchMode === 'nonmatch') {
-          strength = 0;
-        }
+        // Story 5.3 (redesigned): search-mode glow follows the same
+        // saturation lerp as the body color. Non-matches reach 0
+        // (gray pads don't glow); strong matches keep ~full glow;
+        // weak matches glow proportionally. Multiplying rather than
+        // overriding preserves the underlying focused/ambient/flash
+        // logic during non-search frames (saturation = 1).
+        strength *= searchSaturationRef.current;
 
         glowMatRef.current.uniforms.uStrength.value = strength;
       }
