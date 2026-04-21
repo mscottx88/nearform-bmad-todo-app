@@ -49,6 +49,8 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
 
 14. **Given** the existing pond is rendering and a search is active, **When** the user clicks a surfaced pad (match), **Then** the existing click → popup → Complete/Delete/color flows all still work unchanged. Search is a **read-only overlay** on top of the pond — it does not interfere with any write path. Specifically: `POST /api/todos` (new-pad drop), popup actions, drag, camera scroll/pan all continue to function. The typing-to-search global handler must NOT fire when the popup is open (check `activePopupTodoId` inside the keydown guard — same pattern as the existing input-focus guard).
 
+15. **Given** the pre-existing [`useKeyboardShortcuts`](frontend/src/hooks/useKeyboardShortcuts.ts) hook listens for bare **`n`**, **`N`**, and **`/`** at the window level to open the new-todo input, **When** this story ships, **Then** those three bindings are **REMOVED** and replaced with a single non-collision shortcut for "open new-todo input": **`Enter`** when no element is focused AND no popup is open AND no search is active. Rationale: type-anywhere search consumes every printable character — including `n`/`N`/`/` — so the existing shortcut would fire a second window handler and double-dispatch. `Enter` is unambiguous (no printable-char meaning), discoverable (matches the existing Enter-to-submit semantics inside `TodoInput`), and guardable by the same focus/popup/search checks already required by AC #1. The `EmptyPondHint` copy is updated from its current wording to reference `Enter` — or stays generic if the current copy doesn't name the shortcut. Existing callers of `useKeyboardShortcuts` (currently `EmptyPondHint` / similar) are updated to the new key.
+
 ## Tasks / Subtasks
 
 - [ ] Task 1: Extend types + API hook (AC: #2, #3)
@@ -87,6 +89,12 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
     - `setSearchResults(results: Map<string, SearchHit>)` — replaces the results Map; called by the `useSearch` subscriber hook.
     - `clearSearch()` — resets `searchQuery=""`, `searchResults=new Map()`, `searchActive=false`, and `cameraFocus=null`.
   - [ ] Constants co-located with the existing `GLOW_INTENSITY` block: `SURFACE_RISE_Y = 0.3`, `SUBMERGE_DROP_Y = -0.8`, `SEARCH_MATCH_GLOW = 0.35`, `SEARCH_NONMATCH_OPACITY = 0.28`, `SEARCH_DEBOUNCE_MS = 300`.
+
+- [ ] Task 2b: Rebind the existing new-todo keyboard shortcut (AC: #15)
+  - [ ] Edit [frontend/src/hooks/useKeyboardShortcuts.ts](frontend/src/hooks/useKeyboardShortcuts.ts) — remove the `e.key === 'n' || e.key === 'N' || e.key === '/'` condition and replace with `e.key === 'Enter'`.
+  - [ ] Extend the guard to ALSO return early when `usePondStore.getState().searchActive` is true OR `activePopupTodoId !== null`. Without those guards, pressing Enter mid-search or mid-popup would spawn a new-todo input on top of the existing UI.
+  - [ ] Update the existing test `useKeyboardShortcuts.test.ts` (if it exists; grep first) — assert `Enter` triggers `onOpenInput`, assert `n`/`N`/`/` do NOT, assert Enter during searchActive does NOT, assert Enter with activePopupTodoId set does NOT.
+  - [ ] If `EmptyPondHint` (or any other UI) references the old shortcut keys in visible copy, update the text. Most likely the hint says something like "press N or / to add" — change to "press Enter to add" or keep generic ("type something to get started").
 
 - [ ] Task 3: Global type-anywhere keyboard hook `frontend/src/hooks/usePondSearchKeyboard.ts` (AC: #1, #12, #14)
   - [ ] Installs a `window` `keydown` listener inside a `useEffect([])`.
@@ -169,6 +177,19 @@ So that finding a todo feels like speaking to the pond and watching it respond, 
 
 ## Dev Notes
 
+### The `useKeyboardShortcuts` collision — why rebind new-todo to `Enter`
+
+The app today has a window-level shortcut: pressing bare `n`/`N`/`/` opens the new-todo input ([useKeyboardShortcuts.ts:15](frontend/src/hooks/useKeyboardShortcuts.ts#L15)). That collides head-on with type-anywhere search: both the existing shortcut AND the new search-keydown handler would fire on `N`, and the user would see the new-todo input open AND `N` appended to their search query. Undefined winner depending on listener registration order.
+
+Resolution paths considered:
+
+1. **Keep N/N/ — route by `searchActive` flag.** Fragile: users can't consistently use `N` to add todos mid-search; muscle memory breaks.
+2. **Remove N/N/ entirely, rely on the existing `TodoInput` UI for new-todo creation.** Works but drops a power-user shortcut with no replacement.
+3. **Rebind to `Enter` with guards** (chosen). `Enter` is not a printable character in the type-anywhere sense (it doesn't produce a glyph you'd search for), it's discoverable (matches the established "Enter to submit" convention inside `TodoInput`), and the existing focus-target guard already ignores keys in inputs. Adding `searchActive` and `activePopupTodoId` guards makes the shortcut safe in every UI state.
+4. **Rebind to `Ctrl+N` / `Cmd+N`.** Rejected: `Ctrl+N` is browser-reserved for "new window" in most browsers and gets eaten before reaching the app.
+
+The rebind in Task 2b is a one-file, ~8-line change with a straightforward test update. No new UX affordance needed — `Enter` is a conventional "go" key across the web.
+
 ### Why no search-`<input>` element, just `window` keydown?
 
 The UX spec's core beat is "no search bar." Rendering an `<input>` — even hidden — creates a focusable DOM node that would either need explicit-focus management (fights with other inputs like `TodoInput`) or be auto-focused (but then the page loses "focus" semantics and the ActionPopup's text selection could break). Using window-level `keydown` with an explicit focus-target guard is simpler and matches the existing `useClosePopupOnEscape` pattern. The trade-off: IMEs (Chinese/Japanese composition) don't give us a composition session — we only see committed keystrokes. Acceptable for v1 English UI; noted in Out of scope.
@@ -242,8 +263,10 @@ Implementation: the `searchMode` computation in LilyPad's `useFrame` early-retur
 - `frontend/src/types/index.ts` — add `SearchHit`, `SearchResult`, `SearchResponse`, `SearchMatchType` (Task 1).
 - `frontend/src/stores/usePondStore.ts` — add search slices + actions + constants (Task 2).
 - `frontend/src/stores/usePondStore.test.ts` — new assertions for the search slices (Task 10).
+- `frontend/src/hooks/useKeyboardShortcuts.ts` — rebind from `n`/`N`/`/` to `Enter`; add `searchActive` + `activePopupTodoId` guards (Task 2b). Update or add `useKeyboardShortcuts.test.ts` alongside.
 - `frontend/src/components/pond/PondScene.tsx` — mount the two hooks + the overlay (Task 7).
 - `frontend/src/components/pond/LilyPad.tsx` — submerge/rise `useFrame` branch (Task 5).
+- `frontend/src/components/pond/EmptyPondHint.tsx` (if it references the old shortcut keys in visible copy) — update wording (Task 2b).
 
 **Untouched (keep):**
 
@@ -268,6 +291,7 @@ Implementation: the `searchMode` computation in LilyPad's `useFrame` early-retur
 - **DO NOT** render the overlay INSIDE the `<Canvas>`. R3F canvas does not accept HTML children; the overlay is HTML, mounted as a sibling of `<Canvas>`.
 - **DO NOT** invalidate `['todos', 'list']` on search — it's a read, not a write. No cache invalidation anywhere in 5.3.
 - **DO NOT** convert snake_case to camelCase manually in `searchApi.ts`. The client.ts interceptors do it; double-conversion produces `camelCasecamelCase` nonsense.
+- **DO NOT** leave the old bare-key bindings (`n`/`N`/`/`) in `useKeyboardShortcuts.ts` alongside the new search handler. Two window listeners on the same bare key produce nondeterministic behaviour — pressing `N` in search would open a new-todo input on top of the search UI.
 
 ## Previous Story Intelligence
 
@@ -360,3 +384,4 @@ _(to be filled on dev-story run)_
 | Date | Change |
 |------|--------|
 | 2026-04-20 | Story created as Epic 5.3 (third story of Epic 5 "Intelligent Search"). Scope: frontend-only type-anywhere search UI consuming Story 5.2's `/api/search` endpoint. Window-level keydown capture (no `<input>` element), 300 ms debounce, match-rise/non-match-submerge in LilyPad `useFrame`, camera auto-frame on match centroid, HTML overlay for typed text, Escape-clear with 400 ms restore. Forward-compat with Story 4.2's cluster work. Partial-deferral note on FR20 (cluster-surfacing reduces to per-pad-rise until 4.2 lands). |
+| 2026-04-21 | AC #15 added + Task 2b + Dev Notes section § "The `useKeyboardShortcuts` collision — why rebind new-todo to `Enter`". Pre-existing bare-key shortcut (`n`/`N`/`/` → open new-todo input) would collide with type-anywhere search. Resolution: rebind to `Enter` with searchActive + activePopupTodoId guards. Surfaced by user question "What about when you press 'N'?" during story review. |
