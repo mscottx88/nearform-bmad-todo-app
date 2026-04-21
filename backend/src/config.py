@@ -29,5 +29,20 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("google_api_key")
+    @classmethod
+    def _validate_google_api_key(cls, value: str) -> str:
+        # Empty is the explicit "run without embeddings" mode — main.py
+        # logs a WARNING and the worker gracefully leaves todos at
+        # embedding_status='pending'. Whitespace-only, however, is
+        # always a misconfiguration: it's truthy enough to sidestep the
+        # `if not settings.google_api_key` guards, reaches the Google
+        # API, and fails opaquely for every single todo. Normalise.
+        if value and not value.strip():
+            raise ValueError(
+                "GOOGLE_API_KEY is whitespace-only — set a real key or leave unset/empty",
+            )
+        return value
+
 
 settings = Settings()

@@ -141,11 +141,25 @@ def _fts_supported(db: Session, q: str) -> bool:
     emoji, punctuation, and non-English tokens produce an empty tsquery
     (numnode=0) that silently matches nothing. Checking up-front lets us
     skip the FTS SQL AND tell the client why the FTS branch was empty.
+
+    On DB failure (missing text-search config, locale drift, transient
+    Postgres hiccup) we fall back to `False` and let the vector/embedding
+    branch carry on — better a partial result than a 500. Rollback clears
+    any half-applied transaction state so the next SQL on this session
+    doesn't hit PendingRollbackError.
     """
-    row = db.execute(
-        text("SELECT numnode(websearch_to_tsquery('english', :q)) AS n"),
-        {"q": q},
-    ).scalar()
+    try:
+        row = db.execute(
+            text("SELECT numnode(websearch_to_tsquery('english', :q)) AS n"),
+            {"q": q},
+        ).scalar()
+    except Exception as exc:  # noqa: BLE001 - any DB failure → FTS-unavailable
+        db.rollback()
+        logger.warning(
+            "search_fts_supported_failed exc=%s",
+            type(exc).__name__,
+        )
+        return False
     return bool((row or 0) > 0)
 
 

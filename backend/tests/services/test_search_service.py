@@ -422,6 +422,42 @@ def test_hybrid_search_fts_supported_true_for_real_word(
     assert resp.fts_supported is True
 
 
+def test_hybrid_search_fts_supported_falls_back_to_false_on_db_error(
+    db_session: Session,
+) -> None:
+    # If `_fts_supported`'s numnode() tsquery call throws (missing
+    # text-search config, locale drift, transient Postgres hiccup), the
+    # search path must treat it as fts_supported=False and carry on with
+    # the vector branch — not propagate the exception as a 500.
+    from src.services import search_service
+
+    _seed_todo(db_session, "Review Q2 roadmap")
+
+    # Patch db.execute for the FIRST call only (the numnode tsquery inside
+    # _fts_supported) and let the rest pass through — so the vector + FTS
+    # SQL that follow can run normally.
+    original_execute = db_session.execute
+    call_count = {"n": 0}
+
+    def raising_execute(*args: object, **kwargs: object) -> object:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated tsquery failure")
+        return original_execute(*args, **kwargs)  # type: ignore[call-overload]
+
+    with (
+        patch(
+            "src.services.search_service.embedding_service.generate_embedding",
+            return_value=_vec(0),
+        ),
+        patch.object(db_session, "execute", side_effect=raising_execute),
+    ):
+        resp = search_service.hybrid_search(db_session, "review")
+
+    # FTS failed gracefully; response must NOT raise.
+    assert resp.fts_supported is False
+
+
 @pytest.mark.parametrize(
     "similarity,expected_in_results",
     [

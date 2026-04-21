@@ -29,11 +29,19 @@ export function usePondSearchSync(): void {
   // needed for a 300 ms window.
   const [debouncedQuery, setDebouncedQuery] = useState('');
   useEffect(() => {
+    // When search goes inactive (Escape or empty Backspace), flush
+    // the debounce slot to '' immediately so a re-entered query
+    // doesn't read the stale prior value out of React Query's cache
+    // during the debounce window.
+    if (!searchActive) {
+      setDebouncedQuery('');
+      return;
+    }
     const handle = window.setTimeout(() => {
       setDebouncedQuery(searchQuery);
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
-  }, [searchQuery]);
+  }, [searchQuery, searchActive]);
 
   const { data } = useSearch(debouncedQuery, searchActive);
 
@@ -44,9 +52,14 @@ export function usePondSearchSync(): void {
 }
 
 function applySearchResponse(data: SearchResponse): void {
+  // Drop late responses that land after Escape/clear — otherwise the
+  // store repopulates AFTER the user already cleared search and the
+  // pad visuals flicker back on.
+  if (!usePondStore.getState().searchActive) return;
+
   const { setSearchResults } = usePondStore.getState();
 
-  if (!data.ftsSupported) {
+  if (data.ftsSupported === false) {
     // Treat every live todo as a match. No per-id hit map is needed —
     // LilyPad reads `searchAllMatches` as the signal and takes the
     // match path without consulting `searchResults`.

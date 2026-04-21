@@ -1,6 +1,15 @@
 import { useEffect } from 'react';
 import { usePondStore } from '../stores/usePondStore';
 
+// Module-scope sentinel: if two components both mount this hook (HMR
+// double-render, a hypothetical split-pane feature, accidental second
+// import), the second mount becomes a no-op instead of duplicating
+// every keystroke into the search query. The hook is designed to be
+// mounted exactly once at the top of PondScene; this guard turns
+// "mounted twice" from a silent correctness bug into a dev-visible
+// warning.
+let mountCount = 0;
+
 // Story 5.3: type-anywhere search keyboard capture.
 //
 // Installs ONE window-level keydown listener that translates bare
@@ -17,15 +26,40 @@ import { usePondStore } from '../stores/usePondStore';
 // drei OrbitControls only claims arrow keys).
 export function usePondSearchKeyboard(): void {
   useEffect(() => {
+    mountCount += 1;
+    if (mountCount > 1) {
+      // Second mount — don't register a listener (would double every
+      // keystroke). Log in dev so the regression is visible; prod is
+      // silent since the user impact is already "nothing extra happens".
+      if (import.meta.env.DEV) {
+        console.warn(
+          'usePondSearchKeyboard mounted more than once; subsequent mounts are no-ops.',
+        );
+      }
+      return () => {
+        mountCount -= 1;
+      };
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip events inside editable surfaces — same check as
       // useClosePopupOnEscape. Keeps TodoInput and any future input
       // free of unwanted hijacking.
-      const target = e.target as HTMLElement | null;
+      //
+      // Check BOTH `e.target` (the element that received the event)
+      // AND `document.activeElement` (the element with actual input
+      // focus). A user can open the TodoInput, click outside it so
+      // focus drifts to body, and then start typing — the event
+      // target is <body> but the user "thinks" they're typing into
+      // the TodoInput. The activeElement fallback covers that case.
+      const isEditableElement = (el: Element | null): boolean =>
+        el instanceof HTMLElement &&
+        (el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.isContentEditable);
       if (
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.isContentEditable
+        isEditableElement(e.target as Element | null) ||
+        isEditableElement(document.activeElement)
       ) {
         return;
       }
@@ -65,6 +99,9 @@ export function usePondSearchKeyboard(): void {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      mountCount -= 1;
+    };
   }, []);
 }

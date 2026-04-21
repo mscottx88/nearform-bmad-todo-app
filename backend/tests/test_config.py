@@ -37,3 +37,21 @@ def test_archive_threshold_days_rejects_negative() -> None:
 def test_archive_threshold_days_accepts_positive() -> None:
     s = Settings(archive_threshold_days=7)
     assert s.archive_threshold_days == 7
+
+
+def test_google_api_key_accepts_empty_string() -> None:
+    # Empty is the explicit "run without embeddings" mode.
+    s = Settings(google_api_key="")
+    assert s.google_api_key == ""
+
+
+def test_google_api_key_rejects_whitespace_only() -> None:
+    # Whitespace is truthy enough to bypass the `if not key` guards but
+    # always fails at the Google API — reject at startup.
+    with pytest.raises(ValidationError, match="whitespace-only"):
+        Settings(google_api_key="   ")
+
+
+def test_google_api_key_accepts_real_key() -> None:
+    s = Settings(google_api_key="AIzaSyExampleKeyString123")
+    assert s.google_api_key == "AIzaSyExampleKeyString123"

@@ -1096,9 +1096,14 @@ export function LilyPad({
         if (searchState.searchAllMatches) {
           searchSaturation = 1;
         } else if (searchHit !== undefined) {
-          // score is clamped to [0, 1] by Field(ge=0, le=1) at the
-          // API boundary, so no extra clamp needed before the sqrt.
-          searchSaturation = Math.sqrt(searchHit.score);
+          // Defence-in-depth clamp + finite check before the sqrt.
+          // Backend `Field(ge=0, le=1)` should keep the score in
+          // range, but a NaN or negative slipping through (schema
+          // drift, interceptor bug, future code) propagates through
+          // `THREE.MathUtils.lerp` into the `uStrength` uniform —
+          // and NaN uniforms render as black pads on many drivers.
+          const rawScore = Number.isFinite(searchHit.score) ? searchHit.score : 0;
+          searchSaturation = Math.sqrt(Math.max(0, rawScore));
         } else {
           searchSaturation = 0;
         }

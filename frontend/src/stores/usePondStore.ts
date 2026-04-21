@@ -21,6 +21,12 @@ const POPUP_FOCUS_ZOOM = 4;
 // hook can stay in sync on cadence.
 export const SEARCH_DEBOUNCE_MS = 300;
 
+// Mirror of the backend's `Query(max_length=500)` on `GET /api/search`.
+// `appendSearchChar` enforces this client-side so key-repeat doesn't
+// flood the backend with 422s (each rejection also burns the default
+// React Query retry budget).
+export const SEARCH_MAX_LENGTH = 500;
+
 const getWindowSize = () =>
   typeof window !== 'undefined'
     ? { width: window.innerWidth, height: window.innerHeight }
@@ -381,16 +387,42 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   // Story 5.3: search actions.
   appendSearchChar: (ch: string) =>
-    set((state) => ({
-      searchQuery: state.searchQuery + ch,
-      searchActive: true,
-    })),
+    set((state) => {
+      // Cap at the same 500-char ceiling the backend `Query` validator
+      // enforces — key-repeat (~30 keys/sec) would otherwise flood the
+      // backend with 422s + React Query retry amplification past 500.
+      if (state.searchQuery.length >= SEARCH_MAX_LENGTH) return state;
+      const nextQuery = state.searchQuery + ch;
+      // Skip writes that would leave the query as whitespace-only.
+      // `useSearch`'s `query.trim().length > 0` gate blocks the fetch
+      // for all-whitespace queries, which would leave the UI in limbo
+      // (searchActive=true, overlay visible, no request fired, no
+      // halos lit). Swallowing the char keeps the user in non-search
+      // state until a real character lands.
+      if (nextQuery.trim().length === 0) return state;
+      return { searchQuery: nextQuery, searchActive: true };
+    }),
 
   backspaceSearch: () =>
     set((state) => {
       if (state.searchQuery.length === 0) return state;
       const next = state.searchQuery.slice(0, -1);
-      return { searchQuery: next, searchActive: next.length > 0 };
+      // When the query empties, reset the derived fields so
+      // `searchResults` / `searchAllMatches` / `vectorSearchUnavailable`
+      // don't retain stale values from the prior session. Symmetric
+      // with `clearSearch` (minus the cameraFocus invariant) — keeps
+      // any consumer reading `searchResults` without the `searchActive`
+      // gate from seeing ghost hits.
+      if (next.length === 0) {
+        return {
+          searchQuery: '',
+          searchActive: false,
+          searchResults: new Map(),
+          searchAllMatches: false,
+          vectorSearchUnavailable: false,
+        };
+      }
+      return { searchQuery: next, searchActive: true };
     }),
 
   setSearchResults: ({ results, allMatches, vectorUnavailable }) =>
