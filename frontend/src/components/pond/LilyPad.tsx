@@ -1912,6 +1912,18 @@ export function LilyPad({
           (renderOrder=10) and rim (11/12), so the halo sits visually
           beneath the pad regardless of JSX order. */}
       <GlowSource ref={glowMatRef} radius={GLOW_RADIUS} yOffset={GLOW_Y_OFFSET} />
+      {/* Story 4.6 AC #11: cluster glow ring — a second static halo in
+          white at a wider radius that visually binds grouped pads into
+          a cohesive cluster. Rendered only when this pad belongs to a
+          group; solo pads show no second ring. */}
+      {todo.groupId && (
+        <GlowSource
+          radius={2.8}
+          yOffset={GLOW_Y_OFFSET}
+          color="#ffffff"
+          strength={0.4}
+        />
+      )}
     </group>
   );
 }

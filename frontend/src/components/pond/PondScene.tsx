@@ -18,6 +18,7 @@ import { PondCamera } from './PondCamera';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
+import { ClusterLabel } from './ClusterLabel';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
   if (members.length === 0) return { x: 0, z: 0 };
@@ -267,6 +268,24 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
+      {/* Story 4.6 AC #12: floating cluster labels. One per group with a
+          non-null label; each projects its centroid to screen each frame. */}
+      {Array.from(groups.entries())
+        .filter(([, g]) => g.label !== null)
+        .map(([gid, g]) => {
+          const members = renderTodos.filter((t) => t.groupId === gid);
+          const memberPositions = members.map((t) => ({
+            x: t.positionX ?? 0,
+            z: t.positionY ?? 0,
+          }));
+          return (
+            <ClusterLabel
+              key={gid}
+              label={g.label!}
+              memberPositions={memberPositions}
+            />
+          );
+        })}
       {popupTodo && (
         <ActionPopup
           key={popupTodo.id}

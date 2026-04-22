@@ -396,4 +396,22 @@ describe('LilyPad', () => {
       expect(openPopupMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ─── Story 4.6: cluster glow ring (AC #11) ───
+  describe('cluster glow ring (AC #11)', () => {
+    it('renders one GlowSource (primary halo) when groupId is null', () => {
+      const { container } = render(
+        <LilyPad todo={{ ...mockTodo, groupId: null }} />,
+      );
+      // Each GlowSource renders one circlegeometry element.
+      expect(container.querySelectorAll('circlegeometry')).toHaveLength(1);
+    });
+
+    it('renders two GlowSources (primary + cluster ring) when groupId is set', () => {
+      const { container } = render(
+        <LilyPad todo={{ ...mockTodo, groupId: 'group-abc' }} />,
+      );
+      expect(container.querySelectorAll('circlegeometry')).toHaveLength(2);
+    });
+  });
 });

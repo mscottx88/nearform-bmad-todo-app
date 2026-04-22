@@ -44,17 +44,31 @@ const fragmentShader = `
 interface GlowSourceProps {
   radius: number;
   yOffset: number;
+  /** Initial color expressed as a CSS/Three.js color string (e.g. "#ffffff").
+   *  Defaults to black (invisible). For static cluster-ring halos; the
+   *  primary pad halo overrides uniforms imperatively via `ref` each frame. */
+  color?: string;
+  /** Initial uStrength uniform. 0 by default (parent drives it via ref). */
+  strength?: number;
 }
 
 export const GlowSource = forwardRef<THREE.ShaderMaterial, GlowSourceProps>(
-  function GlowSource({ radius, yOffset }, ref) {
+  function GlowSource({ radius, yOffset, color, strength }, ref) {
     // Initialize uniforms once — LilyPad writes to .value directly each
-    // frame. New Vector3 / number per mount, not per frame.
+    // frame for the primary glow. The cluster-ring variant uses static
+    // `color` + `strength` props baked in at mount time.
     const uniforms = useMemo(
-      () => ({
-        uColor: { value: new THREE.Vector3(0, 0, 0) },
-        uStrength: { value: 0 },
-      }),
+      () => {
+        const c = new THREE.Color(color ?? '#000000');
+        return {
+          uColor: { value: new THREE.Vector3(c.r, c.g, c.b) },
+          uStrength: { value: strength ?? 0 },
+        };
+      },
+      // Mount-only: parent writes .value imperatively for animated halos;
+      // static props are only read once at mount. eslint-disable-next-line
+      // react-hooks/exhaustive-deps
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       [],
     );
 
