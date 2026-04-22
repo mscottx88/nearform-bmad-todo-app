@@ -188,25 +188,27 @@ As a user, I want to group lily pads via the existing Action Popup — seeing gr
   - [x] Wire `groups.router` into [backend/src/main.py](backend/src/main.py).
   - [x] Write `backend/tests/api/test_groups.py`: POST creates → 201; POST with already-grouped member → 400; PATCH label → 200; PATCH member_ids → 200; DELETE → 204; DELETE missing → 404.
 
-- [ ] **Task 3: Frontend — types + API hooks** (AC: #4, #6–#8, #18–#25, #30)
-  - [ ] Add `groupId: string | null` to `frontend/src/types/index.ts:Todo`.
-  - [ ] Create [frontend/src/api/groupApi.ts](frontend/src/api/groupApi.ts) with `useCreateGroup`, `useUpdateGroup`, `useDeleteGroup`. All invalidate `TODOS_KEY` on success.
+- [x] **Task 3: Frontend — types + API hooks** (AC: #4, #6–#8, #18–#25, #30)
+  - [x] Add `groupId: string | null` to `frontend/src/types/index.ts:Todo`.
+  - [x] Create [frontend/src/api/groupApi.ts](frontend/src/api/groupApi.ts) with `useCreateGroup`, `useUpdateGroup`, `useDeleteGroup`. All invalidate `TODOS_KEY` on success.
 
-- [ ] **Task 4: Store — selection slice + cluster slices** (AC: #1–#2, #14–#25)
-  - [ ] In `usePondStore.ts`, add:
+- [x] **Task 4: Store — selection slice + cluster slices** (AC: #1–#2, #14–#25)
+  - [x] In `usePondStore.ts`, add:
     - `selectedPadIds: Set<string>`, `togglePadSelection(id)`, `clearSelection()`.
     - `hoveredGroupId: string | null`, `setHoveredGroupId(id)`.
     - `groupDragTarget: { groupId: string; anchorId: string; x: number; z: number } | null` + setter/clearer — used by siblings for repulsion and by PondScene for pop-out detection.
     - `clusterTranslation: { groupId: string; dx: number; dz: number } | null` + setter/clearer — used during handle grip phase so siblings translate in their `useFrame`.
     - `pendingPops: Map<string, number>` + `firePop(todoId)` — triggers pop animation on target; pads auto-expire entries in their own useFrame after 150ms.
-  - [ ] Tests: toggle adds/removes, clear empties; groupDragTarget set/clear round-trip; clusterTranslation accumulates deltas correctly.
+    - (beyond spec) `wakes: Array<...>` + `addWake` + `expireWakes` — added here since task 13's wake emission is a store concern alongside `pendingPops`.
+    - (beyond spec) `selectPendingPop` and `selectIsSelected` per-todo selectors for narrow subscriptions.
+  - [x] Tests: toggle adds/removes, clear empties; groupDragTarget set/clear round-trip; clusterTranslation accumulates deltas correctly.
 
-- [ ] **Task 5: LilyPad — selection visual + Shift/Ctrl click** (AC: #1–#2)
-  - [ ] In `LilyPad.tsx`'s `onPointerDown`: if `e.shiftKey || e.ctrlKey || e.metaKey`, call `togglePadSelection(todo.id)` and return early (no drag, no popup).
-  - [ ] Subscribe `isSelected = usePondStore((s) => s.selectedPadIds.has(todo.id))`.
-  - [ ] In `useFrame` resting phase: if `isSelected`, apply scale oscillation `1.0 + 0.05 * Math.abs(Math.sin(t * Math.PI * 4))`.
-  - [ ] Escape key: extend existing escape handling to also call `clearSelection()` when no popup/search is active.
-  - [ ] Plain click on any pad does NOT clear the selection.
+- [x] **Task 5: LilyPad — selection visual + Shift/Ctrl click** (AC: #1–#2)
+  - [x] In `LilyPad.tsx`'s `onPointerDown`: if `e.shiftKey || e.ctrlKey || e.metaKey`, call `togglePadSelection(todo.id)` and return early (no drag, no popup).
+  - [x] Subscribe `isSelected = usePondStore(selectIsSelected(todo.id))`.
+  - [x] In `useFrame` resting phase: if `isSelected`, apply scale oscillation `1.0 + 0.05 * Math.abs(Math.sin(t * Math.PI * 4))`.
+  - [x] Escape key: extend existing escape handling (`useClosePopupOnEscape`) to also call `clearSelection()` when no popup/search is active.
+  - [x] Plain click on any pad does NOT clear the selection.
 
 - [ ] **Task 6: `ActionPopup` — extended group section** (AC: #3–#10)
   - [ ] New props in `ActionPopupProps`:
@@ -538,6 +540,16 @@ The backend service rejects `POST /api/groups` if any `member_id` is already in 
 - **`conftest.py` now cleans `Group` rows too.** Previously only `GroupMembership` was wiped between tests — with groups surviving across tests, the `member_already_grouped` guard would false-positive depending on test ordering.
 
 **Quality gate:** 141/141 backend tests green (27 new — 16 service + 11 API). `ruff check src/` + `ruff format --check src/` clean. `mypy src/ --strict` clean (28 files, no issues).
+
+**Frontend (Tasks 3–5) — 2026-04-22.** Plumbing + selection visual landed.
+
+- **Task 3 — types + API hooks.** `Todo.groupId: string | null` added. `groupApi.ts` with `useCreateGroup` / `useUpdateGroup` / `useDeleteGroup`, all invalidating `TODOS_KEY` on success (same pattern as `todoApi`). All eight test fixture factories updated with `groupId: null`.
+- **Task 4 — store slices.** Six new slices: `selectedPadIds`, `hoveredGroupId`, `groupDragTarget`, `clusterTranslation`, `pendingPops`, `wakes`. Each with its action(s) and a per-todo narrow selector where useful (`selectIsSelected`, `selectPendingPop`). Identity-preserving no-ops on `clearSelection` / `setHoveredGroupId` identical-value / `clearPendingPop` missing-id / `expireWakes` no-expirations so store consumers don't re-render on idle calls. 17 new tests; `usePondStore.test.ts` now 67 tests green.
+- **Task 5 — LilyPad selection.** `handlePadPointerDown` consumes modifier-click (Shift/Ctrl/Meta) before the drag-vs-popup branch, routing to `togglePadSelection(todo.id)`. `useFrame` resting phase adds `selectionOscillation = 0.05 * |sin(t·π·4)|` on top of the existing focused/decay scale composition. `useClosePopupOnEscape` extended to clear selection when no popup / no search active, with popup-close priority over selection-clear. 6 new LilyPad tests + 3 new Escape tests.
+
+**Quality gate so far:** 307/307 frontend tests green. `tsc --noEmit` clean.
+
+Remaining: Tasks 6–16 (ActionPopup extension, PondScene wiring, cluster visuals, drag handle, member drag, pop-in, wake primitive, camera follow, `/spread-out` group-awareness, final quality gate). Pausing at this checkpoint per user request — context budget.
 
 ### Debug Log
 

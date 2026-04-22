@@ -5,6 +5,7 @@ import type { Todo } from '../../types';
 
 const openPopupMock = vi.fn();
 const clearTargetPositionMock = vi.fn();
+const togglePadSelectionMock = vi.fn();
 // Story 4.2: hoisted mock fn so both `vi.mock('../../api/todoApi')` and
 // per-test assertions can reach the same instance. vitest hoists
 // `vi.mock` above imports, so a top-level `const` declared before
@@ -113,6 +114,9 @@ vi.mock('../../stores/usePondStore', () => ({
       // test running against the pre-search rendering path.
       searchActive: false,
       searchAllMatches: false,
+      // Story 4.6: Shift/Ctrl/Meta-click on a pad routes into the
+      // selection slice instead of the drag / popup pipeline.
+      togglePadSelection: togglePadSelectionMock,
     }),
   }),
   selectCompleting: () => () => undefined,
@@ -124,6 +128,10 @@ vi.mock('../../stores/usePondStore', () => ({
   // Story 5.3: search-hit selector returns undefined — todo isn't a
   // match in this test harness.
   selectSearchHit: () => () => undefined,
+  // Story 4.6: test harness reports the pad as unselected; the
+  // selection-visual branch (useFrame oscillation) is therefore
+  // inactive for these tests.
+  selectIsSelected: () => () => false,
 }));
 
 const mockTodo: Todo = {
@@ -169,6 +177,7 @@ describe('LilyPad', () => {
     openPopupMock.mockClear();
     updateTodoMutateMock.mockClear();
     clearTargetPositionMock.mockClear();
+    togglePadSelectionMock.mockClear();
     completingTodosMock.clear();
     deletingTodosMock.clear();
   });
@@ -319,6 +328,72 @@ describe('LilyPad', () => {
       expect(openPopupMock).toHaveBeenCalledTimes(1);
       // No PATCH — the click branch took over.
       expect(updateTodoMutateMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // Story 4.6 AC #1: Shift/Ctrl/Meta + click toggles the selection
+  // set instead of triggering the drag or popup path.
+  describe('multi-selection modifier click (story 4.6)', () => {
+    it('Shift-click routes to togglePadSelection and skips the popup', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      expect(padMesh).toBeTruthy();
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, {
+        clientX: 0,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 1,
+        shiftKey: true,
+      });
+      expect(togglePadSelectionMock).toHaveBeenCalledWith('123');
+      // No popup open on a selection click — even if pointerUp
+      // happens without movement, the early return prevented the
+      // window listener from being attached.
+      fireEvent.pointerUp(window, {
+        clientX: 0,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 0,
+      });
+      expect(openPopupMock).not.toHaveBeenCalled();
+    });
+
+    it('Ctrl-click also toggles selection', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, {
+        clientX: 0,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 1,
+        ctrlKey: true,
+      });
+      expect(togglePadSelectionMock).toHaveBeenCalledWith('123');
+    });
+
+    it('Meta-click also toggles selection (macOS)', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, {
+        clientX: 0,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 1,
+        metaKey: true,
+      });
+      expect(togglePadSelectionMock).toHaveBeenCalledWith('123');
+    });
+
+    it('plain click does NOT toggle selection', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireClickAt(padMesh);
+      expect(togglePadSelectionMock).not.toHaveBeenCalled();
+      expect(openPopupMock).toHaveBeenCalledTimes(1);
     });
   });
 });

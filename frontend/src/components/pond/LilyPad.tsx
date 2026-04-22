@@ -11,6 +11,7 @@ import {
   selectTodoError,
   selectColorPreview,
   selectSearchHit,
+  selectIsSelected,
 } from '../../stores/usePondStore';
 import { useUpdateTodo } from '../../api/todoApi';
 import { EmergingCreature } from '../creatures/EmergingCreature';
@@ -522,6 +523,11 @@ export function LilyPad({
   // scalars and firing extra renders.
   const searchHit = usePondStore(selectSearchHit(todo.id));
 
+  // Story 4.6: this pad's membership in the multi-selection set.
+  // Narrow subscription so only pads whose selection state flips
+  // re-render on a toggle. Drives the white-rim oscillation below.
+  const isSelected = usePondStore(selectIsSelected(todo.id));
+
   // Story 3.3: historical-pad visual treatment discriminator. Computed
   // once per render from `todo.deleted` / `todo.completed`. All 3.3
   // visual-branch decisions (fade, tint, click-gate, per-frame skip)
@@ -698,6 +704,17 @@ export function LilyPad({
       const state = usePondStore.getState();
       if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;
       if (state.activePopupTodoId === todo.id) return;
+
+      // Story 4.6 AC #1: Shift/Ctrl/Meta + click toggles multi-selection.
+      // No drag attempt, no popup — the click is consumed by the
+      // selection slice. Uses `nativeEvent` because `ThreeEvent` does
+      // not forward modifier flags directly; the native pointer event
+      // carries shiftKey/ctrlKey/metaKey.
+      const native = e.nativeEvent;
+      if (native.shiftKey || native.ctrlKey || native.metaKey) {
+        state.togglePadSelection(todo.id);
+        return;
+      }
       // Defensive: if a previous cycle never received pointerup
       // (rare browser bug, or an unmount-remount mid-drag), drop
       // any stale listeners before starting a new one.
@@ -1340,7 +1357,14 @@ export function LilyPad({
       const decayFlicker = errorEntry
         ? Math.sin(state.clock.elapsedTime * 2 * Math.PI * DECAY_SCALE_FREQ_HZ + driftSeed) * DECAY_SCALE_AMPLITUDE
         : 0;
-      const targetScale = baseTargetScale + decayFlicker;
+      // Story 4.6 AC #1: selected pads oscillate 1.00–1.05 at 2 Hz.
+      // `2 Hz` → period 0.5s → full cycle `t * Math.PI * 4`. Amplitude
+      // 0.05 reads as a clear "held" cue without jitter. Additive on top
+      // of the base scale so focused + decaying + selected composes.
+      const selectionOscillation = isSelected
+        ? 0.05 * Math.abs(Math.sin(state.clock.elapsedTime * Math.PI * 4))
+        : 0;
+      const targetScale = baseTargetScale + decayFlicker + selectionOscillation;
       const currentScale = group.scale.x;
       group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
 

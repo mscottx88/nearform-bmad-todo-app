@@ -51,4 +51,48 @@ describe('useClosePopupOnEscape', () => {
     dispatchEscape();
     expect(usePondStore.getState().activePopupTodoId).toBe('todo-1');
   });
+
+  // Story 4.6 AC #2: Escape clears multi-selection when no popup/search.
+  describe('story 4.6 — Escape clears multi-selection', () => {
+    beforeEach(() => {
+      usePondStore.setState({
+        activePopupTodoId: null,
+        searchActive: false,
+        selectedPadIds: new Set(),
+      });
+    });
+
+    it('clears selection when no popup and no search', () => {
+      usePondStore.setState({ selectedPadIds: new Set(['a', 'b']) });
+      const { unmount } = renderHook(() => useClosePopupOnEscape());
+      dispatchEscape();
+      expect(usePondStore.getState().selectedPadIds.size).toBe(0);
+      unmount();
+    });
+
+    it('prefers closing the popup over clearing selection', () => {
+      usePondStore.setState({
+        activePopupTodoId: 'todo-1',
+        selectedPadIds: new Set(['a', 'b']),
+      });
+      const { unmount } = renderHook(() => useClosePopupOnEscape());
+      dispatchEscape();
+      expect(usePondStore.getState().activePopupTodoId).toBeNull();
+      // Selection preserved — a second Escape would clear it.
+      expect(usePondStore.getState().selectedPadIds.size).toBe(2);
+      unmount();
+    });
+
+    it('does not clear selection while search is active', () => {
+      usePondStore.setState({
+        searchActive: true,
+        selectedPadIds: new Set(['a']),
+      });
+      const { unmount } = renderHook(() => useClosePopupOnEscape());
+      dispatchEscape();
+      // Search hook owns Escape when active — selection untouched.
+      expect(usePondStore.getState().selectedPadIds.size).toBe(1);
+      unmount();
+    });
+  });
 });
