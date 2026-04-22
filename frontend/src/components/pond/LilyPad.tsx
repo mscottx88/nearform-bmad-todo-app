@@ -1380,6 +1380,19 @@ export function LilyPad({
             group.position.x = spreadTarget.x;
             group.position.z = spreadTarget.z;
             usePondStore.getState().clearTargetPosition(todo.id);
+            // Story 4.2 flash-fix (parity with drag release): pin
+            // the pad at `spreadTarget` until the refetched todo
+            // arrives with the new position. Without this, the
+            // resting-branch drift below would use the stale
+            // posX/posZ for the handful of frames between the
+            // PATCH firing and React Query invalidating +
+            // refetching, visibly flashing the pad back to its
+            // pre-spread position. Reuses the same dragPosRef +
+            // stickyDragRef pair the drag pipeline uses — the
+            // cleanup effect clears the flag when posX/posZ
+            // arrives matching the target.
+            dragPosRef.current = { x: spreadTarget.x, z: spreadTarget.z };
+            stickyDragRef.current = true;
             updateTodo.mutate({
               id: todo.id,
               positionX: spreadTarget.x,
