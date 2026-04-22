@@ -23,8 +23,15 @@ const queryClient = new QueryClient({
 
 function AppContent() {
   const [inputOpen, setInputOpen] = useState(false);
+  // Story 3.3 AC #10: seed TodoInput's controlled `value` on open so
+  // the global `/` shortcut lands with "/" already typed. Enter
+  // continues to seed an empty input.
+  const [inputInitial, setInputInitial] = useState('');
 
-  const openInput = useCallback(() => setInputOpen(true), []);
+  const openInput = useCallback((initial: string) => {
+    setInputInitial(initial);
+    setInputOpen(true);
+  }, []);
   const closeInput = useCallback(() => setInputOpen(false), []);
 
   useKeyboardShortcuts(openInput);
@@ -33,7 +40,7 @@ function AppContent() {
   return (
     <ViewportGuard>
       <PondScene />
-      <TodoInput isOpen={inputOpen} onClose={closeInput} />
+      <TodoInput isOpen={inputOpen} initialValue={inputInitial} onClose={closeInput} />
       <CursorFirefly />
     </ViewportGuard>
   );

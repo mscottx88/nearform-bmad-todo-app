@@ -1,9 +1,31 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useShallow } from 'zustand/react/shallow';
 import apiClient from './client';
 import { usePondStore } from '../stores/usePondStore';
 import type { Todo } from '../types';
 
-const TODOS_KEY = ['todos', 'list'] as const;
+// Story 3.3: TODOS_KEY stays as the prefix; the concrete query key
+// now includes a visibility triple so each flag combination gets its
+// own React Query cache entry. Mutations invalidate this prefix so
+// every cached mode refetches after a create/update/delete.
+export const TODOS_KEY = ['todos', 'list'] as const;
+
+interface VisibilityTriple {
+  showActive: boolean;
+  showCompleted: boolean;
+  showDeleted: boolean;
+}
+
+export function todosQueryKey(visibility: VisibilityTriple) {
+  return [
+    ...TODOS_KEY,
+    {
+      active: visibility.showActive,
+      completed: visibility.showCompleted,
+      deleted: visibility.showDeleted,
+    },
+  ] as const;
+}
 
 interface CreateTodoInput {
   text: string;
@@ -13,10 +35,26 @@ interface CreateTodoInput {
 }
 
 export function useTodos() {
+  // `useShallow` because the selector returns a fresh object per
+  // render — without it, every render is a new reference and the
+  // `useQuery` effect re-runs infinitely. Shallow-compare keeps the
+  // three booleans from triggering unless their values actually change.
+  const visibility = usePondStore(
+    useShallow((s) => ({
+      showActive: s.showActive,
+      showCompleted: s.showCompleted,
+      showDeleted: s.showDeleted,
+    })),
+  );
   return useQuery({
-    queryKey: TODOS_KEY,
+    queryKey: todosQueryKey(visibility),
     queryFn: async () => {
-      const { data } = await apiClient.get<Todo[]>('/todos');
+      const params = new URLSearchParams({
+        include_active: String(visibility.showActive),
+        include_completed: String(visibility.showCompleted),
+        include_deleted: String(visibility.showDeleted),
+      });
+      const { data } = await apiClient.get<Todo[]>(`/todos?${params.toString()}`);
       return data;
     },
   });
@@ -30,7 +68,10 @@ export function useCreateTodo() {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+      // Story 3.3: prefix-invalidate so every cached visibility triple
+      // (['todos', 'list', { ... }]) refetches. React Query v5 matches
+      // by prefix unless `exact: true` is set.
+      queryClient.invalidateQueries({ queryKey: TODOS_KEY });
     },
   });
 }
@@ -62,11 +103,40 @@ export function useUpdateTodo() {
     },
     onSuccess: (_data, { id }) => {
       usePondStore.getState().clearTodoError(id);
-      queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+      // Story 3.3: prefix-invalidate so every cached visibility triple
+      // (['todos', 'list', { ... }]) refetches. React Query v5 matches
+      // by prefix unless `exact: true` is set.
+      queryClient.invalidateQueries({ queryKey: TODOS_KEY });
     },
     // Story 2.6 AC #4: fires only after the client-level retry budget
     // (3 attempts, exponential backoff) is exhausted.
     onError: (err, { id }) => {
+      usePondStore.getState().setTodoError(id, 'update', err as Error);
+    },
+  });
+}
+
+export function useRestoreTodo() {
+  // Story 3.3: POST /api/todos/:id/restore flips a soft-deleted row's
+  // `deleted` back to `false`. Used by the ActionPopup UNDELETE button
+  // when the popup opens on a deleted pad. Mirrors the mutation
+  // plumbing of useUpdateTodo — clearTodoError onMutate/onSuccess,
+  // setTodoError onError (via the 'update' op slot since restore is
+  // conceptually an update), prefix-invalidate todos on success.
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await apiClient.post<Todo>(`/todos/${id}/restore`);
+      return data;
+    },
+    onMutate: (id) => {
+      usePondStore.getState().clearTodoError(id);
+    },
+    onSuccess: (_data, id) => {
+      usePondStore.getState().clearTodoError(id);
+      queryClient.invalidateQueries({ queryKey: TODOS_KEY });
+    },
+    onError: (err, id) => {
       usePondStore.getState().setTodoError(id, 'update', err as Error);
     },
   });
@@ -86,7 +156,10 @@ export function useDeleteTodo() {
     },
     onSuccess: (_data, id) => {
       usePondStore.getState().clearTodoError(id);
-      queryClient.invalidateQueries({ queryKey: [...TODOS_KEY] });
+      // Story 3.3: prefix-invalidate so every cached visibility triple
+      // (['todos', 'list', { ... }]) refetches. React Query v5 matches
+      // by prefix unless `exact: true` is set.
+      queryClient.invalidateQueries({ queryKey: TODOS_KEY });
     },
     onError: (err, id) => {
       usePondStore.getState().setTodoError(id, 'delete', err as Error);

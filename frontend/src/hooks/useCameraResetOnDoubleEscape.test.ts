@@ -6,6 +6,7 @@ import { createElement } from 'react';
 import { useCameraResetOnDoubleEscape } from './useCameraResetOnDoubleEscape';
 import { usePondStore } from '../stores/usePondStore';
 import { fitCameraToPads } from '../components/pond/fitCameraToPads';
+import { todosQueryKey } from '../api/todoApi';
 import type { Todo } from '../types';
 
 function dispatchEscape(target?: EventTarget): void {
@@ -147,6 +148,65 @@ describe('useCameraResetOnDoubleEscape', () => {
       position: [0, 15, 20],
       target: [0, 0, 0],
     });
+    unmount();
+  });
+
+  // Story 3.3: under the new useTodos keying, a single seeded
+  // ['todos', 'list', { ... }] entry still prefix-matches the hook's
+  // getQueriesData query.
+  it('reads from a new-shape (story 3.3) cache entry via prefix match', () => {
+    const client = new QueryClient();
+    const todos: Todo[] = [
+      makeTodo({ id: 'a', positionX: 10, positionY: 10 }),
+      makeTodo({ id: 'b', positionX: 12, positionY: 12 }),
+    ];
+    client.setQueryData(
+      todosQueryKey({ showActive: true, showCompleted: false, showDeleted: false }),
+      todos,
+    );
+    const { unmount } = renderWithClient(client);
+
+    mockNow = 100;
+    dispatchEscape();
+    mockNow = 200;
+    dispatchEscape();
+
+    expect(usePondStore.getState().cameraResetRequestId).toBe(1);
+    expect(usePondStore.getState().pendingCameraFit).toEqual(fitCameraToPads(todos));
+    unmount();
+  });
+
+  // Story 3.3 AC #5 regression: two visibility cache entries (default
+  // + all-three-true) — the hook should union their todos and de-dupe
+  // by id so overlapping entries don't skew the fit.
+  it('merges multiple visibility cache entries and de-dupes by id', () => {
+    const client = new QueryClient();
+    const activeTodos: Todo[] = [
+      makeTodo({ id: 'a', positionX: 10, positionY: 10 }),
+    ];
+    const allTodos: Todo[] = [
+      makeTodo({ id: 'a', positionX: 10, positionY: 10 }),
+      makeTodo({ id: 'b', positionX: -20, positionY: 5, completed: true }),
+      makeTodo({ id: 'c', positionX: 30, positionY: -15, deleted: true }),
+    ];
+    client.setQueryData(
+      todosQueryKey({ showActive: true, showCompleted: false, showDeleted: false }),
+      activeTodos,
+    );
+    client.setQueryData(
+      todosQueryKey({ showActive: true, showCompleted: true, showDeleted: true }),
+      allTodos,
+    );
+    const { unmount } = renderWithClient(client);
+
+    mockNow = 100;
+    dispatchEscape();
+    mockNow = 200;
+    dispatchEscape();
+
+    // Union by id = a, b, c (a de-duped across the two entries).
+    const expected = fitCameraToPads(allTodos);
+    expect(usePondStore.getState().pendingCameraFit).toEqual(expected);
     unmount();
   });
 

@@ -2,15 +2,10 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePondStore } from '../stores/usePondStore';
 import { fitCameraToPads } from '../components/pond/fitCameraToPads';
+import { TODOS_KEY } from '../api/todoApi';
 import type { Todo } from '../types';
 
 const ESC_DOUBLE_WINDOW_MS = 600;
-
-// Must match the query key used by useTodos in todoApi.ts (`TODOS_KEY`).
-// Re-declared rather than imported because `TODOS_KEY` is currently a
-// module-local const. If future work needs this key in more than one
-// place, hoist the const into a shared file.
-const TODOS_QUERY_KEY = ['todos', 'list'] as const;
 
 /**
  * Story 3.1 AC #4: two Escape keypresses within 600ms dispatch a
@@ -51,9 +46,24 @@ export function useCameraResetOnDoubleEscape(): void {
       }
       const now = performance.now();
       if (now - lastEscapeTs.current < ESC_DOUBLE_WINDOW_MS) {
-        // Read live todos from React Query's cache at dispatch time —
-        // always the freshest snapshot, no stale closure.
-        const todos = queryClient.getQueryData<Todo[]>(TODOS_QUERY_KEY) ?? [];
+        // Story 3.3: useTodos now keys per visibility triple, so the
+        // plain ['todos', 'list'] key no longer resolves. Read every
+        // cache entry under that prefix and merge — de-dupe by id so
+        // overlapping triples (e.g. active-only + all-three) don't
+        // double-count the same pad in the fit computation.
+        const entries = queryClient.getQueriesData<Todo[]>({
+          queryKey: TODOS_KEY,
+        });
+        const todos: Todo[] = [];
+        const seen = new Set<string>();
+        for (const [, data] of entries) {
+          if (!data) continue;
+          for (const t of data) {
+            if (seen.has(t.id)) continue;
+            seen.add(t.id);
+            todos.push(t);
+          }
+        }
         const fit = fitCameraToPads(todos);
         usePondStore.getState().requestCameraReset(fit);
         // Consume the double-tap so a third rapid ESC doesn't fire a second reset.

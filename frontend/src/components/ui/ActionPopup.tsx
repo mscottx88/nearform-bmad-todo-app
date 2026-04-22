@@ -166,19 +166,25 @@ export function ActionPopup({
             );
           }}
         >
+          {/* Story 3.3: the Complete / Delete buttons swap to
+              Uncomplete / Undelete when the popup opens on a
+              completed / deleted pad. The parent passes the same
+              onComplete / onDelete callback for both polarities —
+              PondScene branches on todo.completed / todo.deleted to
+              decide which mutation to fire. */}
           <button
             type="button"
             className="action-popup__button action-popup__button--complete"
             onClick={onComplete}
           >
-            Complete
+            {todo.completed ? 'Uncomplete' : 'Complete'}
           </button>
           <button
             type="button"
             className="action-popup__button action-popup__button--delete"
             onClick={onDelete}
           >
-            Delete
+            {todo.deleted ? 'Undelete' : 'Delete'}
           </button>
           <button
             type="button"

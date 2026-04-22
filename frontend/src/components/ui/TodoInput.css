@@ -32,3 +32,67 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* Story 3.3: shell wraps the input + absolute-positioned dropdown
+   so the dropdown anchors directly beneath the input without
+   shifting the input's layout. */
+.todo-input-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.todo-input-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  list-style: none;
+  padding: 4px 0;
+  min-width: 320px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--neon-cyan);
+  box-shadow: 0 0 8px var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  pointer-events: auto;
+  transition: opacity 150ms ease-out;
+}
+
+/* Dim-on-open affordance — the dropdown is present but recessed so
+   the default Enter-to-type-a-todo flow isn't visually shouted at.
+   Full opacity kicks in the moment the user types '/'. */
+.todo-input-dropdown--dim {
+  opacity: 0.7;
+}
+
+.todo-input-dropdown--active {
+  opacity: 1;
+}
+
+.todo-input-dropdown__item,
+.todo-input-dropdown__item--highlighted {
+  padding: 6px 16px;
+  display: flex;
+  gap: 12px;
+  opacity: 0.6;
+}
+
+.todo-input-dropdown__item--highlighted {
+  opacity: 1;
+  border-left: 2px solid var(--neon-cyan);
+  background: rgba(0, 238, 255, 0.08);
+}
+
+.todo-input-dropdown__token {
+  flex-shrink: 0;
+}
+
+.todo-input-dropdown__desc {
+  opacity: 0.5;
+  font-size: 12px;
+}

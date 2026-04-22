@@ -78,6 +78,15 @@ export function usePondSearchKeyboard(): void {
         return;
       }
 
+      // Story 3.3 AC #10: let the app-level `/` shortcut claim the
+      // keystroke when no search is active. Once a search IS active,
+      // `/` continues to append to the query (useful for typing
+      // path-like search strings). This is the primary collision
+      // resolution between 3.3's `/` shortcut and 5.3's type-anywhere
+      // search capture; `useKeyboardShortcuts` also calls
+      // stopImmediatePropagation as a belt-and-braces.
+      if (e.key === '/' && !state.searchActive) return;
+
       if (e.key === 'Backspace') {
         // preventDefault so browser "back" navigation doesn't fire
         // (some keyboards route Backspace through History.back when

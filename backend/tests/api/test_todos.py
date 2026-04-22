@@ -202,6 +202,94 @@ def test_create_todo_response_time_not_affected(client: TestClient) -> None:
     )
 
 
+# Story 3.3: visibility-flag query params on GET /api/todos.
+def _seed_visibility_mix(client: TestClient) -> dict[str, list[str]]:
+    active_texts = ["Active-A", "Active-B", "Active-C"]
+    for text in active_texts:
+        client.post("/api/todos", json={"text": text})
+    completed_resp = client.post("/api/todos", json={"text": "Completed-1"})
+    client.patch(
+        f"/api/todos/{completed_resp.json()['id']}",
+        json={"completed": True},
+    )
+    deleted_resp = client.post("/api/todos", json={"text": "Deleted-1"})
+    client.delete(f"/api/todos/{deleted_resp.json()['id']}")
+    return {
+        "active": active_texts,
+        "completed": ["Completed-1"],
+        "deleted": ["Deleted-1"],
+    }
+
+
+def test_list_todos_default_preserves_pre_3_3_contract(client: TestClient) -> None:
+    seed = _seed_visibility_mix(client)
+    response = client.get("/api/todos")
+    assert response.status_code == 200
+    assert {t["text"] for t in response.json()} == set(seed["active"])
+
+
+def test_list_todos_include_completed_only(client: TestClient) -> None:
+    seed = _seed_visibility_mix(client)
+    response = client.get(
+        "/api/todos?include_active=false&include_completed=true&include_deleted=false",
+    )
+    assert response.status_code == 200
+    assert {t["text"] for t in response.json()} == set(seed["completed"])
+
+
+def test_list_todos_include_deleted_only(client: TestClient) -> None:
+    seed = _seed_visibility_mix(client)
+    response = client.get(
+        "/api/todos?include_active=false&include_completed=false&include_deleted=true",
+    )
+    assert response.status_code == 200
+    assert {t["text"] for t in response.json()} == set(seed["deleted"])
+
+
+def test_list_todos_all_three_flags_true(client: TestClient) -> None:
+    seed = _seed_visibility_mix(client)
+    response = client.get(
+        "/api/todos?include_active=true&include_completed=true&include_deleted=true",
+    )
+    assert response.status_code == 200
+    expected = set(seed["active"]) | set(seed["completed"]) | set(seed["deleted"])
+    assert {t["text"] for t in response.json()} == expected
+
+
+def test_list_todos_all_flags_false_returns_empty(client: TestClient) -> None:
+    _seed_visibility_mix(client)
+    response = client.get(
+        "/api/todos?include_active=false&include_completed=false&include_deleted=false",
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_restore_deleted_todo_round_trip(client: TestClient) -> None:
+    # Story 3.3: POST /api/todos/:id/restore undeletes a soft-deleted row.
+    create_resp = client.post("/api/todos", json={"text": "Bring me back"})
+    todo_id = create_resp.json()["id"]
+    client.delete(f"/api/todos/{todo_id}")
+    # After delete: default list excludes it.
+    assert client.get("/api/todos").json() == []
+    # Restore returns deleted=false + deleted_at=null.
+    restore_resp = client.post(f"/api/todos/{todo_id}/restore")
+    assert restore_resp.status_code == 200
+    assert restore_resp.json()["deleted"] is False
+    assert restore_resp.json()["deleted_at"] is None
+    # And the default list now includes it again.
+    listed = client.get("/api/todos").json()
+    assert [t["id"] for t in listed] == [todo_id]
+
+
+def test_restore_missing_todo_returns_404(client: TestClient) -> None:
+    import uuid as _uuid
+
+    response = client.post(f"/api/todos/{_uuid.uuid4()}/restore")
+    assert response.status_code == 404
+    assert response.json()["error"] == "not_found"
+
+
 def test_response_uses_snake_case(client: TestClient) -> None:
     create_resp = client.post(
         "/api/todos",

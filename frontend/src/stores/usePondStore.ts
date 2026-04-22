@@ -142,6 +142,15 @@ interface PondState {
   searchResults: Map<string, SearchHit>;
   searchAllMatches: boolean;
   vectorSearchUnavailable: boolean;
+
+  // Story 3.3: todo-visibility flags. Default (active-only) matches
+  // the PRD's primary interaction model; users opt into historical
+  // view via slash commands (see frontend/src/utils/slashCommands.ts).
+  // All flags live in-memory only — a reload resets to defaults.
+  // See story 3.3 Dev Notes § "Why no localStorage" for the rationale.
+  showActive: boolean;
+  showCompleted: boolean;
+  showDeleted: boolean;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -236,6 +245,18 @@ interface PondState {
    * Called on Escape (AC #12).
    */
   clearSearch: () => void;
+
+  /**
+   * Story 3.3: merge a partial visibility patch into the store.
+   * Mirrors Zustand's `set` semantics — fields omitted from `patch`
+   * retain their current value. Called by the execute() closures of
+   * the visibility slash commands (see visibilityCommands.ts).
+   */
+  setVisibility: (patch: {
+    showActive?: boolean;
+    showCompleted?: boolean;
+    showDeleted?: boolean;
+  }) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -256,6 +277,10 @@ export const usePondStore = create<PondState>((set, get) => ({
   searchResults: new Map(),
   searchAllMatches: false,
   vectorSearchUnavailable: false,
+
+  showActive: true,
+  showCompleted: false,
+  showDeleted: false,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -475,6 +500,11 @@ export const usePondStore = create<PondState>((set, get) => ({
       searchAllMatches: false,
       vectorSearchUnavailable: false,
     }),
+
+  // Story 3.3: partial-patch merge for the three visibility flags.
+  // `set({ ...patch })` with only the provided keys mirrors Zustand's
+  // default shallow-merge — omitted keys retain their current value.
+  setVisibility: (patch) => set(patch),
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook

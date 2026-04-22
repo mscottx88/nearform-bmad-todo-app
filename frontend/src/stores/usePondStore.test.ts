@@ -430,4 +430,56 @@ describe('usePondStore', () => {
       expect(selectSearchHit('todo-2')(state)).toBeUndefined();
     });
   });
+
+  // Story 3.3: visibility slices + setVisibility action.
+  describe('visibility slices (story 3.3)', () => {
+    beforeEach(() => {
+      usePondStore.setState({
+        showActive: true,
+        showCompleted: false,
+        showDeleted: false,
+      });
+    });
+
+    it('defaults match the PRD active-only contract', () => {
+      const state = usePondStore.getState();
+      expect(state.showActive).toBe(true);
+      expect(state.showCompleted).toBe(false);
+      expect(state.showDeleted).toBe(false);
+    });
+
+    it('setVisibility partial patch merges without touching unrelated keys', () => {
+      usePondStore.getState().setVisibility({ showCompleted: true });
+      const state = usePondStore.getState();
+      expect(state.showActive).toBe(true);
+      expect(state.showCompleted).toBe(true);
+      expect(state.showDeleted).toBe(false);
+    });
+
+    it('setVisibility accepts all three keys at once', () => {
+      usePondStore.getState().setVisibility({
+        showActive: false,
+        showCompleted: true,
+        showDeleted: true,
+      });
+      const state = usePondStore.getState();
+      expect(state.showActive).toBe(false);
+      expect(state.showCompleted).toBe(true);
+      expect(state.showDeleted).toBe(true);
+    });
+
+    it('setVisibility with empty patch is a no-op on values', () => {
+      usePondStore.getState().setVisibility({});
+      const state = usePondStore.getState();
+      expect(state.showActive).toBe(true);
+      expect(state.showCompleted).toBe(false);
+      expect(state.showDeleted).toBe(false);
+    });
+
+    it('idempotent: applying the same patch twice leaves values unchanged', () => {
+      usePondStore.getState().setVisibility({ showCompleted: true });
+      usePondStore.getState().setVisibility({ showCompleted: true });
+      expect(usePondStore.getState().showCompleted).toBe(true);
+    });
+  });
 });

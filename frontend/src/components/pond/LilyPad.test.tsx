@@ -125,4 +125,35 @@ describe('LilyPad', () => {
     if (padMesh) fireEvent.click(padMesh);
     expect(openPopupMock).not.toHaveBeenCalled();
   });
+
+  // Story 3.3 (revised): completed / deleted pads remain INTERACTIVE so
+  // the ActionPopup can offer UNCOMPLETE / UNDELETE / color / group.
+  // The grey/fade visual was pulled per product direction; only the
+  // halo color changes (green for completed, red for deleted) — that
+  // behaviour is validated in browser walkthroughs rather than unit
+  // tests because the JSX stub doesn't host real Three.js objects.
+  describe('historical pads remain interactive (story 3.3 revised)', () => {
+    it('completed pad opens the popup when clicked', () => {
+      const completedTodo: Todo = { ...mockTodo, completed: true };
+      const { container } = render(<LilyPad todo={completedTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (padMesh) fireEvent.click(padMesh);
+      expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+    });
+
+    it('deleted pad opens the popup when clicked', () => {
+      const deletedTodo: Todo = { ...mockTodo, deleted: true };
+      const { container } = render(<LilyPad todo={deletedTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (padMesh) fireEvent.click(padMesh);
+      expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+    });
+
+    it('active pad with completed=false and deleted=false opens the popup', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (padMesh) fireEvent.click(padMesh);
+      expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+    });
+  });
 });

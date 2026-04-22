@@ -461,6 +461,18 @@ export function LilyPad({
   // scalars and firing extra renders.
   const searchHit = usePondStore(selectSearchHit(todo.id));
 
+  // Story 3.3: historical-pad visual treatment discriminator. Computed
+  // once per render from `todo.deleted` / `todo.completed`. All 3.3
+  // visual-branch decisions (fade, tint, click-gate, per-frame skip)
+  // read from this single memo so adding/removing the treatment is a
+  // localised change. Active pads short-circuit every 3.3 branch so
+  // the pre-3.3 behaviour is byte-identical.
+  const visualState = useMemo<'active' | 'completed' | 'deleted'>(() => {
+    if (todo.deleted) return 'deleted';
+    if (todo.completed) return 'completed';
+    return 'active';
+  }, [todo.deleted, todo.completed]);
+
   const posX = todo.positionX ?? 0;
   const posZ = todo.positionY ?? 0;
   // Story 4.1: `effectiveColor` layers the hover-preview on top of the
@@ -1286,6 +1298,30 @@ export function LilyPad({
           : 1.0;
         let strength: number;
 
+        // Story 3.3: completed / deleted pads use the action tint
+        // (green / red HDR) for their halo instead of the pad's own
+        // color, so history reads at a glance regardless of palette.
+        // The pad body, rim, and opacity are unchanged — only the
+        // surrounding halo signals the status.
+        const baseGlowR =
+          visualState === 'completed'
+            ? COMPLETE_PAD_TINT.x
+            : visualState === 'deleted'
+            ? DELETE_PAD_TINT.x
+            : colorVec.r * AMBIENT_GLOW_HDR_SCALE;
+        const baseGlowG =
+          visualState === 'completed'
+            ? COMPLETE_PAD_TINT.y
+            : visualState === 'deleted'
+            ? DELETE_PAD_TINT.y
+            : colorVec.g * AMBIENT_GLOW_HDR_SCALE;
+        const baseGlowB =
+          visualState === 'completed'
+            ? COMPLETE_PAD_TINT.z
+            : visualState === 'deleted'
+            ? DELETE_PAD_TINT.z
+            : colorVec.b * AMBIENT_GLOW_HDR_SCALE;
+
         if (focused) {
           // Stamp the focus anchor on the first tick we see `focused`.
           // The osc phase then reads from elapsed-since-focus-open, so
@@ -1299,19 +1335,11 @@ export function LilyPad({
             0.5 +
             0.5 *
               Math.sin((focusElapsed * 2 * Math.PI) / FOCUSED_OSC_PERIOD_S);
-          uColor.set(
-            colorVec.r * AMBIENT_GLOW_HDR_SCALE,
-            colorVec.g * AMBIENT_GLOW_HDR_SCALE,
-            colorVec.b * AMBIENT_GLOW_HDR_SCALE,
-          );
+          uColor.set(baseGlowR, baseGlowG, baseGlowB);
           uColor.lerp(FOCUS_PAD_GLOW, osc);
           strength = FOCUSED_GLOW_STRENGTH * intensity;
         } else {
-          uColor.set(
-            colorVec.r * AMBIENT_GLOW_HDR_SCALE,
-            colorVec.g * AMBIENT_GLOW_HDR_SCALE,
-            colorVec.b * AMBIENT_GLOW_HDR_SCALE,
-          );
+          uColor.set(baseGlowR, baseGlowG, baseGlowB);
           strength = AMBIENT_GLOW_STRENGTH * intensity;
         }
 

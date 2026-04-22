@@ -3,7 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
-import { useTodos, useUpdateTodo } from '../../api/todoApi';
+import { useTodos, useUpdateTodo, useRestoreTodo } from '../../api/todoApi';
 import { useCompleteTodo } from '../../hooks/usePopupComplete';
 import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
 import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
@@ -44,6 +44,10 @@ export function PondScene() {
   // setTodoError/clearTodoError (story 2.6 plumbing), so AC #5/#6
   // fall out of the existing wiring without additional error code.
   const updateTodo = useUpdateTodo();
+  // Story 3.3: UNDELETE mutation. PATCH can't flip `deleted=false`
+  // (the route's `_get_active_todo` rejects deleted rows), so the
+  // backend exposes a dedicated POST /api/todos/:id/restore endpoint.
+  const restoreTodo = useRestoreTodo();
 
   // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
   // the first non-empty data set has been rendered, any subsequent mount
@@ -120,12 +124,29 @@ export function PondScene() {
 
   const handleComplete = () => {
     if (!popupTodo) return;
+    const store = usePondStore.getState();
+    // Story 3.3: UNCOMPLETE path for an already-completed pad — no
+    // creature spawn, no flash/dissolve, just PATCH {completed:false}
+    // and close. The pad re-renders as active on the next refetch.
+    if (popupTodo.completed) {
+      updateTodo.mutate({ id: popupTodo.id, completed: false });
+      store.setColorPreview(popupTodo.id, null);
+      store.closePopup();
+      return;
+    }
     // Guard the handler itself — store's `startCompletion` is idempotent
     // but the POST /creatures network call fires regardless, and a rapid
     // double-dispatch (synchronous re-click, touchstart+click pairing)
     // would produce a duplicate that fails on the DB UniqueConstraint.
-    const store = usePondStore.getState();
     if (store.completingTodos.has(popupTodo.id) || store.deletingTodos.has(popupTodo.id)) return;
+    // Story 3.3: pad stays visible when showCompleted is on — skip the
+    // dissolve/creature sequence; the halo lerps to green on next refetch.
+    if (store.showCompleted) {
+      updateTodo.mutate({ id: popupTodo.id, completed: true });
+      store.setColorPreview(popupTodo.id, null);
+      store.closePopup();
+      return;
+    }
     const { creatureType, rarity } = completeTodo(popupTodo.id);
     store.startCompletion(popupTodo, creatureType, rarity);
     // Story 4.1 CR-patch: clear any in-flight hover preview before the
@@ -137,11 +158,28 @@ export function PondScene() {
 
   const handleDelete = () => {
     if (!popupTodo) return;
+    const store = usePondStore.getState();
+    // Story 3.3: UNDELETE path for an already-deleted pad — POST to
+    // the restore endpoint and close. No dissolve; the pad re-renders
+    // as active on the next refetch.
+    if (popupTodo.deleted) {
+      restoreTodo.mutate(popupTodo.id);
+      store.setColorPreview(popupTodo.id, null);
+      store.closePopup();
+      return;
+    }
     // Guard the handler itself — store's `startDeletion` is idempotent but
     // the DELETE network call fires regardless, and a duplicate DELETE can
     // 404 silently since the first call soft-deletes the row.
-    const store = usePondStore.getState();
     if (store.deletingTodos.has(popupTodo.id) || store.completingTodos.has(popupTodo.id)) return;
+    // Story 3.3: pad stays visible when showDeleted is on — skip the
+    // dissolve sequence; the halo lerps to red on next refetch.
+    if (store.showDeleted) {
+      deleteTodo(popupTodo.id);
+      store.setColorPreview(popupTodo.id, null);
+      store.closePopup();
+      return;
+    }
     deleteTodo(popupTodo.id);
     store.startDeletion(popupTodo);
     // Story 4.1 CR-patch: mirror the complete path — clear the hover

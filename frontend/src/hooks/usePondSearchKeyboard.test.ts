@@ -156,4 +156,32 @@ describe('usePondSearchKeyboard', () => {
     dispatch('a');
     expect(usePondStore.getState().searchQuery).toBe('');
   });
+
+  // Story 3.3 AC #10: '/' carve-out so the app-level '/' shortcut
+  // can claim an idle pond's '/' keystroke without the search handler
+  // also appending it to the query.
+  describe("'/' carve-out (story 3.3 AC #10)", () => {
+    it("ignores '/' when search is NOT active (carve-out fires)", () => {
+      const { unmount } = renderHook(() => usePondSearchKeyboard());
+      dispatch('/');
+      expect(usePondStore.getState().searchQuery).toBe('');
+      expect(usePondStore.getState().searchActive).toBe(false);
+      unmount();
+    });
+
+    it("APPENDS '/' when search IS active (carve-out skipped)", () => {
+      usePondStore.setState({ searchQuery: 'path', searchActive: true });
+      const { unmount } = renderHook(() => usePondSearchKeyboard());
+      dispatch('/');
+      expect(usePondStore.getState().searchQuery).toBe('path/');
+      unmount();
+    });
+
+    it("a plain 'a' with search inactive still appends (carve-out is '/'-specific)", () => {
+      const { unmount } = renderHook(() => usePondSearchKeyboard());
+      dispatch('a');
+      expect(usePondStore.getState().searchQuery).toBe('a');
+      unmount();
+    });
+  });
 });

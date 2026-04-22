@@ -314,8 +314,20 @@ def test_hybrid_search_combined_score_within_epsilon(db_session: Session) -> Non
     )
     query_vec = _vec(3)  # cosine similarity 1.0 against _vec(3)
 
-    fts_map = search_service._run_fts(db_session, "review")
-    vec_map = search_service._run_vector(db_session, query_vec)
+    fts_map = search_service._run_fts(
+        db_session,
+        "review",
+        include_active=True,
+        include_completed=False,
+        include_deleted=False,
+    )
+    vec_map = search_service._run_vector(
+        db_session,
+        query_vec,
+        include_active=True,
+        include_completed=False,
+        include_deleted=False,
+    )
 
     assert todo.id in fts_map
     assert todo.id in vec_map
@@ -667,3 +679,88 @@ def test_hybrid_search_empty_result_set_returns_empty_list(
     assert resp.results == []
     assert resp.vector_search_unavailable is False
     assert resp.query == "nothingmatchesthis"
+
+
+# Story 3.3: search respects the visibility triple. Same keyword lives
+# on three todos in different states; each permutation should only
+# surface the pads its flags make visible.
+def test_hybrid_search_default_matches_active_only(db_session: Session) -> None:
+    from src.services import search_service
+
+    _seed_todo(db_session, "review active")
+    _seed_todo(db_session, "review completed", completed=True)
+    _seed_todo(db_session, "review deleted", deleted=True)
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(db_session, "review")
+
+    texts = {r.todo.text for r in resp.results}
+    assert texts == {"review active"}
+
+
+def test_hybrid_search_includes_completed_when_flagged(db_session: Session) -> None:
+    from src.services import search_service
+
+    _seed_todo(db_session, "review active")
+    _seed_todo(db_session, "review completed", completed=True)
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(
+            db_session,
+            "review",
+            include_active=True,
+            include_completed=True,
+            include_deleted=False,
+        )
+
+    texts = {r.todo.text for r in resp.results}
+    assert texts == {"review active", "review completed"}
+
+
+def test_hybrid_search_deleted_only_when_flagged(db_session: Session) -> None:
+    from src.services import search_service
+
+    _seed_todo(db_session, "review active")
+    _seed_todo(db_session, "review deleted", deleted=True)
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(
+            db_session,
+            "review",
+            include_active=False,
+            include_completed=False,
+            include_deleted=True,
+        )
+
+    texts = {r.todo.text for r in resp.results}
+    assert texts == {"review deleted"}
+
+
+def test_hybrid_search_all_flags_false_returns_empty(db_session: Session) -> None:
+    from src.services import search_service
+
+    _seed_todo(db_session, "review active")
+    _seed_todo(db_session, "review completed", completed=True)
+
+    with patch(
+        "src.services.search_service.embedding_service.generate_embedding",
+        return_value=_vec(0),
+    ):
+        resp = search_service.hybrid_search(
+            db_session,
+            "review",
+            include_active=False,
+            include_completed=False,
+            include_deleted=False,
+        )
+
+    assert resp.results == []

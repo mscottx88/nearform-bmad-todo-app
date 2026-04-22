@@ -40,6 +40,36 @@ describe('ActionPopup', () => {
     expect(screen.getByRole('button', { name: /group/i })).toBeInTheDocument();
   });
 
+  // Story 3.3: label swap for historical pads.
+  it('renders "Uncomplete" when todo.completed=true', () => {
+    render(
+      <ActionPopup
+        todo={{ ...mockTodo, completed: true }}
+        onComplete={() => {}}
+        onDelete={() => {}}
+        onCommitColor={() => {}}
+        onGroup={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /uncomplete/i })).toBeInTheDocument();
+    // "Delete" still reads as Delete when deleted=false.
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+  });
+
+  it('renders "Undelete" when todo.deleted=true', () => {
+    render(
+      <ActionPopup
+        todo={{ ...mockTodo, deleted: true }}
+        onComplete={() => {}}
+        onDelete={() => {}}
+        onCommitColor={() => {}}
+        onGroup={() => {}}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /undelete/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^complete$/i })).toBeInTheDocument();
+  });
+
   it('wires complete / delete / group to their handlers', () => {
     const onComplete = vi.fn();
     const onDelete = vi.fn();

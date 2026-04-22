@@ -91,7 +91,17 @@ describe('usePondSearchSync (debounce, fake timers)', () => {
     });
 
     expect(getSpy).toHaveBeenCalledTimes(1);
-    expect(getSpy).toHaveBeenCalledWith('/search', { params: { q: 'rev' } });
+    expect(getSpy).toHaveBeenCalledWith(
+      '/search',
+      {
+        params: {
+          q: 'rev',
+          include_active: true,
+          include_completed: false,
+          include_deleted: false,
+        },
+      },
+    );
   });
 
   it('coalesces rapid keystrokes into a single request', async () => {
@@ -121,7 +131,17 @@ describe('usePondSearchSync (debounce, fake timers)', () => {
     });
 
     expect(getSpy).toHaveBeenCalledTimes(1);
-    expect(getSpy).toHaveBeenCalledWith('/search', { params: { q: 'rev' } });
+    expect(getSpy).toHaveBeenCalledWith(
+      '/search',
+      {
+        params: {
+          q: 'rev',
+          include_active: true,
+          include_completed: false,
+          include_deleted: false,
+        },
+      },
+    );
   });
 
   it('skips the request when searchActive is false', async () => {

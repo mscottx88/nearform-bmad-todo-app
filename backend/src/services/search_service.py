@@ -23,8 +23,9 @@ import uuid
 from typing import cast
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import bindparam, text
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, bindparam, or_, text
+from sqlalchemy.orm import Query, Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.models.todo import Todo
 from src.schemas.search import MatchType, SearchResponse, SearchResult
@@ -75,7 +76,17 @@ MIN_VECTOR_SIMILARITY = 0.60
 SEARCH_EMBED_TIMEOUT_MS = 1_500
 
 
-def hybrid_search(db: Session, query_text: str) -> SearchResponse:
+def hybrid_search(
+    db: Session,
+    query_text: str,
+    include_active: bool = True,
+    include_completed: bool = False,
+    include_deleted: bool = False,
+) -> SearchResponse:
+    # Story 3.3: search matches every currently-visible pad per the
+    # user's visibility flags. Defaults (active-only) preserve the
+    # pre-3.3 contract. When all three flags are false the result is
+    # trivially empty — no SQL needed.
     q = query_text.strip()
     if not q:
         raise ValueError("Query cannot be empty")
@@ -85,7 +96,11 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
     # FTS branch contributed nothing because the query was unparseable,
     # distinct from "FTS ran and found no matches".
     fts_supported = _fts_supported(db, q)
-    fts_map = _run_fts(db, q) if fts_supported else {}
+    fts_map = (
+        _run_fts(db, q, include_active, include_completed, include_deleted)
+        if fts_supported
+        else {}
+    )
 
     vector_unavailable = False
     vec_map: dict[uuid.UUID, tuple[Todo, float]] = {}
@@ -111,7 +126,13 @@ def hybrid_search(db: Session, query_text: str) -> SearchResponse:
 
     if query_vec is not None:
         try:
-            vec_map = _run_vector(db, query_vec)
+            vec_map = _run_vector(
+                db,
+                query_vec,
+                include_active,
+                include_completed,
+                include_deleted,
+            )
         except Exception as exc:  # noqa: BLE001 - pgvector/SQL failure → FTS-only
             # Rollback to clear any half-applied transaction state before
             # the session returns to the pool; otherwise the next request
@@ -163,11 +184,46 @@ def _fts_supported(db: Session, q: str) -> bool:
     return bool((row or 0) > 0)
 
 
-def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:
+def _visibility_sql_clause(
+    include_active: bool,
+    include_completed: bool,
+    include_deleted: bool,
+) -> str:
+    # Story 3.3: translate the visibility triple into a SQL fragment
+    # compatible with both `_run_fts` and `_run_vector`. The `archived`
+    # pre-filter stays outside so archived rows are never surfaced.
+    # Empty triple returns `false` so the enclosing query is trivially
+    # empty without an "always false" hack.
+    parts: list[str] = []
+    if include_active:
+        parts.append("(completed = false AND deleted = false)")
+    if include_completed:
+        parts.append("completed = true")
+    if include_deleted:
+        parts.append("deleted = true")
+    if not parts:
+        return "false"
+    return "(" + " OR ".join(parts) + ")"
+
+
+def _run_fts(
+    db: Session,
+    q: str,
+    include_active: bool,
+    include_completed: bool,
+    include_deleted: bool,
+) -> dict[uuid.UUID, tuple[Todo, float]]:
     # ts_rank_cd is in [0, ∞); `x / (1 + x)` squashes to [0, 1). Keeps
     # the FTS branch's score in the same [0, 1] scale as cosine similarity
     # so the weighted merge is meaningful.
-    stmt = text("""
+    visibility = _visibility_sql_clause(
+        include_active, include_completed, include_deleted
+    )
+    # S608 false positive: `visibility` is a closed enum of SQL fragments
+    # produced locally from three booleans — never user input. The
+    # query parameter that COULD contain user input (`q`) is bound via
+    # `:q`, not interpolated.
+    stmt = text(f"""
         SELECT id,
                ts_rank_cd(
                    to_tsvector('english', text),
@@ -175,12 +231,11 @@ def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:
                ) AS fts_score
           FROM todos
          WHERE to_tsvector('english', text) @@ websearch_to_tsquery('english', :q)
-           AND deleted = false
-           AND completed = false
            AND archived = false
+           AND {visibility}
          ORDER BY fts_score DESC
          LIMIT :max_candidates
-    """)
+    """)  # noqa: S608
     rows = db.execute(
         stmt,
         {"q": q, "max_candidates": MAX_CANDIDATES_PER_SIDE},
@@ -190,19 +245,16 @@ def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:
         return {}
 
     ids_to_raw: dict[uuid.UUID, float] = {row.id: float(row.fts_score) for row in rows}
-    # Defence-in-depth: re-apply the active-row filter on ORM re-fetch so
-    # a concurrent soft-delete/complete/archive between the two queries
-    # can't resurface a tombstoned row.
-    todos = (
-        db.query(Todo)
-        .filter(
-            Todo.id.in_(ids_to_raw.keys()),
-            Todo.deleted == False,  # noqa: E712
-            Todo.completed == False,  # noqa: E712
-            Todo.archived == False,  # noqa: E712
-        )
-        .all()
+    # Defence-in-depth ORM re-fetch. `archived == False` always holds;
+    # the visibility-triple filter is reapplied dynamically below.
+    query = db.query(Todo).filter(
+        Todo.id.in_(ids_to_raw.keys()),
+        Todo.archived == False,  # noqa: E712
     )
+    query = _apply_visibility_orm_filter(
+        query, include_active, include_completed, include_deleted
+    )
+    todos = query.all()
 
     out: dict[uuid.UUID, tuple[Todo, float]] = {}
     for todo in todos:
@@ -212,25 +264,62 @@ def _run_fts(db: Session, q: str) -> dict[uuid.UUID, tuple[Todo, float]]:
     return out
 
 
+def _apply_visibility_orm_filter(
+    query: "Query[Todo]",
+    include_active: bool,
+    include_completed: bool,
+    include_deleted: bool,
+) -> "Query[Todo]":
+    # Mirror of `_visibility_sql_clause` but as SQLAlchemy ORM filters —
+    # used for the defence-in-depth re-fetch step after raw SQL returns
+    # candidate ids.
+    clauses: list[ColumnElement[bool]] = []
+    if include_active:
+        clauses.append(
+            and_(
+                Todo.completed == False,  # noqa: E712
+                Todo.deleted == False,  # noqa: E712
+            )
+        )
+    if include_completed:
+        clauses.append(Todo.completed == True)  # noqa: E712
+    if include_deleted:
+        clauses.append(Todo.deleted == True)  # noqa: E712
+    if not clauses:
+        # No visibility flag set → force an always-false filter so the
+        # re-fetch returns zero rows deterministically.
+        return query.filter(text("false"))
+    return query.filter(or_(*clauses))
+
+
 def _run_vector(
     db: Session,
     query_vec: list[float],
+    include_active: bool,
+    include_completed: bool,
+    include_deleted: bool,
 ) -> dict[uuid.UUID, tuple[Todo, float]]:
     # `embedding <=> :query_vec` in ORDER BY is what triggers the HNSW
     # index. Aliasing and ordering by the aliased column would
     # sequential-scan.
-    stmt = text("""
+    visibility = _visibility_sql_clause(
+        include_active, include_completed, include_deleted
+    )
+    # S608 false positive: `visibility` is a closed enum of SQL fragments
+    # produced locally from three booleans — never user input. The only
+    # external value here is the embedding vector, which is bound via
+    # :query_vec.
+    stmt = text(f"""
         SELECT id,
                1 - (embedding <=> :query_vec) AS similarity
           FROM todos
          WHERE embedding IS NOT NULL
            AND embedding_status = 'complete'
-           AND deleted = false
-           AND completed = false
            AND archived = false
+           AND {visibility}
          ORDER BY embedding <=> :query_vec
          LIMIT :max_candidates
-    """).bindparams(bindparam("query_vec", type_=Vector(768)))
+    """).bindparams(bindparam("query_vec", type_=Vector(768)))  # noqa: S608
 
     rows = db.execute(
         stmt,
@@ -255,16 +344,14 @@ def _run_vector(
     if not ids_to_sim:
         return {}
     # Same defence-in-depth filter as _run_fts.
-    todos = (
-        db.query(Todo)
-        .filter(
-            Todo.id.in_(ids_to_sim.keys()),
-            Todo.deleted == False,  # noqa: E712
-            Todo.completed == False,  # noqa: E712
-            Todo.archived == False,  # noqa: E712
-        )
-        .all()
+    query = db.query(Todo).filter(
+        Todo.id.in_(ids_to_sim.keys()),
+        Todo.archived == False,  # noqa: E712
     )
+    query = _apply_visibility_orm_filter(
+        query, include_active, include_completed, include_deleted
+    )
+    todos = query.all()
 
     out: dict[uuid.UUID, tuple[Todo, float]] = {}
     for todo in todos:

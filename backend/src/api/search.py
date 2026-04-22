@@ -37,6 +37,9 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 def search(
     request: Request,
     q: QParam,
+    include_active: bool = Query(default=True),
+    include_completed: bool = Query(default=False),
+    include_deleted: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> SearchResponse:
     # FastAPI's scalar `str` binding silently takes the last value when
@@ -46,4 +49,12 @@ def search(
             status_code=422,
             detail="Multiple values for 'q' are not allowed",
         )
-    return search_service.hybrid_search(db, q)
+    # Story 3.3: search over the currently-visible pad set, mirroring
+    # `GET /api/todos`. Defaults (active-only) preserve pre-3.3 contract.
+    return search_service.hybrid_search(
+        db,
+        q,
+        include_active=include_active,
+        include_completed=include_completed,
+        include_deleted=include_deleted,
+    )

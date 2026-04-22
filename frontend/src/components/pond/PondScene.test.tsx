@@ -36,9 +36,11 @@ let mockUseTodosData: Todo[] = [];
 // individual tests (e.g. the story-4.1 commit-flow test) can assert
 // what PondScene dispatches when a swatch is committed.
 const mockUpdateTodoMutate = vi.fn();
+const mockRestoreTodoMutate = vi.fn();
 vi.mock('../../api/todoApi', () => ({
   useTodos: () => ({ data: mockUseTodosData, isLoading: false }),
   useUpdateTodo: () => ({ mutate: mockUpdateTodoMutate }),
+  useRestoreTodo: () => ({ mutate: mockRestoreTodoMutate }),
 }));
 
 vi.mock('../../api/creatureApi', () => ({
