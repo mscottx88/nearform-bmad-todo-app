@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-22 # stories 4.2 + 4.6 + 5.6 created — drag/spread-out, clustering/groups, cluster-aware search (FR20)
+last_updated: 2026-04-22 # 4.2 drag + /spread-out implemented; moved to review
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -88,7 +88,7 @@ development_status:
   # Epic 4: Organizing the Pond
   epic-4: in-progress  # opened 2026-04-17 with story 4.1
   4-1-popup-color-swatch-neon-selector: done  # 5 CR patches applied (Escape race, preview leak, empty-string, completed-pad flash, keyboard test); 102/102 tests green
-  4-2-lily-pad-drag-and-spread-out: ready-for-dev  # drag individual pads to reposition; /spread-out slash command resolves overlaps; group-aware algorithm interface (singletons now, real groups later)
+  4-2-lily-pad-drag-and-spread-out: review  # drag individual pads to reposition; /spread-out slash command resolves overlaps; group-aware algorithm interface (singletons now, real groups later)
   4-3-position-persistence: backlog
   4-4-frontend-a11y-sweep: backlog  # promoted from 2-3/2-7 CR defers — prefers-reduced-motion honoured across LilyPad animations; popup ARIA/dialog semantics + focus trap + Escape-to-close + keyboard-navigable action buttons; SVG callout pointer-events fix
   4-5-react-strict-compliance-sweep: backlog  # promoted from 2-7 CR defer — fix ref mutations/reads during render in PondScene (hasSeenInitialLoadRef) and similar patterns; verify by running the app under <StrictMode> and checking the console is clean

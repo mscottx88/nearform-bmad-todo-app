@@ -288,8 +288,14 @@ export function PondCamera() {
       // listener below for ascend/descend (AC #8). With MIDDLE undefined,
       // OrbitControls' internal switch falls through to STATE.NONE and
       // leaves the button free.
+      //
+      // Story 4.2: LEFT is also intentionally omitted so plain left-
+      // button drag is always a pad interaction (click or drag), never a
+      // camera pan. Ctrl+RMB still pans via OrbitControls' built-in
+      // modifier swap on the ROTATE button — so users retain both
+      // pan and rotate without the left-button channel fighting the
+      // pad-drag gesture.
       mouseButtons={{
-        LEFT: THREE.MOUSE.PAN,
         RIGHT: THREE.MOUSE.ROTATE,
       }}
     />

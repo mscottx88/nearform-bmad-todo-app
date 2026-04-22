@@ -8,6 +8,8 @@
 // `visibilityCommands.ts`; future categories register into the same
 // registry without touching the parser.
 
+import type { Todo } from '../types';
+
 export interface VisibilityState {
   showActive: boolean;
   showCompleted: boolean;
@@ -24,6 +26,16 @@ export interface VisibilityState {
  */
 export interface WorldSnapshot {
   visibility: VisibilityState;
+  /**
+   * Story 4.2: optional visible-todo list. Commands that read the
+   * current pad layout (e.g. `/spread-out`) can consult this to
+   * decide consumability or to build execute() inputs. Optional
+   * because the visibility commands (story 3.3) never care about
+   * the pad list and would otherwise have to supply an empty
+   * array at every `worldFromVisibility` call. TodoInput passes
+   * the current `useTodos()` data when building the snapshot.
+   */
+  todos?: readonly Todo[];
 }
 
 export interface SlashCommand {

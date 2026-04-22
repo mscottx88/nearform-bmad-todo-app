@@ -482,4 +482,63 @@ describe('usePondStore', () => {
       expect(usePondStore.getState().showCompleted).toBe(true);
     });
   });
+
+  // Story 4.2: padTargetPositions slice drives the `/spread-out`
+  // animation. LilyPad reads its own entry in useFrame and clears
+  // it on arrival; `/spread-out` populates the whole map.
+  describe('padTargetPositions (story 4.2)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ padTargetPositions: new Map() });
+    });
+
+    it('starts as an empty Map', () => {
+      expect(usePondStore.getState().padTargetPositions.size).toBe(0);
+    });
+
+    it('setTargetPositions replaces the map wholesale', () => {
+      const first = new Map<string, { x: number; z: number }>([
+        ['a', { x: 1, z: 2 }],
+      ]);
+      usePondStore.getState().setTargetPositions(first);
+      expect(usePondStore.getState().padTargetPositions.size).toBe(1);
+      expect(usePondStore.getState().padTargetPositions.get('a')).toEqual({ x: 1, z: 2 });
+
+      // A second call replaces (not merges) — `a` should be gone.
+      const second = new Map<string, { x: number; z: number }>([
+        ['b', { x: 3, z: 4 }],
+      ]);
+      usePondStore.getState().setTargetPositions(second);
+      expect(usePondStore.getState().padTargetPositions.size).toBe(1);
+      expect(usePondStore.getState().padTargetPositions.has('a')).toBe(false);
+      expect(usePondStore.getState().padTargetPositions.get('b')).toEqual({ x: 3, z: 4 });
+    });
+
+    it('clearTargetPosition removes a single entry, leaving the rest intact', () => {
+      const targets = new Map<string, { x: number; z: number }>([
+        ['a', { x: 1, z: 2 }],
+        ['b', { x: 3, z: 4 }],
+      ]);
+      usePondStore.getState().setTargetPositions(targets);
+      usePondStore.getState().clearTargetPosition('a');
+      const after = usePondStore.getState().padTargetPositions;
+      expect(after.size).toBe(1);
+      expect(after.has('a')).toBe(false);
+      expect(after.get('b')).toEqual({ x: 3, z: 4 });
+    });
+
+    it('clearTargetPosition on a missing id is a no-op (does not mutate or recreate the map)', () => {
+      const targets = new Map<string, { x: number; z: number }>([
+        ['a', { x: 1, z: 2 }],
+      ]);
+      usePondStore.getState().setTargetPositions(targets);
+      const beforeRef = usePondStore.getState().padTargetPositions;
+      usePondStore.getState().clearTargetPosition('does-not-exist');
+      // Same Map identity — no-op shortcut was taken.
+      expect(usePondStore.getState().padTargetPositions).toBe(beforeRef);
+    });
+
+    // Reference the un-used helper so eslint doesn't complain — the
+    // other tests in the file share `makeTodo`.
+    void makeTodo;
+  });
 });

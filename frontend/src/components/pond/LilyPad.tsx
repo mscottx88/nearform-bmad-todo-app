@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -12,8 +12,35 @@ import {
   selectColorPreview,
   selectSearchHit,
 } from '../../stores/usePondStore';
+import { useUpdateTodo } from '../../api/todoApi';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 import { GlowSource } from './GlowSource';
+
+// Story 4.2: drag + spread-out support.
+// Module-scope so every pad shares the same Plane + scratch vectors
+// rather than allocating on each pointermove / useFrame tick. The
+// scratch objects are mutated in place during ray-plane
+// intersection — callers read `worldDragPoint.x / .z` after
+// `intersectPlane` returns truthy.
+const WATER_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const worldDragPoint = new THREE.Vector3();
+// Window-level pointermove does not carry a pre-computed ray the way
+// R3F's ThreeEvent does, so we keep our own Raycaster + NDC Vector2
+// to derive the water-plane hit from raw clientX/Y + camera + canvas.
+const dragRaycaster = new THREE.Raycaster();
+const dragNDC = new THREE.Vector2();
+// Screen-space movement in px before a pointerDown is treated as a
+// drag. 4 px matches the existing camera click-vs-drag threshold in
+// PondCamera (see `Math.sqrt(dx² + dy²) > 5` — 4 here gives pads a
+// slightly tighter click tolerance, which reads correctly for a
+// direct-manipulation target vs. a camera orbit).
+const DRAG_THRESHOLD_PX = 4;
+// Arrival threshold for /spread-out — the pad fires PATCH and
+// clears its target once both axes are within this world-unit gap.
+// 0.05 matches the OrbitControls reset-arrive threshold used
+// elsewhere; tight enough that the final snap is imperceptible,
+// loose enough that the lerp actually lands in finite frames.
+const SPREAD_ARRIVE_THRESHOLD = 0.05;
 
 // 'completed' / 'deleted' are terminal phases — the dissolve finished
 // locally and the pad is awaiting unmount. Distinct from 'completing' /
@@ -418,6 +445,40 @@ export function LilyPad({
   // wall-clock time happens to land.
   const focusStartTimeRef = useRef<number | null>(null);
   const prevFocusedRef = useRef(focused);
+  // Story 4.2: drag-state refs. `dragStartScreenRef` is non-null for
+  // the lifespan of a pointerDown→pointerUp cycle. `isDraggingRef`
+  // flips true only once the pointer has moved past
+  // DRAG_THRESHOLD_PX — i.e., a "real" drag vs. a stationary click.
+  // `dragPosRef` holds the latest world-XZ from the water-plane
+  // raycast; useFrame reads it to imperatively place the pad each
+  // frame. Seeded to the pad's spawn position so the very-first-
+  // frame click-to-popup path has valid coords even if pointermove
+  // never fired.
+  const isDraggingRef = useRef(false);
+  const dragStartScreenRef = useRef<{ x: number; y: number } | null>(null);
+  const dragPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  // Story 4.2: "sticky drag" — after pointerUp the pad stays
+  // pinned at `dragPosRef` until the updated `todo.positionX/Y`
+  // arrives via React Query's refetch. Without this, the
+  // resting-branch drift uses the STALE posX/posZ for the frames
+  // between the PATCH firing and the refetched data arriving —
+  // the pad visually flashes back to its pre-drag position before
+  // jumping forward. Cleared by the useEffect below when posX/posZ
+  // catch up to the committed drag target (within the same
+  // arrival threshold used by the /spread-out lerp).
+  const stickyDragRef = useRef(false);
+  // Story 4.2: useUpdateTodo — fires PATCH {position_x, position_y}
+  // on drag-release AND on spread-out arrival. Already wires
+  // clearTodoError/setTodoError into the 2.6 decay system, so a
+  // failed position save decays the pad exactly like any other
+  // update failure — no additional error handling needed here.
+  const updateTodo = useUpdateTodo();
+  // Story 4.2: camera + canvas are needed by the window-level
+  // pointermove handler to raycast raw clientX/Y against the water
+  // plane. Using useThree (rather than passing these in as props)
+  // keeps the drag logic encapsulated in LilyPad.
+  const { camera, gl } = useThree();
+
   // Story 5.3: lerped search saturation, in [0, 1]. 1.0 = pad
   // glows at its normal ambient/focused strength (no search, or a
   // strong match); 0.0 = glow snuffed entirely (non-match pads are
@@ -530,6 +591,25 @@ export function LilyPad({
     targetY.current = todo.completed ? COMPLETED_Y : DROP_Y_REST;
   }, [todo.completed]);
 
+  // Story 4.2: clear the sticky-drag hold once the refetched todo
+  // prop reflects the committed drag position. The arrival check
+  // uses the same SPREAD_ARRIVE_THRESHOLD as the /spread-out
+  // branch for consistency — any positional jitter smaller than
+  // that reads as "caught up" and the resting-branch drift takes
+  // over without a visible snap.
+  useEffect(() => {
+    if (!stickyDragRef.current) return;
+    const px = todo.positionX ?? 0;
+    const py = todo.positionY ?? 0;
+    const target = dragPosRef.current;
+    if (
+      Math.abs(px - target.x) < SPREAD_ARRIVE_THRESHOLD &&
+      Math.abs(py - target.z) < SPREAD_ARRIVE_THRESHOLD
+    ) {
+      stickyDragRef.current = false;
+    }
+  }, [todo.positionX, todo.positionY]);
+
   // P7: clear any lingering error-decay entry on unmount. Without this,
   // `errorTodos` accumulates entries for pads that were dissolved (terminal
   // phase) or dropped from the list (delete → backend removes) while an
@@ -570,19 +650,140 @@ export function LilyPad({
     prevFocusedRef.current = focused;
   }, [focused]);
 
-  const handlePadClick = useCallback(
-    (e: ThreeEvent<MouseEvent>) => {
+  // Story 4.2: window-level drag pipeline.
+  //
+  // Previous attempt kept pointermove + pointerup on the mesh. That
+  // left a stale-state bug when pointerup landed OFF the mesh
+  // (pointer released outside the canvas, dragged behind an overlay,
+  // etc.) — R3F's event system never fired the mesh's pointerup, so
+  // `dragStartScreenRef` stayed set and the NEXT pointermove over
+  // the mesh (on a later hover) re-activated drag-follow on the pad.
+  //
+  // Fix: pointerDown stays on the mesh (needs R3F's raycast to know
+  // which pad was hit), but then IMMEDIATELY attaches
+  // pointermove/up/cancel listeners to `window`. Those fire
+  // unconditionally regardless of where the pointer ends up, so the
+  // drag cycle always terminates cleanly. Listeners are removed
+  // inside the up/cancel handlers, and again on unmount via the
+  // dedicated cleanup effect below.
+  //
+  // Using refs (not state) for the bound listeners so the mesh-side
+  // pointerDown callback doesn't churn dependencies — the listeners
+  // read from refs + closures over stable callbacks.
+  const windowMoveRef = useRef<((e: PointerEvent) => void) | null>(null);
+  const windowUpRef = useRef<((e: PointerEvent) => void) | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+
+  const detachWindowListeners = useCallback(() => {
+    if (windowMoveRef.current) {
+      window.removeEventListener('pointermove', windowMoveRef.current);
+      windowMoveRef.current = null;
+    }
+    if (windowUpRef.current) {
+      window.removeEventListener('pointerup', windowUpRef.current);
+      window.removeEventListener('pointercancel', windowUpRef.current);
+      windowUpRef.current = null;
+    }
+    activePointerIdRef.current = null;
+  }, []);
+
+  // Cleanup effect — on unmount, drop any in-flight window
+  // listeners so a dissolving / unmounting pad doesn't leak
+  // event handlers onto the window.
+  useEffect(() => detachWindowListeners, [detachWindowListeners]);
+
+  const handlePadPointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation();
-      // Ignore clicks on a pad mid-sequence (completion OR deletion) — the
-      // pad is still visibly present (scale/opacity > 0) through ~t=1.0s of
-      // the dissolve, so it remains hit-testable. A second Complete would
-      // fire a duplicate POST /creatures that fails on the DB
-      // UniqueConstraint; a second Delete would fire a duplicate DELETE.
       const state = usePondStore.getState();
       if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;
-      state.openPopup(todo.id, posX, posZ);
+      if (state.activePopupTodoId === todo.id) return;
+      // Defensive: if a previous cycle never received pointerup
+      // (rare browser bug, or an unmount-remount mid-drag), drop
+      // any stale listeners before starting a new one.
+      detachWindowListeners();
+
+      dragStartScreenRef.current = { x: e.clientX, y: e.clientY };
+      isDraggingRef.current = false;
+      // Seed dragPosRef with the pad's current world position so a
+      // sub-threshold release (click) has valid coords to fall back
+      // on (the click branch uses posX/posZ directly, but useFrame
+      // reads dragPosRef on the NEXT frame and needs a sane value).
+      dragPosRef.current = { x: posX, z: posZ };
+      activePointerIdRef.current = e.nativeEvent.pointerId;
+
+      const onWindowMove = (ev: PointerEvent) => {
+        if (activePointerIdRef.current !== ev.pointerId) return;
+        const start = dragStartScreenRef.current;
+        if (!start) return;
+        // Pointer released outside our tracking (e.g. browser
+        // cancelled without firing pointerup) — `buttons` bitmask
+        // is 0 when no button is pressed. Force-terminate the
+        // drag here so a later hover can't re-activate follow.
+        if (ev.buttons === 0) {
+          onWindowUp(ev);
+          return;
+        }
+        const dx = ev.clientX - start.x;
+        const dy = ev.clientY - start.y;
+        const distSq = dx * dx + dy * dy;
+        if (!isDraggingRef.current && distSq < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+          return;
+        }
+        if (!isDraggingRef.current) {
+          isDraggingRef.current = true;
+          usePondStore.getState().clearTargetPosition(todo.id);
+        }
+        // Convert client coords → canvas NDC → water-plane hit.
+        const rect = gl.domElement.getBoundingClientRect();
+        dragNDC.set(
+          ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+          -((ev.clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        dragRaycaster.setFromCamera(dragNDC, camera);
+        if (dragRaycaster.ray.intersectPlane(WATER_PLANE, worldDragPoint)) {
+          dragPosRef.current = { x: worldDragPoint.x, z: worldDragPoint.z };
+        }
+      };
+
+      const onWindowUp = (ev: PointerEvent) => {
+        if (activePointerIdRef.current !== ev.pointerId) return;
+        const wasDrag = isDraggingRef.current;
+        dragStartScreenRef.current = null;
+        isDraggingRef.current = false;
+        detachWindowListeners();
+        if (!wasDrag) {
+          // Clean click — open popup (same mid-sequence guard as
+          // the pre-4.2 onClick path).
+          const guardState = usePondStore.getState();
+          if (
+            guardState.completingTodos.has(todo.id) ||
+            guardState.deletingTodos.has(todo.id)
+          ) {
+            return;
+          }
+          guardState.openPopup(todo.id, posX, posZ);
+          return;
+        }
+        // Real drag — PATCH the new position. stickyDragRef pins
+        // the pad visually at dragPosRef until the refetched prop
+        // catches up so the pad doesn't flash back to its old spot
+        // between PATCH fire and cache invalidation.
+        stickyDragRef.current = true;
+        updateTodo.mutate({
+          id: todo.id,
+          positionX: dragPosRef.current.x,
+          positionY: dragPosRef.current.z,
+        });
+      };
+
+      windowMoveRef.current = onWindowMove;
+      windowUpRef.current = onWindowUp;
+      window.addEventListener('pointermove', onWindowMove);
+      window.addEventListener('pointerup', onWindowUp);
+      window.addEventListener('pointercancel', onWindowUp);
     },
-    [todo.id, posX, posZ],
+    [todo.id, posX, posZ, camera, gl, updateTodo, detachWindowListeners],
   );
 
   const padShape = useMemo(
@@ -1142,8 +1343,54 @@ export function LilyPad({
       const targetScale = baseTargetScale + decayFlicker;
       const currentScale = group.scale.x;
       group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
-      group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
-      group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
+
+      // Story 4.2: drag + /spread-out overrides. Applied before the
+      // ambient drift so the pad sits exactly where the user's
+      // finger / the spread target says, not offset by the drift.
+      //   Drag: x/z snap to the live raycast hit — the pad is the
+      //     object being directly manipulated, so no smoothing.
+      //   Spread target: x/z lerp toward the target each frame at
+      //     `1 - 0.001^delta` (~10% per 60fps frame → ~333ms to
+      //     close 90% of the gap). On arrival (both axes within
+      //     SPREAD_ARRIVE_THRESHOLD) fire PATCH and clear the
+      //     target — see AC #8.
+      //   Neither: fall back to the pre-4.2 sinusoidal drift.
+      if (isDraggingRef.current || stickyDragRef.current) {
+        group.position.x = dragPosRef.current.x;
+        group.position.z = dragPosRef.current.z;
+      } else {
+        const spreadTarget =
+          usePondStore.getState().padTargetPositions.get(todo.id);
+        if (spreadTarget) {
+          const lerpSpeed = 1 - Math.pow(0.001, delta);
+          group.position.x = THREE.MathUtils.lerp(
+            group.position.x,
+            spreadTarget.x,
+            lerpSpeed,
+          );
+          group.position.z = THREE.MathUtils.lerp(
+            group.position.z,
+            spreadTarget.z,
+            lerpSpeed,
+          );
+          if (
+            Math.abs(group.position.x - spreadTarget.x) < SPREAD_ARRIVE_THRESHOLD &&
+            Math.abs(group.position.z - spreadTarget.z) < SPREAD_ARRIVE_THRESHOLD
+          ) {
+            group.position.x = spreadTarget.x;
+            group.position.z = spreadTarget.z;
+            usePondStore.getState().clearTargetPosition(todo.id);
+            updateTodo.mutate({
+              id: todo.id,
+              positionX: spreadTarget.x,
+              positionY: spreadTarget.z,
+            });
+          }
+        } else {
+          group.position.x = posX + Math.sin(t * 0.3 + seed) * 0.08 * ramp;
+          group.position.z = posZ + Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp;
+        }
+      }
 
       // Story 2.10: pad rides the water surface. Sample elevation at
       // the pad's CURRENT (drifted) world position — not the anchor
@@ -1543,7 +1790,13 @@ export function LilyPad({
   return (
     <group ref={groupRef}>
       {/* Pad surface with procedural vein texture */}
-      <mesh ref={padMeshRef} geometry={flatGeometry} position={[0, 0.1, 0]} renderOrder={10} onClick={handlePadClick}>
+      <mesh
+        ref={padMeshRef}
+        geometry={flatGeometry}
+        position={[0, 0.1, 0]}
+        renderOrder={10}
+        onPointerDown={handlePadPointerDown}
+      >
         <shaderMaterial
           uniforms={padUniforms}
           vertexShader={padVertexShader}

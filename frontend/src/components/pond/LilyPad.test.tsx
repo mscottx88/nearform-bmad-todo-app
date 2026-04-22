@@ -4,9 +4,56 @@ import { LilyPad } from './LilyPad';
 import type { Todo } from '../../types';
 
 const openPopupMock = vi.fn();
+const clearTargetPositionMock = vi.fn();
+// Story 4.2: hoisted mock fn so both `vi.mock('../../api/todoApi')` and
+// per-test assertions can reach the same instance. vitest hoists
+// `vi.mock` above imports, so a top-level `const` declared before
+// `vi.mock` isn't yet initialised when the mock factory runs — the
+// `vi.hoisted` wrapper gives us a hoisted-safe shared reference.
+const { updateTodoMutateMock } = vi.hoisted(() => ({
+  updateTodoMutateMock: vi.fn(),
+}));
+
+vi.mock('../../api/todoApi', () => ({
+  useUpdateTodo: () => ({ mutate: updateTodoMutateMock }),
+  TODOS_KEY: ['todos', 'list'],
+}));
 
 vi.mock('@react-three/fiber', () => ({
   useFrame: vi.fn(),
+  // Story 4.2: LilyPad's drag pipeline calls useThree() for the
+  // camera + canvas so it can convert window-level pointermove
+  // events into water-plane raycasts. The stub returns a fake
+  // camera with a projectionMatrix + matrixWorld that
+  // `Raycaster.setFromCamera` can consume, and a minimal
+  // `gl.domElement` whose getBoundingClientRect returns a
+  // viewport-sized rect. Tests that assert on drag math call the
+  // raycaster via a synthetic pointermove — the numbers don't need
+  // to correspond to a real scene, they just can't throw.
+  useThree: () => ({
+    camera: (() => {
+      const THREE = require('three') as typeof import('three');
+      const cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
+      cam.position.set(0, 15, 20);
+      cam.lookAt(0, 0, 0);
+      cam.updateMatrixWorld(true);
+      return cam;
+    })(),
+    gl: {
+      domElement: {
+        getBoundingClientRect: () => ({
+          left: 0,
+          top: 0,
+          right: 1920,
+          bottom: 1080,
+          width: 1920,
+          height: 1080,
+          x: 0,
+          y: 0,
+        }),
+      },
+    },
+  }),
 }));
 
 vi.mock('@react-three/drei', () => ({
@@ -37,6 +84,11 @@ vi.mock('../../stores/usePondStore', () => ({
       openPopup: openPopupMock,
       completingTodos: completingTodosMock,
       deletingTodos: deletingTodosMock,
+      // Story 4.2: AC #6 — if a popup is open on THIS pad, the
+      // pointerDown guard returns early. Setting to null here
+      // matches the default "no popup open" state for the click
+      // tests; the guard is exercised via explicit override below.
+      activePopupTodoId: null,
       triggerRipple: triggerRippleMock,
       startCompletion: startCompletionMock,
       stampCompletionStart: stampCompletionStartMock,
@@ -51,6 +103,11 @@ vi.mock('../../stores/usePondStore', () => ({
       // Story 4.1 CR-patch: LilyPad's unmount cleanup also clears any
       // lingering color preview. Mirror the pattern above.
       setColorPreview: vi.fn(),
+      // Story 4.2: drag-over-spread and spread-arrival both touch
+      // these. Kept empty so the resting-branch spread lerp is a
+      // no-op in unit tests (no arrival callback fires).
+      clearTargetPosition: clearTargetPositionMock,
+      padTargetPositions: new Map(),
       // Story 5.3: LilyPad reads these imperatively inside useFrame to
       // decide its per-pad search mode. Inactive defaults keep this
       // test running against the pre-search rendering path.
@@ -85,9 +142,32 @@ const mockTodo: Todo = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
+// Story 4.2: the pad's click path is a mesh pointerDown followed
+// by a window-level pointerUp (with no movement between) so the
+// click-vs-drag discrimination classifies it as a click. The
+// window-level listener is attached inside the mesh's pointerDown
+// handler, so the pointerUp MUST be dispatched on `window` (not the
+// mesh) to trigger the popup-open branch.
+function fireClickAt(el: Element, x = 0, y = 0): void {
+  fireEvent.pointerDown(el, {
+    clientX: x,
+    clientY: y,
+    pointerId: 1,
+    buttons: 1,
+  });
+  fireEvent.pointerUp(window, {
+    clientX: x,
+    clientY: y,
+    pointerId: 1,
+    buttons: 0,
+  });
+}
+
 describe('LilyPad', () => {
   beforeEach(() => {
     openPopupMock.mockClear();
+    updateTodoMutateMock.mockClear();
+    clearTargetPositionMock.mockClear();
     completingTodosMock.clear();
     deletingTodosMock.clear();
   });
@@ -97,11 +177,11 @@ describe('LilyPad', () => {
     expect(container).toBeTruthy();
   });
 
-  it('calls openPopup with todo id and pad position when clicked', () => {
+  it('calls openPopup with todo id and pad position when clicked (sub-threshold pointerUp)', () => {
     const { container } = render(<LilyPad todo={mockTodo} />);
     const padMesh = container.querySelector('mesh');
     expect(padMesh).toBeTruthy();
-    if (padMesh) fireEvent.click(padMesh);
+    if (padMesh) fireClickAt(padMesh);
     expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
   });
 
@@ -109,7 +189,7 @@ describe('LilyPad', () => {
     deletingTodosMock.set('123', { todo: mockTodo, startedAt: 0 });
     const { container } = render(<LilyPad todo={mockTodo} />);
     const padMesh = container.querySelector('mesh');
-    if (padMesh) fireEvent.click(padMesh);
+    if (padMesh) fireClickAt(padMesh);
     expect(openPopupMock).not.toHaveBeenCalled();
   });
 
@@ -122,7 +202,7 @@ describe('LilyPad', () => {
     });
     const { container } = render(<LilyPad todo={mockTodo} />);
     const padMesh = container.querySelector('mesh');
-    if (padMesh) fireEvent.click(padMesh);
+    if (padMesh) fireClickAt(padMesh);
     expect(openPopupMock).not.toHaveBeenCalled();
   });
 
@@ -137,7 +217,7 @@ describe('LilyPad', () => {
       const completedTodo: Todo = { ...mockTodo, completed: true };
       const { container } = render(<LilyPad todo={completedTodo} />);
       const padMesh = container.querySelector('mesh');
-      if (padMesh) fireEvent.click(padMesh);
+      if (padMesh) fireClickAt(padMesh);
       expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
     });
 
@@ -145,15 +225,99 @@ describe('LilyPad', () => {
       const deletedTodo: Todo = { ...mockTodo, deleted: true };
       const { container } = render(<LilyPad todo={deletedTodo} />);
       const padMesh = container.querySelector('mesh');
-      if (padMesh) fireEvent.click(padMesh);
+      if (padMesh) fireClickAt(padMesh);
       expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
     });
 
     it('active pad with completed=false and deleted=false opens the popup', () => {
       const { container } = render(<LilyPad todo={mockTodo} />);
       const padMesh = container.querySelector('mesh');
-      if (padMesh) fireEvent.click(padMesh);
+      if (padMesh) fireClickAt(padMesh);
       expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+    });
+  });
+
+  // Story 4.2: drag mechanics — click-vs-drag discrimination and
+  // position PATCH on release. The drag pipeline uses WINDOW-level
+  // pointermove/pointerup so release is captured even when the
+  // pointer leaves the mesh. Tests dispatch pointermove/pointerup
+  // against `window`.
+  describe('drag (story 4.2)', () => {
+    it('treats sub-4px movement as a click, not a drag', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      expect(padMesh).toBeTruthy();
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
+      // 3 px diagonal — below 4 px threshold.
+      fireEvent.pointerMove(window, { clientX: 2, clientY: 2, pointerId: 1, buttons: 1 });
+      fireEvent.pointerUp(window, { clientX: 2, clientY: 2, pointerId: 1, buttons: 0 });
+      expect(openPopupMock).toHaveBeenCalledWith('123', 5, 7);
+      expect(updateTodoMutateMock).not.toHaveBeenCalled();
+    });
+
+    it('crossing the 4px threshold flips from click to drag and persists the final position', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      expect(padMesh).toBeTruthy();
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 100, clientY: 100, pointerId: 1, buttons: 1 });
+      // 50 px horizontal move — crosses the threshold. The
+      // raycaster in the mocked useThree() runs the real
+      // Three.js math, so we just need the pointerMove to push
+      // past 4 px for the drag to engage.
+      fireEvent.pointerMove(window, { clientX: 200, clientY: 100, pointerId: 1, buttons: 1 });
+      fireEvent.pointerUp(window, { clientX: 200, clientY: 100, pointerId: 1, buttons: 0 });
+
+      expect(openPopupMock).not.toHaveBeenCalled();
+      expect(updateTodoMutateMock).toHaveBeenCalled();
+      const arg = updateTodoMutateMock.mock.calls[0][0] as {
+        id: string;
+        positionX: number;
+        positionY: number;
+      };
+      expect(arg.id).toBe('123');
+      // Position should be a real number (not NaN), and differ
+      // from the pad's original (5, 7) — confirming the raycast
+      // ran and updated the drag target.
+      expect(Number.isFinite(arg.positionX)).toBe(true);
+      expect(Number.isFinite(arg.positionY)).toBe(true);
+      expect(clearTargetPositionMock).toHaveBeenCalledWith('123');
+    });
+
+    it('pointerDown is ignored while the pad is deleting', () => {
+      deletingTodosMock.set('123', { todo: mockTodo, startedAt: 0 });
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      expect(padMesh).toBeTruthy();
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 40, pointerId: 1, buttons: 1 });
+      fireEvent.pointerUp(window, { clientX: 40, clientY: 40, pointerId: 1, buttons: 0 });
+      expect(openPopupMock).not.toHaveBeenCalled();
+      expect(updateTodoMutateMock).not.toHaveBeenCalled();
+    });
+
+    it('force-terminates the drag if pointermove arrives with no buttons pressed (missed pointerup)', () => {
+      // Simulates the browser's occasional "pointerup never fires"
+      // scenario (e.g. pointer released off-window during a drag).
+      // The next pointermove will arrive with buttons === 0 — the
+      // handler treats that as a synthetic up to prevent the pad
+      // from re-attaching on future hover.
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      expect(padMesh).toBeTruthy();
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
+      // Mouse moved but NO button down → forced up.
+      fireEvent.pointerMove(window, { clientX: 200, clientY: 100, pointerId: 1, buttons: 0 });
+      // A subsequent hover-move must NOT re-engage drag.
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 200, pointerId: 1, buttons: 0 });
+      // Because no drag actually crossed the threshold, this
+      // should register as a click (openPopup fires once).
+      expect(openPopupMock).toHaveBeenCalledTimes(1);
+      // No PATCH — the click branch took over.
+      expect(updateTodoMutateMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -151,6 +151,15 @@ interface PondState {
   showActive: boolean;
   showCompleted: boolean;
   showDeleted: boolean;
+
+  // Story 4.2: spread-out animation targets. Keyed by todo.id; value
+  // is the world-space (x, z) the pad should lerp toward during the
+  // spread animation. LilyPad reads its own entry imperatively in
+  // useFrame and lerps position.x/z toward the target; on arrival
+  // (within 0.05 world units) it fires PATCH /api/todos/{id} and
+  // clears its own entry. The map is ONLY populated by the
+  // `/spread-out` slash command and is empty at rest.
+  padTargetPositions: Map<string, { x: number; z: number }>;
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -257,6 +266,25 @@ interface PondState {
     showCompleted?: boolean;
     showDeleted?: boolean;
   }) => void;
+
+  /**
+   * Story 4.2: replace the full `padTargetPositions` map with a new
+   * set of per-pad spread-out targets. Called by the `/spread-out`
+   * command's execute() after `computeSpreadPositions` produces the
+   * target map. Replacing wholesale (rather than merging) means a
+   * second `/spread-out` run always supersedes the first — any pads
+   * not in the new result are simply released (LilyPad's arrival
+   * check naturally fires when the entry is missing).
+   */
+  setTargetPositions: (targets: Map<string, { x: number; z: number }>) => void;
+  /**
+   * Story 4.2: clear a single pad's spread-out target. Called by
+   * LilyPad from its useFrame when the pad's position reaches the
+   * target within the arrival threshold, OR on pointerDown when the
+   * user starts dragging (drag wins over the spread target per AC
+   * #12). No-op if the entry is absent.
+   */
+  clearTargetPosition: (todoId: string) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -281,6 +309,8 @@ export const usePondStore = create<PondState>((set, get) => ({
   showActive: true,
   showCompleted: false,
   showDeleted: false,
+
+  padTargetPositions: new Map(),
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -505,6 +535,16 @@ export const usePondStore = create<PondState>((set, get) => ({
   // `set({ ...patch })` with only the provided keys mirrors Zustand's
   // default shallow-merge — omitted keys retain their current value.
   setVisibility: (patch) => set(patch),
+
+  setTargetPositions: (targets) => set({ padTargetPositions: targets }),
+
+  clearTargetPosition: (todoId: string) => {
+    const current = get().padTargetPositions;
+    if (!current.has(todoId)) return;
+    const next = new Map(current);
+    next.delete(todoId);
+    set({ padTargetPositions: next });
+  },
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook
@@ -538,6 +578,17 @@ export const selectColorPreview =
   (todoId: string) =>
   (s: PondState): string | null =>
     s.colorPreviews.get(todoId) ?? null;
+
+// Story 4.2: per-pad spread-out target selector. Returns this pad's
+// target (x, z) while a `/spread-out` animation is in flight, or
+// undefined when there is no target. LilyPad subscribes via this so
+// only pads that *have* a target re-render on the one big map swap
+// that `/spread-out` performs — subsequent per-pad clears then
+// re-render only the arriving pad.
+export const selectTargetPosition =
+  (todoId: string) =>
+  (s: PondState): { x: number; z: number } | undefined =>
+    s.padTargetPositions.get(todoId);
 
 // Story 5.3: per-pad search-hit selector. Returns the SearchHit for
 // this todo if the backend ranked it, else undefined. LilyPad can
