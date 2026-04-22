@@ -127,6 +127,18 @@ const COMPLETE_PAD_TINT = new THREE.Vector3(0.2, 2.0, 0.1);
 const DELETE_PAD_TINT = new THREE.Vector3(2.0, 0.2, 0.5);
 const PAD_TINT_MAX = 0.6;
 
+// Selection ring — thin neon-white ring encircling the pad while it is in
+// the multi-selection set (Ctrl/Shift-click). Animates away (scale-up +
+// fade-out) over SELECTION_FADE_DURATION seconds when deselected so the
+// transition into the cluster ring reads as a clean pop.
+const SELECTION_RING_INNER = 1.12;
+const SELECTION_RING_OUTER = 1.22;
+const SELECTION_RING_SEGMENTS = 48;
+const SELECTION_FADE_DURATION = 0.35;
+// Y slightly above the pad body so it clears z-fighting with the flat
+// surface geometry (local +0.12 → world ~0.17 when at DROP_Y_REST).
+const SELECTION_RING_Y = 0.12;
+
 // Story 2.8: pad-action glow on water. Each pad mounts a GlowSource
 // disc just above the water plane; its shader uniforms are driven from
 // the same per-phase strength curves that feed the pad body/rim tint.
@@ -371,6 +383,8 @@ const RECENT_THRESHOLD_MS = 3000;
 interface LilyPadProps {
   todo: Todo;
   onDropComplete?: (x: number, z: number) => void;
+  /** Called after a real drag completes with the final world (x, z). */
+  onDragEnd?: (x: number, z: number) => void;
   focused?: boolean;
   // Story 2.6: ms to wait before entering the 'forming' phase. PondScene
   // passes index * STAGGER_STEP_MS on initial load so pads cascade in.
@@ -381,6 +395,7 @@ interface LilyPadProps {
 export function LilyPad({
   todo,
   onDropComplete,
+  onDragEnd,
   focused = false,
   dropDelayMs = 0,
 }: LilyPadProps) {
@@ -397,6 +412,11 @@ export function LilyPad({
   // Story 2.8: ref to the GlowSource shader material. useFrame writes
   // uColor + uStrength uniforms each frame alongside the pad/rim updates.
   const glowMatRef = useRef<THREE.ShaderMaterial>(null);
+  // Selection ring — visible while this pad is in selectedPadIds.
+  // Animates away (expand + fade) on deselect via selectionFadeRef.
+  const selectionRingRef = useRef<THREE.Mesh>(null);
+  const wasSelectedRef = useRef(false);
+  const selectionFadeRef = useRef<number | null>(null);
   const targetY = useRef(todo.completed ? COMPLETED_Y : DROP_Y_REST);
   // Initial phase — in priority order:
   //   1. Recently-created (isRecent) → 'forming' (no staggering — the user
@@ -792,6 +812,7 @@ export function LilyPad({
           positionX: dragPosRef.current.x,
           positionY: dragPosRef.current.z,
         });
+        onDragEnd?.(dragPosRef.current.x, dragPosRef.current.z);
       };
 
       windowMoveRef.current = onWindowMove;
@@ -1651,6 +1672,42 @@ export function LilyPad({
 
         glowMatRef.current.uniforms.uStrength.value = strength;
       }
+
+      // Selection ring animation — driven from isSelected + wasSelectedRef
+      // transition detection. Ring expands + fades out on deselect so the
+      // switch from selection ring → cluster halo reads as a pop.
+      if (selectionRingRef.current) {
+        const ring = selectionRingRef.current;
+        const ringMat = ring.material as THREE.MeshBasicMaterial;
+        if (isSelected) {
+          selectionFadeRef.current = null;
+          ring.visible = true;
+          ring.scale.setScalar(1);
+          ringMat.opacity = 0.85;
+        } else if (!wasSelectedRef.current) {
+          // steady deselected state — keep hidden
+          ring.visible = false;
+        } else {
+          // transition: was selected, now not — start fade if not already running
+          if (selectionFadeRef.current === null) {
+            selectionFadeRef.current = state.clock.elapsedTime;
+          }
+          const fadeT = Math.min(
+            (state.clock.elapsedTime - selectionFadeRef.current) / SELECTION_FADE_DURATION,
+            1,
+          );
+          if (fadeT >= 1) {
+            ring.visible = false;
+            selectionFadeRef.current = null;
+          } else {
+            ring.visible = true;
+            ring.scale.setScalar(1 + fadeT * 0.4);
+            ringMat.opacity = (1 - fadeT) * 0.85;
+          }
+        }
+        wasSelectedRef.current = isSelected;
+      }
+
       return;
     }
 
@@ -1913,6 +1970,21 @@ export function LilyPad({
           duration={COMPLETING_EMERGE_END - COMPLETING_EMERGE_START}
         />
       )}
+      {/* Story 4.6: selection ring — visible while this pad is Ctrl/Shift-
+          selected; animates away on deselect. Flat ring geometry lying on
+          the pad plane. userData.skipDissolve keeps fadePadMaterials from
+          touching it during the completion/deletion sequences. */}
+      <mesh
+        ref={selectionRingRef}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, SELECTION_RING_Y, 0]}
+        visible={false}
+        userData={{ skipDissolve: true }}
+        renderOrder={13}
+      >
+        <ringGeometry args={[SELECTION_RING_INNER, SELECTION_RING_OUTER, SELECTION_RING_SEGMENTS]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.85} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
       {/* Story 2.8: additive HDR halo on the water below the pad. Always
           mounted (uniforms default to strength=0 → null contribution);
           useFrame branches above write per-phase color + strength.

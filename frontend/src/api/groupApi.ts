@@ -30,6 +30,7 @@ export function useCreateGroup() {
 interface UpdateGroupInput {
   id: string;
   label?: string | null;
+  color?: string | null;
   memberIds?: string[];
 }
 

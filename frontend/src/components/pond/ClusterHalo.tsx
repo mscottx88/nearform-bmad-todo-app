@@ -9,6 +9,8 @@ import { computeCentroid, computeHaloRadius } from '../../lib/clusterGeometry';
 
 interface ClusterHaloProps {
   memberPositions: { x: number; z: number }[];
+  /** Hex color for the ring. Defaults to neon cyan #00eeff. */
+  color?: string;
 }
 
 // A unit ring: inner=0.96, outer=1.0 — thin enough to read as a boundary
@@ -19,7 +21,7 @@ const RING_SEGMENTS = 96;
 // Slightly above water so it doesn't z-fight with the water mesh.
 const RING_Y = 0.03;
 
-export function ClusterHalo({ memberPositions }: ClusterHaloProps) {
+export function ClusterHalo({ memberPositions, color = '#00eeff' }: ClusterHaloProps) {
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame(() => {
@@ -37,7 +39,7 @@ export function ClusterHalo({ memberPositions }: ClusterHaloProps) {
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]}>
       <ringGeometry args={[RING_INNER, RING_OUTER, RING_SEGMENTS]} />
       <meshBasicMaterial
-        color="#00eeff"
+        color={color}
         transparent
         opacity={0.35}
         side={THREE.DoubleSide}

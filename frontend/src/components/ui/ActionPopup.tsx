@@ -15,21 +15,19 @@ const RAINBOW_HUES = [
   '#d500f9', // V
 ];
 
-// Precompute the "Set Color" letter → hue mapping at module load so
-// there is no mutable counter running during component render (which
-// React flags as `Cannot reassign variable after render completes`).
-// Spaces carry `hue = null` and render as a non-breaking space without
-// consuming a palette slot.
-const SET_COLOR_LETTERS: ReadonlyArray<{ ch: string; hue: string | null }> = (() => {
-  const chars = 'Set Color'.split('');
+// Precompute letter → hue mappings at module load (no mutable counter
+// during render). Spaces carry `hue = null` → rendered as &nbsp;.
+function makeRainbowLetters(text: string): ReadonlyArray<{ ch: string; hue: string | null }> {
   let hueIdx = 0;
-  return chars.map((ch) => {
+  return text.split('').map((ch) => {
     if (ch === ' ') return { ch, hue: null };
     const hue = RAINBOW_HUES[hueIdx % RAINBOW_HUES.length];
     hueIdx += 1;
     return { ch, hue };
   });
-})();
+}
+const SET_COLOR_LETTERS = makeRainbowLetters('Set Color');
+const SET_GROUP_COLOR_LETTERS = makeRainbowLetters('Group Color');
 
 interface ActionPopupProps {
   todo: Todo;
@@ -54,12 +52,14 @@ interface ActionPopupProps {
   // Story 4.6: group extension props.
   isGrouped?: boolean;
   groupLabel?: string | null;
+  groupColor?: string | null;
   /** Number of currently-selected pads (excluding the popup pad). */
   selectedCount?: number;
   onUngroup?: () => void;
   onDisband?: () => void;
   onSpreadGroup?: () => void;
   onSetLabel?: (label: string | null) => void;
+  onCommitGroupColor?: (color: string) => void;
 }
 
 // Horizontal/vertical offset from the pad's projected screen position to the
@@ -76,14 +76,18 @@ export function ActionPopup({
   onGroup,
   isGrouped = false,
   groupLabel,
+  groupColor,
   selectedCount = 0,
   onUngroup,
   onDisband,
   onSpreadGroup,
   onSetLabel,
+  onCommitGroupColor,
 }: ActionPopupProps) {
   // Story 4.1: Set Color toggles an inline swatch sub-panel.
+  // Only one swatch (pad or group) is open at a time.
   const [swatchOpen, setSwatchOpen] = useState(false);
+  const [groupSwatchOpen, setGroupSwatchOpen] = useState(false);
   const [previewColor, setPreviewColor] = useState<string | null>(null);
   // Story 4.6: Label inline input toggle.
   const [labelOpen, setLabelOpen] = useState(false);
@@ -109,13 +113,15 @@ export function ActionPopup({
     }
   }, [swatchOpen, previewColor]);
 
-  // When the sub-panel collapses (Escape, commit, or second click on
-  // Set Color), drop any in-flight hover preview so LilyPad reverts
-  // to the committed color within one frame (AC #4).
+  // Collapse pad-color swatch (Escape, commit, or second click).
+  // Also clears the hover preview so LilyPad reverts immediately.
   const collapse = () => {
     setSwatchOpen(false);
     setPreviewColor(null);
   };
+  // Collapse group-color swatch (same pattern, no preview store needed
+  // — group color is not live-previewed on the halo).
+  const collapseGroup = () => setGroupSwatchOpen(false);
   // Drei <Html> with no `transform` renders a DOM overlay, positioning its
   // top-left at the projection of the given 3D point. The panel and callout
   // inside use absolute positioning relative to that anchor.
@@ -207,9 +213,7 @@ export function ActionPopup({
           <button
             type="button"
             className="action-popup__button action-popup__button--set-color"
-            // Story 4.1: toggle — click once to open, again to close.
-            // Escape (handled by PopupColorSwatch) also closes.
-            onClick={() => setSwatchOpen((open) => !open)}
+            onClick={() => { setSwatchOpen((open) => !open); collapseGroup(); }}
             aria-label="Set Color"
             aria-expanded={swatchOpen}
           >
@@ -293,6 +297,35 @@ export function ActionPopup({
                       }
                       if (e.key === 'Escape') setLabelOpen(false);
                     }}
+                  />
+                )}
+                {/* Group Color — only one of the two swatches can be open at once */}
+                <button
+                  type="button"
+                  className="action-popup__button action-popup__button--set-color"
+                  onClick={() => { setGroupSwatchOpen((open) => !open); collapse(); }}
+                  aria-label="Group Color"
+                  aria-expanded={groupSwatchOpen}
+                >
+                  {SET_GROUP_COLOR_LETTERS.map(({ ch, hue }, i) =>
+                    hue === null ? (
+                      <span key={i} aria-hidden>{' '}</span>
+                    ) : (
+                      <span key={i} style={{ color: hue, textShadow: `0 0 4px ${hue}` }} aria-hidden>
+                        {ch}
+                      </span>
+                    ),
+                  )}
+                </button>
+                {groupSwatchOpen && (
+                  <PopupColorSwatch
+                    committedColor={groupColor || '#00eeff'}
+                    onHover={() => {}}
+                    onCommit={(color) => {
+                      onCommitGroupColor?.(color);
+                      collapseGroup();
+                    }}
+                    onCollapse={collapseGroup}
                   />
                 )}
               </div>

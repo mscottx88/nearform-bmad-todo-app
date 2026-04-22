@@ -37,6 +37,7 @@ def _build_response(db: Session, group: Group) -> GroupResponse:
         {
             "id": group.id,
             "label": group.label,
+            "color": group.color,
             "member_ids": member_ids,
             "created_at": group.created_at,
         }
@@ -99,7 +100,7 @@ def create_group(db: Session, data: GroupCreate) -> GroupResponse:
     _require_todos_exist(db, distinct_members)
     _require_unclaimed_members(db, distinct_members, allow_group_id=None)
 
-    group = Group(label=data.label)
+    group = Group(label=data.label, color=data.color)
     db.add(group)
     db.flush()  # populate group.id + group.created_at without a full commit
     for todo_id in distinct_members:
@@ -139,6 +140,10 @@ def update_group(
     fields = data.model_dump(exclude_unset=True)
     if "label" in fields:
         group.label = fields["label"]
+        changed = True
+
+    if "color" in fields:
+        group.color = fields["color"]
         changed = True
 
     if data.member_ids is not None:

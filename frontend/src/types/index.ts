@@ -22,6 +22,7 @@ export interface Todo {
 export interface Group {
   id: string;
   label: string | null;
+  color: string | null;
   positionX: number | null;
   positionY: number | null;
   createdAt: string;

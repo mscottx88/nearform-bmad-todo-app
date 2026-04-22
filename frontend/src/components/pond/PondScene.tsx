@@ -12,6 +12,7 @@ import { usePondSearchSync } from '../../hooks/usePondSearchSync';
 import { useCameraResetOnDoubleEscape } from '../../hooks/useCameraResetOnDoubleEscape';
 import { computeSpreadPositions } from '../../utils/spreadOut';
 import type { Group, Todo } from '../../types';
+import { fitCameraToPads } from './fitCameraToPads';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
@@ -73,10 +74,11 @@ export function PondScene() {
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup();
   const deleteGroup = useDeleteGroup();
-  // Session-local cache of group labels. Updated from mutation onSuccess
-  // so the Label input pre-fills correctly after the user sets a label.
-  // Key = groupId, value = latest known label (null if explicitly cleared).
+  // Session-local caches for group metadata. Updated from mutation onSuccess
+  // so inputs pre-fill correctly after the user sets a value.
+  // Key = groupId, value = latest known label / color (null if explicitly cleared).
   const groupLabelCacheRef = useRef<Map<string, string | null>>(new Map());
+  const groupColorCacheRef = useRef<Map<string, string | null>>(new Map());
 
   // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
   // the first non-empty data set has been rendered, any subsequent mount
@@ -144,6 +146,7 @@ export function PondScene() {
         map.set(todo.groupId, {
           id: todo.groupId,
           label: groupLabelCacheRef.current.get(todo.groupId) ?? null,
+          color: groupColorCacheRef.current.get(todo.groupId) ?? null,
           positionX: null,
           positionY: null,
           createdAt: '',
@@ -266,6 +269,13 @@ export function PondScene() {
           key={todo.id}
           todo={todo}
           onDropComplete={handleDropComplete}
+          onDragEnd={(newX, newZ) => {
+            // Re-fit the camera after each pad drag so all pads stay in view.
+            const updated = renderTodos.map((t) =>
+              t.id === todo.id ? { ...t, positionX: newX, positionY: newZ } : t,
+            );
+            usePondStore.getState().requestCameraReset(fitCameraToPads(updated));
+          }}
           focused={activePopupTodoId === todo.id}
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
@@ -276,7 +286,7 @@ export function PondScene() {
         const memberPositions = renderTodos
           .filter((t) => t.groupId === gid)
           .map((t) => ({ x: t.positionX ?? 0, z: t.positionY ?? 0 }));
-        return <ClusterHalo key={gid} memberPositions={memberPositions} />;
+        return <ClusterHalo key={gid} memberPositions={memberPositions} color={groups.get(gid)?.color ?? undefined} />;
       })}
       {/* Story 4.6 AC #12: floating cluster labels. One per group with a
           non-null label; each projects its centroid to screen each frame. */}
@@ -324,6 +334,13 @@ export function PondScene() {
                     positionY: (m.positionY ?? 0) + translation.dz,
                   });
                 }
+                // Re-fit camera with updated member positions.
+                const updated = renderTodos.map((t) =>
+                  t.groupId === gid
+                    ? { ...t, positionX: (t.positionX ?? 0) + translation.dx, positionY: (t.positionY ?? 0) + translation.dz }
+                    : t,
+                );
+                store.requestCameraReset(fitCameraToPads(updated));
               }
               store.setClusterTranslation(null);
             }}
@@ -356,6 +373,7 @@ export function PondScene() {
           // Story 4.6: group extension props.
           isGrouped={!!popupTodo.groupId}
           groupLabel={groups.get(popupTodo.groupId ?? '')?.label ?? null}
+          groupColor={groups.get(popupTodo.groupId ?? '')?.color ?? null}
           selectedCount={selectedPadIds.size}
           onGroup={() => {
             if (!popupTodo || selectedPadIds.size === 0) return;
@@ -421,6 +439,17 @@ export function PondScene() {
               {
                 onSuccess: (group) => {
                   groupLabelCacheRef.current.set(group.id, group.label);
+                },
+              },
+            );
+          }}
+          onCommitGroupColor={(color) => {
+            const gid = popupTodo.groupId!;
+            updateGroup.mutate(
+              { id: gid, color },
+              {
+                onSuccess: (group) => {
+                  groupColorCacheRef.current.set(group.id, group.color);
                 },
               },
             );

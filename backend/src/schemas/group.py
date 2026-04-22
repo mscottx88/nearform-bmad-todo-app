@@ -15,6 +15,7 @@ class GroupCreate(BaseModel):
 
     member_ids: list[uuid.UUID]
     label: str | None = None
+    color: str | None = None
 
 
 class GroupUpdate(BaseModel):
@@ -24,10 +25,11 @@ class GroupUpdate(BaseModel):
     treats it as a full replacement of the group's membership set
     (delete old `GroupMembership` rows, insert new ones). Omitting
     `member_ids` leaves membership untouched, allowing a pure label
-    update to flow through without a round-trip on the members.
+    or color update to flow through without a round-trip on the members.
     """
 
     label: str | None = None
+    color: str | None = None
     member_ids: list[uuid.UUID] | None = None
 
 
@@ -45,5 +47,6 @@ class GroupResponse(BaseModel):
 
     id: uuid.UUID
     label: str | None
+    color: str | None
     member_ids: list[uuid.UUID]
     created_at: datetime
