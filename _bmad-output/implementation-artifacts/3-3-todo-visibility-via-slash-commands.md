@@ -1,6 +1,6 @@
 # Story 3.3: Todo Visibility via Slash Commands
 
-Status: review
+Status: done
 
 > **Scope note — net-new scope, not in epics.md/PRD/UX.** The PRD (FR2, FR8, FR14, FR38) explicitly says completed and deleted todos are **retained in the DB but excluded from the default pond view and search**. This story introduces an opt-in user-facing toggle to view completed and/or deleted pads, driven by a **slash-command interface** embedded in the existing [TodoInput](frontend/src/components/ui/TodoInput.tsx). It does NOT weaken the default: a fresh session still shows active-only. The feature is an exploratory / demo affordance ("look what was here before"), not a change to the PRD's primary interaction model.
 >
