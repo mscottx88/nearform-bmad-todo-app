@@ -100,10 +100,10 @@ describe('PondCamera — OrbitControls config', () => {
     const buttons = orbitControlsProps.mouseButtons as Record<string, unknown>;
     // Story 4.2: LEFT is intentionally omitted so plain left-button
     // drag is always a pad interaction (click or drag), never a
-    // camera pan. Users retain pan via Ctrl+RMB (OrbitControls'
-    // built-in modifier swap on the ROTATE button).
+    // camera pan. RIGHT is PAN (primary nav); Ctrl+RMB becomes
+    // ROTATE via OrbitControls' built-in modifier swap.
     expect(buttons.LEFT).toBeUndefined();
-    expect(buttons.RIGHT).toBe(THREE.MOUSE.ROTATE);
+    expect(buttons.RIGHT).toBe(THREE.MOUSE.PAN);
     // MIDDLE is intentionally omitted so OrbitControls skips MMB.
     expect(buttons.MIDDLE).toBeUndefined();
   });

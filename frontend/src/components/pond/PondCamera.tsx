@@ -289,14 +289,14 @@ export function PondCamera() {
       // OrbitControls' internal switch falls through to STATE.NONE and
       // leaves the button free.
       //
-      // Story 4.2: LEFT is also intentionally omitted so plain left-
-      // button drag is always a pad interaction (click or drag), never a
-      // camera pan. Ctrl+RMB still pans via OrbitControls' built-in
-      // modifier swap on the ROTATE button — so users retain both
-      // pan and rotate without the left-button channel fighting the
-      // pad-drag gesture.
+      // Story 4.2: LEFT is intentionally omitted so plain left-
+      // button drag is always a pad interaction (click or drag), never
+      // a camera pan. RIGHT is bound to PAN as the primary navigation
+      // gesture; OrbitControls' built-in modifier swap on the PAN
+      // button means Ctrl+RMB drag becomes ROTATE (adjust yaw / tilt).
+      // So: plain RMB = pan, Ctrl+RMB = rotate.
       mouseButtons={{
-        RIGHT: THREE.MOUSE.ROTATE,
+        RIGHT: THREE.MOUSE.PAN,
       }}
     />
   );
