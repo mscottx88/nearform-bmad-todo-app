@@ -17,6 +17,7 @@ function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
     deletedAt: null,
     createdAt: '2026-04-16T00:00:00Z',
     updatedAt: '2026-04-16T00:00:00Z',
+    groupId: null,
     ...overrides,
   };
 }
@@ -540,5 +541,158 @@ describe('usePondStore', () => {
     // Reference the un-used helper so eslint doesn't complain — the
     // other tests in the file share `makeTodo`.
     void makeTodo;
+  });
+
+  // ─── Story 4.6: selection + cluster slices ───
+  describe('togglePadSelection / clearSelection (story 4.6 AC #1–#2)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ selectedPadIds: new Set() });
+    });
+
+    it('toggle adds an absent id', () => {
+      usePondStore.getState().togglePadSelection('pad-1');
+      const ids = usePondStore.getState().selectedPadIds;
+      expect(ids.has('pad-1')).toBe(true);
+      expect(ids.size).toBe(1);
+    });
+
+    it('toggle removes a present id (second call)', () => {
+      usePondStore.getState().togglePadSelection('pad-1');
+      usePondStore.getState().togglePadSelection('pad-1');
+      expect(usePondStore.getState().selectedPadIds.size).toBe(0);
+    });
+
+    it('toggle preserves other selected ids', () => {
+      usePondStore.getState().togglePadSelection('pad-1');
+      usePondStore.getState().togglePadSelection('pad-2');
+      usePondStore.getState().togglePadSelection('pad-1');
+      const ids = usePondStore.getState().selectedPadIds;
+      expect(ids.has('pad-2')).toBe(true);
+      expect(ids.has('pad-1')).toBe(false);
+    });
+
+    it('clearSelection empties the set', () => {
+      usePondStore.getState().togglePadSelection('a');
+      usePondStore.getState().togglePadSelection('b');
+      usePondStore.getState().clearSelection();
+      expect(usePondStore.getState().selectedPadIds.size).toBe(0);
+    });
+
+    it('clearSelection on empty set is a no-op (same reference)', () => {
+      const before = usePondStore.getState().selectedPadIds;
+      usePondStore.getState().clearSelection();
+      expect(usePondStore.getState().selectedPadIds).toBe(before);
+    });
+  });
+
+  describe('setHoveredGroupId (story 4.6 AC #13)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ hoveredGroupId: null });
+    });
+
+    it('sets a group id', () => {
+      usePondStore.getState().setHoveredGroupId('g-1');
+      expect(usePondStore.getState().hoveredGroupId).toBe('g-1');
+    });
+
+    it('clears on null', () => {
+      usePondStore.getState().setHoveredGroupId('g-1');
+      usePondStore.getState().setHoveredGroupId(null);
+      expect(usePondStore.getState().hoveredGroupId).toBeNull();
+    });
+
+    it('identical re-set is a no-op (no state churn)', () => {
+      usePondStore.getState().setHoveredGroupId('g-1');
+      const refBefore = usePondStore.getState();
+      usePondStore.getState().setHoveredGroupId('g-1');
+      // Zustand preserves object identity when `set` isn't called.
+      expect(usePondStore.getState()).toBe(refBefore);
+    });
+  });
+
+  describe('setGroupDragTarget (story 4.6 AC #14–#17)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ groupDragTarget: null });
+    });
+
+    it('round-trip set and clear', () => {
+      const target = { groupId: 'g', anchorId: 'a', x: 1, z: 2 };
+      usePondStore.getState().setGroupDragTarget(target);
+      expect(usePondStore.getState().groupDragTarget).toEqual(target);
+      usePondStore.getState().setGroupDragTarget(null);
+      expect(usePondStore.getState().groupDragTarget).toBeNull();
+    });
+  });
+
+  describe('setClusterTranslation (story 4.6 AC #23)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ clusterTranslation: null });
+    });
+
+    it('stores the translation delta', () => {
+      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 0.5, dz: -1.2 });
+      expect(usePondStore.getState().clusterTranslation).toEqual({
+        groupId: 'g',
+        dx: 0.5,
+        dz: -1.2,
+      });
+    });
+
+    it('accepts successive updates (grip phase accumulates)', () => {
+      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 0.5, dz: 0 });
+      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 1.0, dz: 0 });
+      expect(usePondStore.getState().clusterTranslation?.dx).toBe(1.0);
+    });
+  });
+
+  describe('firePop / clearPendingPop (story 4.6 AC #7, #18.ii, #20.ii)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ pendingPops: new Map() });
+    });
+
+    it('firePop stamps the todoId with the given time', () => {
+      usePondStore.getState().firePop('pad-1', 123.45);
+      expect(usePondStore.getState().pendingPops.get('pad-1')).toBe(123.45);
+    });
+
+    it('clearPendingPop removes the entry', () => {
+      usePondStore.getState().firePop('pad-1', 10);
+      usePondStore.getState().clearPendingPop('pad-1');
+      expect(usePondStore.getState().pendingPops.has('pad-1')).toBe(false);
+    });
+
+    it('clearPendingPop on missing id is a no-op (same Map ref)', () => {
+      const before = usePondStore.getState().pendingPops;
+      usePondStore.getState().clearPendingPop('nope');
+      expect(usePondStore.getState().pendingPops).toBe(before);
+    });
+  });
+
+  describe('addWake / expireWakes (story 4.6 AC #16)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ wakes: [] });
+    });
+
+    it('addWake appends to the list', () => {
+      const now = 1000;
+      usePondStore.getState().addWake({ id: 'w1', x: 0, z: 0, angle: 0, bornAt: now });
+      expect(usePondStore.getState().wakes).toHaveLength(1);
+    });
+
+    it('expireWakes drops entries older than maxAge', () => {
+      usePondStore.getState().addWake({ id: 'old', x: 0, z: 0, angle: 0, bornAt: 0 });
+      usePondStore.getState().addWake({ id: 'new', x: 0, z: 0, angle: 0, bornAt: 500 });
+      usePondStore.getState().expireWakes(600, 400);
+      const wakes = usePondStore.getState().wakes;
+      expect(wakes).toHaveLength(1);
+      expect(wakes[0].id).toBe('new');
+    });
+
+    it('expireWakes with nothing to expire keeps identity', () => {
+      usePondStore.getState().addWake({ id: 'w', x: 0, z: 0, angle: 0, bornAt: 1000 });
+      const before = usePondStore.getState().wakes;
+      usePondStore.getState().expireWakes(1100, 400);
+      expect(usePondStore.getState().wakes).toBe(before);
+    });
   });
 });

@@ -140,6 +140,7 @@ const mockTodo: Todo = {
   deletedAt: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
+  groupId: null,
 };
 
 // Story 4.2: the pad's click path is a mesh pointerDown followed

@@ -12,6 +12,11 @@ export interface Todo {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  // Story 4.6: null when the pad is solo; set to the owning group's
+  // UUID when the pad is a member of a cluster. Populated by the
+  // backend `TodoResponse.group_id` via an outerjoin on
+  // `group_memberships` (see backend/src/services/todo_service.py).
+  groupId: string | null;
 }
 
 export interface Group {
