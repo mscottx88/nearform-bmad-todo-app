@@ -4,18 +4,35 @@ import type { RootState } from '@react-three/fiber';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import { usePondStore } from '../../stores/usePondStore';
 import { useTodos, useUpdateTodo, useRestoreTodo } from '../../api/todoApi';
+import { useCreateGroup, useUpdateGroup, useDeleteGroup } from '../../api/groupApi';
 import { useCompleteTodo } from '../../hooks/usePopupComplete';
 import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
 import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
 import { usePondSearchSync } from '../../hooks/usePondSearchSync';
 import { useCameraResetOnDoubleEscape } from '../../hooks/useCameraResetOnDoubleEscape';
-import type { Todo } from '../../types';
+import { computeSpreadPositions } from '../../utils/spreadOut';
+import type { Group, Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
+
+function computeCentroid(members: Todo[]): { x: number; z: number } {
+  if (members.length === 0) return { x: 0, z: 0 };
+  const x = members.reduce((s, m) => s + (m.positionX ?? 0), 0) / members.length;
+  const z = members.reduce((s, m) => s + (m.positionY ?? 0), 0) / members.length;
+  return { x, z };
+}
+
+function autoSpread(members: Todo[]): void {
+  const groupings = new Map(
+    members.filter((t) => t.groupId).map((t) => [t.id, t.groupId!]),
+  );
+  const targets = computeSpreadPositions(members, groupings);
+  if (targets.size > 0) usePondStore.getState().setTargetPositions(targets);
+}
 
 // Milliseconds between consecutive pads entering the 'forming' phase on
 // the first staggered load. 100ms gives a visible cascade without dragging
@@ -35,6 +52,7 @@ export function PondScene() {
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
   const completingTodos = usePondStore((s) => s.completingTodos);
   const deletingTodos = usePondStore((s) => s.deletingTodos);
+  const selectedPadIds = usePondStore((s) => s.selectedPadIds);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [], isLoading: isTodosLoading } = useTodos();
   const completeTodo = useCompleteTodo();
@@ -48,6 +66,14 @@ export function PondScene() {
   // (the route's `_get_active_todo` rejects deleted rows), so the
   // backend exposes a dedicated POST /api/todos/:id/restore endpoint.
   const restoreTodo = useRestoreTodo();
+  // Story 4.6: group mutations.
+  const createGroup = useCreateGroup();
+  const updateGroup = useUpdateGroup();
+  const deleteGroup = useDeleteGroup();
+  // Session-local cache of group labels. Updated from mutation onSuccess
+  // so the Label input pre-fills correctly after the user sets a label.
+  // Key = groupId, value = latest known label (null if explicitly cleared).
+  const groupLabelCacheRef = useRef<Map<string, string | null>>(new Map());
 
   // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
   // the first non-empty data set has been rendered, any subsequent mount
@@ -102,6 +128,28 @@ export function PondScene() {
     }
     return extras.length > 0 ? [...todos, ...extras] : todos;
   }, [todos, completingTodos, deletingTodos]);
+
+  // Story 4.6: derive group metadata from the live todo list. The backend
+  // returns `group_id` on each todo but not the group label. Labels are
+  // cached session-locally in `groupLabelCacheRef` and updated from
+  // mutation onSuccess callbacks so the Label input pre-fills correctly.
+  const groups = useMemo<Map<string, Group>>(() => {
+    const map = new Map<string, Group>();
+    for (const todo of renderTodos) {
+      if (todo.groupId && !map.has(todo.groupId)) {
+        const members = renderTodos.filter((t) => t.groupId === todo.groupId);
+        map.set(todo.groupId, {
+          id: todo.groupId,
+          label: groupLabelCacheRef.current.get(todo.groupId) ?? null,
+          positionX: null,
+          positionY: null,
+          createdAt: '',
+          memberIds: members.map((t) => t.id),
+        });
+      }
+    }
+    return map;
+  }, [renderTodos]);
 
   if (glError) {
     return (
@@ -242,8 +290,78 @@ export function PondScene() {
           onPreviewColor={(color) =>
             usePondStore.getState().setColorPreview(popupTodo.id, color)
           }
-          // TODO(Epic 4.2): open group/ungroup flow
-          onGroup={() => console.log('Group', popupTodo.id)}
+          // Story 4.6: group extension props.
+          isGrouped={!!popupTodo.groupId}
+          groupLabel={groups.get(popupTodo.groupId ?? '')?.label ?? null}
+          selectedCount={selectedPadIds.size}
+          onGroup={() => {
+            if (!popupTodo || selectedPadIds.size === 0) return;
+            const memberIds = [popupTodo.id, ...Array.from(selectedPadIds)];
+            createGroup.mutate(
+              { memberIds },
+              {
+                onSuccess: (group) => {
+                  groupLabelCacheRef.current.set(group.id, group.label);
+                  autoSpread(renderTodos.filter((t) => memberIds.includes(t.id)));
+                },
+              },
+            );
+            usePondStore.getState().clearSelection();
+            usePondStore.getState().closePopup();
+          }}
+          onUngroup={() => {
+            const gid = popupTodo.groupId!;
+            const remaining = renderTodos.filter(
+              (t) => t.groupId === gid && t.id !== popupTodo.id,
+            );
+            if (remaining.length <= 1) {
+              deleteGroup.mutate(gid, {
+                onSuccess: () => autoSpread(remaining),
+              });
+            } else {
+              updateGroup.mutate(
+                { id: gid, memberIds: remaining.map((t) => t.id) },
+                { onSuccess: () => autoSpread(remaining) },
+              );
+            }
+            usePondStore.getState().firePop(popupTodo.id, performance.now());
+            usePondStore.getState().closePopup();
+          }}
+          onDisband={() => {
+            const gid = popupTodo.groupId!;
+            const members = renderTodos.filter((t) => t.groupId === gid);
+            deleteGroup.mutate(gid, {
+              onSuccess: () => {
+                const now = performance.now();
+                members.forEach((m) =>
+                  usePondStore.getState().firePop(m.id, now),
+                );
+                const centroid = computeCentroid(members);
+                usePondStore
+                  .getState()
+                  .triggerRipple(centroid.x, centroid.z);
+              },
+            });
+            usePondStore.getState().closePopup();
+          }}
+          onSpreadGroup={() => {
+            const members = renderTodos.filter(
+              (t) => t.groupId === popupTodo.groupId,
+            );
+            autoSpread(members);
+            usePondStore.getState().closePopup();
+          }}
+          onSetLabel={(label) => {
+            const gid = popupTodo.groupId!;
+            updateGroup.mutate(
+              { id: gid, label },
+              {
+                onSuccess: (group) => {
+                  groupLabelCacheRef.current.set(group.id, group.label);
+                },
+              },
+            );
+          }}
         />
       )}
       <PondCamera />

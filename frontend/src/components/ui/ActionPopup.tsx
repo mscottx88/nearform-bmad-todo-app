@@ -51,6 +51,15 @@ interface ActionPopupProps {
    */
   onPreviewColor?: (color: string | null) => void;
   onGroup: () => void;
+  // Story 4.6: group extension props.
+  isGrouped?: boolean;
+  groupLabel?: string | null;
+  /** Number of currently-selected pads (excluding the popup pad). */
+  selectedCount?: number;
+  onUngroup?: () => void;
+  onDisband?: () => void;
+  onSpreadGroup?: () => void;
+  onSetLabel?: (label: string | null) => void;
 }
 
 // Horizontal/vertical offset from the pad's projected screen position to the
@@ -65,10 +74,19 @@ export function ActionPopup({
   onCommitColor,
   onPreviewColor,
   onGroup,
+  isGrouped = false,
+  groupLabel,
+  selectedCount = 0,
+  onUngroup,
+  onDisband,
+  onSpreadGroup,
+  onSetLabel,
 }: ActionPopupProps) {
   // Story 4.1: Set Color toggles an inline swatch sub-panel.
   const [swatchOpen, setSwatchOpen] = useState(false);
   const [previewColor, setPreviewColor] = useState<string | null>(null);
+  // Story 4.6: Label inline input toggle.
+  const [labelOpen, setLabelOpen] = useState(false);
 
   // Notify the parent whenever the hover preview changes. PondScene
   // uses this to push the preview into usePondStore so LilyPad can
@@ -213,13 +231,73 @@ export function ActionPopup({
               ),
             )}
           </button>
-          <button
-            type="button"
-            className="action-popup__button action-popup__button--group"
-            onClick={onGroup}
-          >
-            Group
-          </button>
+          {/* Story 4.6: Group button only shows for non-grouped pads.
+              Disabled (aria-disabled + pointer-events:none) when no
+              other pads are selected — the user must Shift/Ctrl-click
+              peers first before the Group action becomes available. */}
+          {!isGrouped && (
+            <button
+              type="button"
+              className="action-popup__button action-popup__button--group"
+              onClick={selectedCount > 0 ? onGroup : undefined}
+              aria-disabled={selectedCount === 0 ? 'true' : undefined}
+              style={selectedCount === 0 ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+            >
+              Group
+            </button>
+          )}
+          {/* Story 4.6: group action section — Ungroup / Disband /
+              Spread Out / Label. Only rendered when this pad is a
+              member of a group (isGrouped=true). */}
+          {isGrouped && (
+            <>
+              <hr className="action-popup__group-separator" />
+              <div className="action-popup__group-section">
+                <button
+                  type="button"
+                  className="action-popup__button action-popup__button--group-action"
+                  onClick={onUngroup}
+                >
+                  Ungroup
+                </button>
+                <button
+                  type="button"
+                  className="action-popup__button action-popup__button--group-action"
+                  onClick={onDisband}
+                >
+                  Disband
+                </button>
+                <button
+                  type="button"
+                  className="action-popup__button action-popup__button--group-action"
+                  onClick={onSpreadGroup}
+                >
+                  Spread Out
+                </button>
+                <button
+                  type="button"
+                  className="action-popup__button action-popup__button--group-action"
+                  onClick={() => setLabelOpen(true)}
+                >
+                  Label
+                </button>
+                {labelOpen && (
+                  <input
+                    className="action-popup__label-input"
+                    autoFocus
+                    defaultValue={groupLabel ?? ''}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        onSetLabel?.(e.currentTarget.value.trim() || null);
+                        setLabelOpen(false);
+                      }
+                      if (e.key === 'Escape') setLabelOpen(false);
+                    }}
+                  />
+                )}
+              </div>
+            </>
+          )}
           {/* Story 4.1: inline swatch sub-panel. Rendered as a child of
               the panel root so it inherits the pointer-event absorption
               (AC #9). Conditional render so the keyboard Escape handler

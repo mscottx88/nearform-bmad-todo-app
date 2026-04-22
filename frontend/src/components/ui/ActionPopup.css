@@ -97,6 +97,36 @@
   white-space: nowrap;
 }
 
+/* Story 4.6 — group action section. Rendered below a thin separator
+   when the popup opens on a grouped pad (isGrouped=true). */
+.action-popup__group-separator {
+  border: none;
+  border-top: 1px solid rgba(0, 238, 255, 0.2);
+  margin: 6px 0;
+}
+
+.action-popup__group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-popup__button--group-action {
+  color: rgba(0, 238, 255, 0.75);
+}
+
+.action-popup__label-input {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* Story 4.1 — color-swatch sub-panel. Rendered conditionally below
    the four-button row when `swatchOpen` is true in ActionPopup.tsx.
    The divider line visually separates the picker from the actions. */
