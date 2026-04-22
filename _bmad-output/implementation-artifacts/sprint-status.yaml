@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-21 # story 5.3 done (CR 8 patches applied + 4 deferred items drained, commit 1b1147f)
+last_updated: 2026-04-21 # story 3.1 created (epic 3 → in-progress)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -79,8 +79,8 @@ development_status:
   epic-2-retrospective: pending
 
   # Epic 3: Exploring the Pond
-  epic-3: backlog
-  3-1-interactive-camera-controls: backlog
+  epic-3: in-progress  # opened 2026-04-21 with story 3.1
+  3-1-interactive-camera-controls: ready-for-dev
   3-2-atmosphere-mode-toggle: backlog
   epic-3-retrospective: pending
 
