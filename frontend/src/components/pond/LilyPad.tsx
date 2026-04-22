@@ -1833,6 +1833,16 @@ export function LilyPad({
         position={[0, 0.1, 0]}
         renderOrder={10}
         onPointerDown={handlePadPointerDown}
+        onPointerEnter={
+          todo.groupId
+            ? () => usePondStore.getState().setHoveredGroupId(todo.groupId!)
+            : undefined
+        }
+        onPointerLeave={
+          todo.groupId
+            ? () => usePondStore.getState().setHoveredGroupId(null)
+            : undefined
+        }
       >
         <shaderMaterial
           uniforms={padUniforms}

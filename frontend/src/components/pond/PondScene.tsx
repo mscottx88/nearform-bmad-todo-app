@@ -19,6 +19,7 @@ import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
 import { ClusterLabel } from './ClusterLabel';
+import { ClusterDragHandle } from './ClusterDragHandle';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
   if (members.length === 0) return { x: 0, z: 0 };
@@ -286,6 +287,40 @@ export function PondScene() {
             />
           );
         })}
+      {/* Story 4.6 AC #13, #21–#25: one drag handle per group. Visible
+          only when hoveredGroupId matches or a drag is in progress.
+          onTranslate accumulates the cumulative (dx,dz) into the store
+          so LilyPad siblings can apply the offset imperatively in useFrame.
+          onDragEnd PATCHes every member's final position and clears the
+          translation. */}
+      {Array.from(groups.keys()).map((gid) => {
+        const members = renderTodos.filter((t) => t.groupId === gid);
+        return (
+          <ClusterDragHandle
+            key={gid}
+            groupId={gid}
+            members={members}
+            onTranslate={(dx, dz) => {
+              usePondStore.getState().setClusterTranslation({ groupId: gid, dx, dz });
+            }}
+            onDragEnd={() => {
+              const store = usePondStore.getState();
+              const translation = store.clusterTranslation;
+              if (translation?.groupId === gid) {
+                const finalMembers = renderTodos.filter((t) => t.groupId === gid);
+                for (const m of finalMembers) {
+                  updateTodo.mutate({
+                    id: m.id,
+                    positionX: (m.positionX ?? 0) + translation.dx,
+                    positionY: (m.positionY ?? 0) + translation.dz,
+                  });
+                }
+              }
+              store.setClusterTranslation(null);
+            }}
+          />
+        );
+      })}
       {popupTodo && (
         <ActionPopup
           key={popupTodo.id}

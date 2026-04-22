@@ -63,6 +63,10 @@ vi.mock('./ClusterLabel', () => ({
   ),
 }));
 
+vi.mock('./ClusterDragHandle', () => ({
+  ClusterDragHandle: () => null,
+}));
+
 // Expose dropDelayMs via a data attribute so the staggered-index test can
 // assert what PondScene passes to each LilyPad on initial load.
 vi.mock('./LilyPad', () => ({

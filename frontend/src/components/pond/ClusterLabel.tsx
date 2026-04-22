@@ -1,14 +1,11 @@
 // Story 4.6 AC #12: floating label above a cluster centroid.
-// Lives inside the R3F Canvas tree (needs useFrame + useThree for
-// the world→screen projection); renders its DOM via createPortal so
-// it layers above the canvas without fighting WebGL compositing.
+// Uses drei's <Html> component to create a DOM overlay inside the R3F
+// scene — createPortal from react-dom cannot be used inside R3F's custom
+// reconciler (it would try to instantiate <div> as a Three.js object).
 import { useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-
-// Scratch vector — reused each frame to avoid per-frame allocation.
-const _scratchV3 = new THREE.Vector3();
 
 interface ClusterLabelProps {
   label: string;
@@ -16,52 +13,37 @@ interface ClusterLabelProps {
 }
 
 export function ClusterLabel({ label, memberPositions }: ClusterLabelProps) {
-  const divRef = useRef<HTMLDivElement>(null);
-  const { camera, size } = useThree();
+  const groupRef = useRef<THREE.Group>(null);
 
   useFrame(() => {
-    const el = divRef.current;
-    if (!el || memberPositions.length === 0) return;
+    if (!groupRef.current || memberPositions.length === 0) return;
 
-    // Compute centroid in world space.
     const cx =
       memberPositions.reduce((s, p) => s + p.x, 0) / memberPositions.length;
     const cz =
       memberPositions.reduce((s, p) => s + p.z, 0) / memberPositions.length;
 
-    // Project to NDC then to CSS pixel coordinates.
-    _scratchV3.set(cx, 0.4, cz);
-    _scratchV3.project(camera);
-
-    const sx = ((_scratchV3.x + 1) / 2) * size.width;
-    const sy = ((-_scratchV3.y + 1) / 2) * size.height;
-
-    el.style.left = `${sx}px`;
-    el.style.top = `${sy}px`;
+    groupRef.current.position.set(cx, 0.4, cz);
   });
 
-  if (typeof document === 'undefined') return null;
-
-  return createPortal(
-    <div
-      ref={divRef}
-      className="cluster-label"
-      style={{
-        position: 'fixed',
-        left: '-9999px',
-        top: '-9999px',
-        fontFamily: "'Share Tech Mono', monospace",
-        color: '#00eeff',
-        fontSize: '11px',
-        opacity: 0.8,
-        pointerEvents: 'none',
-        transform: 'translate(-50%, -100%)',
-        whiteSpace: 'nowrap',
-        userSelect: 'none',
-      }}
-    >
-      {label}
-    </div>,
-    document.body,
+  return (
+    <group ref={groupRef}>
+      <Html center style={{ pointerEvents: 'none' }}>
+        <div
+          className="cluster-label"
+          style={{
+            fontFamily: "'Share Tech Mono', monospace",
+            color: '#00eeff',
+            fontSize: '11px',
+            opacity: 0.8,
+            whiteSpace: 'nowrap',
+            userSelect: 'none',
+            transform: 'translateY(-20px)',
+          }}
+        >
+          {label}
+        </div>
+      </Html>
+    </group>
   );
 }
