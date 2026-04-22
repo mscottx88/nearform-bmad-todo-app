@@ -26,6 +26,8 @@ describe('usePondStore', () => {
     usePondStore.setState({
       activePopupTodoId: null,
       cameraFocus: null,
+      cameraResetRequestId: 0,
+      pendingCameraFit: null,
       dropRipples: [],
       completingTodos: new Map(),
       deletingTodos: new Map(),
@@ -85,6 +87,43 @@ describe('usePondStore', () => {
     it('sets cameraFocus with x, z, and zoom', () => {
       usePondStore.getState().focusCamera(3, 4, 5);
       expect(usePondStore.getState().cameraFocus).toEqual({ x: 3, z: 4, zoom: 5 });
+    });
+  });
+
+  describe('requestCameraReset / clearCameraResetRequest (story 3.1 AC #4)', () => {
+    const fitA = { position: [1, 2, 3] as [number, number, number], target: [0, 0, 0] as [number, number, number] };
+    const fitB = { position: [4, 5, 6] as [number, number, number], target: [7, 0, 8] as [number, number, number] };
+
+    it('bumps the counter and sets pendingCameraFit atomically', () => {
+      const idBefore = usePondStore.getState().cameraResetRequestId;
+      usePondStore.getState().requestCameraReset(fitA);
+      const state = usePondStore.getState();
+      expect(state.cameraResetRequestId).toBe(idBefore + 1);
+      expect(state.pendingCameraFit).toBe(fitA);
+    });
+
+    it('second call bumps counter again and latest fit wins', () => {
+      usePondStore.getState().requestCameraReset(fitA);
+      usePondStore.getState().requestCameraReset(fitB);
+      const state = usePondStore.getState();
+      expect(state.cameraResetRequestId).toBe(2);
+      expect(state.pendingCameraFit).toBe(fitB);
+    });
+
+    it('does NOT touch cameraFocus', () => {
+      usePondStore.getState().focusCamera(10, 20, 30);
+      const focusBefore = usePondStore.getState().cameraFocus;
+      usePondStore.getState().requestCameraReset(fitA);
+      expect(usePondStore.getState().cameraFocus).toEqual(focusBefore);
+    });
+
+    it('clearCameraResetRequest nulls pendingCameraFit but preserves the counter', () => {
+      usePondStore.getState().requestCameraReset(fitA);
+      const counterAfterRequest = usePondStore.getState().cameraResetRequestId;
+      usePondStore.getState().clearCameraResetRequest();
+      const state = usePondStore.getState();
+      expect(state.pendingCameraFit).toBeNull();
+      expect(state.cameraResetRequestId).toBe(counterAfterRequest);
     });
   });
 

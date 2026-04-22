@@ -1,6 +1,6 @@
 # Story 3.1: Interactive Camera Controls
 
-Status: ready-for-dev
+Status: review
 
 > **Scope note:** First story of Epic 3 "Exploring the Pond". Fulfils PRD FR30 (orbit/zoom/pan) and FR31 (camera reset to default — trigger changed from epics.md's "double-click empty water" to **double-Escape** per Dev Notes rationale). **Partially wired** in [frontend/src/components/pond/PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx) from Story 1.2 — damping, min/max zoom, polar-angle constraint, LEFT=pan, RIGHT=orbit are present but **pan is broken** (screen-space instead of ground-plane, so forward/back mouse-drag doesn't work). Net-new work:
 > 1. Fix LMB pan to ground-plane (`screenSpacePanning={false}`) so drag-up = forward (AC #2).
@@ -32,7 +32,7 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
 
 1. **Given** the pond is loaded and no interaction is in flight, **When** I scroll the mouse wheel on the canvas, **Then** the camera distance from its `OrbitControls` target changes smoothly with eased damping (not instant). **And** distance is bounded: `minDistance = 5` and `maxDistance = 60` world units. Further scroll attempts at either extreme are no-ops at the Three.js level (OrbitControls clamps internally); no visible jitter. `zoomToCursor` stays enabled so the zoom pivots toward the cursor, not the current target.
 
-2. **Given** the pond is loaded and no popup is open, **When** I press-and-drag the **left** mouse button across the canvas (movement > 5 px between `pointerdown` and `pointerup`), **Then** the camera **pans across the horizontal ground plane**: dragging **up** = forward (pond slides toward the viewer), **down** = back, **left/right** = strafe. OrbitControls translates both the target and the camera position parallel to the **XZ plane** — NOT parallel to the screen. This requires setting `screenSpacePanning = false` on `<OrbitControls>`; with the default `true`, pan is screen-parallel, which on our tilted view turns up-drag into "move camera upward in world space" instead of "move forward across the pond" (the bug you just hit). The pan tracks the cursor for the full drag duration (not a jump on release). Panning does NOT change camera distance or pitch. Mouse button mapping on `<OrbitControls>`: `LEFT = THREE.MOUSE.PAN`, `MIDDLE = -1` (disabled in OrbitControls — MMB is claimed for ascend/descend per AC #8 and handled by our own listener, not OrbitControls), `RIGHT = THREE.MOUSE.ROTATE`. Note: with ground-plane panning, pan-distance-per-pixel scales with camera height — a zoomed-out view pans fast, a close-up pans slow. That's the intended "consistent world-space travel per mouse drag" behaviour and is NOT a bug.
+2. **Given** the pond is loaded and no popup is open, **When** I press-and-drag the **left** mouse button across the canvas (movement > 5 px between `pointerdown` and `pointerup`), **Then** the camera **pans across the horizontal ground plane**: dragging **up** = forward (pond slides toward the viewer), **down** = back, **left/right** = strafe. OrbitControls translates both the target and the camera position parallel to the **XZ plane** — NOT parallel to the screen. This requires setting `screenSpacePanning = false` on `<OrbitControls>`; with the default `true`, pan is screen-parallel, which on our tilted view turns up-drag into "move camera upward in world space" instead of "move forward across the pond" (the bug you just hit). The pan tracks the cursor for the full drag duration (not a jump on release). Panning does NOT change camera distance or pitch. Mouse button mapping on `<OrbitControls>`: `LEFT = THREE.MOUSE.PAN`, `RIGHT = THREE.MOUSE.ROTATE`, and `MIDDLE` omitted entirely so drei passes `undefined` — OrbitControls' internal pointerdown switch then treats MMB as no-op, leaving it free for our ascend/descend handler (AC #8). Note: with ground-plane panning, pan-distance-per-pixel scales with camera height — a zoomed-out view pans fast, a close-up pans slow. That's the intended "consistent world-space travel per mouse drag" behaviour and is NOT a bug.
 
 3. **Given** the pond is loaded, **When** I press-and-drag the **right** mouse button across the canvas (or modifier-drag if the platform routes right-click to a context menu — see Dev Notes), **Then** the camera **orbits** around the `OrbitControls` target with smooth damping. Orbit is constrained by `maxPolarAngle = Math.PI / 2.2` (≈ 81.8°) so the camera **cannot tilt low enough to see underwater** — at the lower polar limit the camera is still tilted downward toward the water plane, never level with or below it. `minPolarAngle` is left at the OrbitControls default of `0` so the user can orbit up to a full top-down bird's-eye view if they want. Azimuth (horizontal orbit) is unconstrained — full 360°. This is **one of three layered underwater-prevention mechanisms**; the others are the MMB-descend clamp (AC #8) and the frame-level hard floor (AC #9).
 
@@ -55,7 +55,7 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
 6. **Given** the browser window is resized (user drags the window edge, rotates the screen, or the system triggers a resize event), **When** the resize completes, **Then** the camera framing adapts: aspect ratio updates, the `OrbitControls` target stays at the same world-space point (user keeps their mental "where I was looking"), and no pads visibly jump. R3F's `Canvas` handles `camera.aspect` + `renderer.setSize` automatically on its `ResizeObserver`; this AC is a **verify-and-don't-regress** gate — no new code needed unless a live test reveals a bug. Confirmed in the architecture doc ("OrbitControls automatically adapt to container changes" — architecture.md:1100).
 
 7. **Given** the existing vitest suite and this story's new tests, **When** the suite runs, **Then** (a) all existing tests stay green, AND (b) new tests cover:
-   - **`OrbitControls` config props** (`PondCamera.test.tsx`, AC #1/#2/#3/#5): min/max distance, maxPolarAngle, enableDamping + factor, enablePan, zoomToCursor, `screenSpacePanning=false`, mouseButtons map with `MIDDLE=-1`.
+   - **`OrbitControls` config props** (`PondCamera.test.tsx`, AC #1/#2/#3/#5): min/max distance, maxPolarAngle (and `minPolarAngle` unset so the default of 0 is preserved — confirms the bird's-eye up-limit), enableDamping + factor, enablePan, zoomToCursor, `screenSpacePanning=false`, mouseButtons map with `MIDDLE` omitted (drei passes `undefined` → OrbitControls no-ops MMB).
    - **`fitCameraToPads` pure helper** (`fitCameraToPads.test.ts`, AC #4): empty input → default fit `(0,15,20)/(0,0,0)`; single pad at origin → centroid at origin with distance clamped to `RESET_MIN_DISTANCE`; two pads at `(−5, 0, −5)` and `(5, 0, 5)` → centroid at origin, distance = `clamp(hypot(10,10) · 1.3, 15, 60)` ≈ 18.4, pose preserves polar angle (`cy/D ≈ 0.6`); dispersed cluster with `d · 1.3 > 60` clamps at `RESET_MAX_DISTANCE`; mixed list with some `positionX=null` filters them out of the computation.
    - **`requestCameraReset` store action** (`usePondStore.test.ts`, AC #4): flips `cameraResetRequestId` and sets `pendingCameraFit` atomically; does NOT touch `cameraFocus`; `clearCameraResetRequest` nulls `pendingCameraFit` without resetting the counter.
    - **`useCameraResetOnDoubleEscape` hook** (`useCameraResetOnDoubleEscape.test.ts`, AC #4): two Escape keydowns within 600 ms dispatch `requestCameraReset` with the current React Query todos → computed fit; two Escape keydowns > 600 ms apart do NOT dispatch; Escape keydowns with an `<input>` / `<textarea>` / contenteditable target are ignored; consume-on-trigger — three rapid Escapes fire exactly one reset, not two.
@@ -70,8 +70,8 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Hoist default-camera constants (AC: #4, #7, #8, #9)
-  - [ ] In [PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx), add module-scope constants near the existing `LERP_SPEED` block:
+- [x] Task 1: Hoist default-camera constants (AC: #4, #7, #8, #9)
+  - [x] In [PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx), add module-scope constants near the existing `LERP_SPEED` block:
     ```ts
     const DEFAULT_CAMERA_POSITION = new THREE.Vector3(0, 15, 20);
     const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
@@ -81,8 +81,8 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
     ```
     `DEFAULT_CAMERA_POSITION` **must** match the `<Canvas camera={{ position: [0, 15, 20] }}>` values in `PondScene.tsx`. If you change one, change the other — add a comment on both sides noting the pairing. These constants also define the empty-pond fallback for `fitCameraToPads` (Task 1d) — export both as named constants so the helper can reference them by name.
 
-- [ ] Task 1d: Extract `fitCameraToPads` helper + tests (AC: #4, #7)
-  - [ ] Create [frontend/src/components/pond/fitCameraToPads.ts](frontend/src/components/pond/fitCameraToPads.ts):
+- [x] Task 1d: Extract `fitCameraToPads` helper + tests (AC: #4, #7)
+  - [x] Create [frontend/src/components/pond/fitCameraToPads.ts](frontend/src/components/pond/fitCameraToPads.ts):
     ```ts
     import type { Todo } from '../../types';
     import { DEFAULT_CAMERA_POSITION, DEFAULT_CAMERA_TARGET } from './PondCamera';
@@ -163,31 +163,32 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
       };
     }
     ```
-  - [ ] Why tuples `[number, number, number]` rather than `THREE.Vector3`: the fit lives in the Zustand store where Vector3 instances with mutable state would be a footgun (equality checks, serialization for devtools, test snapshots). Convert to Vector3 at consumption in `PondCamera.useFrame` via `vec.fromArray(fit.position)` on pre-allocated module-scope Vector3 instances — no per-frame allocation.
-  - [ ] Create [frontend/src/components/pond/fitCameraToPads.test.ts](frontend/src/components/pond/fitCameraToPads.test.ts) with the test cases enumerated in AC #7 (empty, single, two-pad, max-clamp, null-filter). Plain unit tests — no React, no Canvas, no mocks needed beyond a minimal `Todo`-shaped factory.
+  - [x] Why tuples `[number, number, number]` rather than `THREE.Vector3`: the fit lives in the Zustand store where Vector3 instances with mutable state would be a footgun (equality checks, serialization for devtools, test snapshots). Convert to Vector3 at consumption in `PondCamera.useFrame` via `vec.fromArray(fit.position)` on pre-allocated module-scope Vector3 instances — no per-frame allocation.
+  - [x] Create [frontend/src/components/pond/fitCameraToPads.test.ts](frontend/src/components/pond/fitCameraToPads.test.ts) with the test cases enumerated in AC #7 (empty, single, two-pad, max-clamp, null-filter). Plain unit tests — no React, no Canvas, no mocks needed beyond a minimal `Todo`-shaped factory.
 
-- [ ] Task 1b: Ground-plane pan + retire click-to-centre (AC: #2)
-  - [ ] Add `screenSpacePanning={false}` to the `<OrbitControls>` element. With the default `true`, LMB-drag translates parallel to the screen — on our tilted view, up-drag mostly moves the camera upward in world space, not forward across the pond. Flipping this to `false` makes pan stay parallel to the XZ plane so drag up = forward, drag down = back, drag left/right = strafe.
-  - [ ] Update the `mouseButtons` prop on `<OrbitControls>`:
+- [x] Task 1b: Ground-plane pan + retire click-to-centre (AC: #2)
+  - [x] Add `screenSpacePanning={false}` to the `<OrbitControls>` element. With the default `true`, LMB-drag translates parallel to the screen — on our tilted view, up-drag mostly moves the camera upward in world space, not forward across the pond. Flipping this to `false` makes pan stay parallel to the XZ plane so drag up = forward, drag down = back, drag left/right = strafe.
+  - [x] Update the `mouseButtons` prop on `<OrbitControls>`:
     ```ts
     mouseButtons={{
       LEFT: THREE.MOUSE.PAN,
-      MIDDLE: -1, // disabled — MMB is handled by our own listener for ascend/descend (AC #8)
       RIGHT: THREE.MOUSE.ROTATE,
+      // MIDDLE intentionally omitted — MMB is handled by our own listener
+      // for ascend/descend (AC #8).
     }}
     ```
-    `-1` (or any non-`THREE.MOUSE.*` value) makes OrbitControls skip the button in its internal `onPointerDown` switch. Do NOT set to `undefined` — drei's types prefer an explicit sentinel.
-  - [ ] Retire the single-click-water-lerp in [handlePointerUp](frontend/src/components/pond/PondCamera.tsx#L40-L68). Concretely, remove the two lines `targetVec.current.copy(hit); animating.current = true;`. Preserve every other branch — the popup-close path (`if (activePopupTodoId !== null) { closePopup(); return; }`) stays exactly as it is (that's the click-outside-to-dismiss contract for the action popup and is relied on by Story 2.3). This is a deliberate behaviour retirement, not a refactor — do NOT simplify any other code in the handler.
-  - [ ] `targetVec` and `animating` refs STAY in the file — they're still used by the `cameraFocus` branch in `useFrame` (pad-focus zoom) and will be used by the reset animation (Task 3). The retirement only removes their one use in `handlePointerUp`.
-  - [ ] Browser-verify (do not wait for Task 7 for this one — it's a regression check on existing behaviour):
+    drei's `mouseButtons` is `Partial<{ LEFT; MIDDLE; RIGHT }>`, so omitting `MIDDLE` leaves it `undefined`. OrbitControls' internal `onPointerDown` switch treats an `undefined` button as no-op (falls through to `STATE.NONE`), leaving MMB free for our handler. Earlier drafts of this story specified a sentinel value like `-1`; that works at runtime but isn't what ships — the implementation omits `MIDDLE` entirely, matching drei's type shape.
+  - [x] Retire the single-click-water-lerp in [handlePointerUp](frontend/src/components/pond/PondCamera.tsx#L40-L68). Concretely, remove the two lines `targetVec.current.copy(hit); animating.current = true;`. Preserve every other branch — the popup-close path (`if (activePopupTodoId !== null) { closePopup(); return; }`) stays exactly as it is (that's the click-outside-to-dismiss contract for the action popup and is relied on by Story 2.3). This is a deliberate behaviour retirement, not a refactor — do NOT simplify any other code in the handler.
+  - [x] `targetVec` and `animating` refs STAY in the file — they're still used by the `cameraFocus` branch in `useFrame` (pad-focus zoom) and will be used by the reset animation (Task 3). The retirement only removes their one use in `handlePointerUp`.
+  - [ ] Browser-verify (DEFERRED to reviewer — dev ran in headless environment; unit tests cover the code paths):
     - LMB-click-drag up on empty water → camera slides forward across the pond (target moves away from viewer on the XZ plane). Drag down → back. Drag sideways → strafe.
     - LMB-click with no drag on empty water → no camera motion, no popup opens, nothing happens.
     - Click a pad → existing pad-focus / popup-open flow still works (that path is driven by `cameraFocus`, not this handler).
     - Open popup, click outside on water → popup closes (that branch is preserved).
 
-- [ ] Task 1c: MMB-drag ascend/descend (AC: #8)
-  - [ ] Add a `mmbDragPrevY` ref (`useRef<number | null>(null)`) alongside the existing `clickStart` ref. `null` = not currently dragging; a number = last observed `e.clientY`.
-  - [ ] Extend `handlePointerDown`:
+- [x] Task 1c: MMB-drag ascend/descend (AC: #8)
+  - [x] Add a `mmbDragPrevY` ref (`useRef<number | null>(null)`) alongside the existing `clickStart` ref. `null` = not currently dragging; a number = last observed `e.clientY`.
+  - [x] Extend `handlePointerDown`:
     ```ts
     if (e.button === 1) {
       mmbDragPrevY.current = e.clientY;
@@ -197,7 +198,7 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
     }
     ```
     The `preventDefault` and `button === 1` check must come BEFORE the existing `button === 0` branch — MMB has its own path.
-  - [ ] Add a new `handlePointerMove(e: PointerEvent)` listener:
+  - [x] Add a new `handlePointerMove(e: PointerEvent)` listener:
     ```ts
     const handlePointerMove = useCallback((e: PointerEvent) => {
       if (mmbDragPrevY.current === null || !controlsRef.current) return;
@@ -214,7 +215,7 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
       controlsRef.current.target.y += delta; // rigid-body — preserve pitch
     }, [camera]);
     ```
-  - [ ] Extend `handlePointerUp`:
+  - [x] Extend `handlePointerUp`:
     ```ts
     if (e.button === 1) {
       mmbDragPrevY.current = null;
@@ -222,15 +223,15 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
     }
     ```
     Also handle `pointercancel` the same way (register a `pointercancel` listener or unify on `pointerleave`). The `pointermove` listener should be registered on the `window`, not the canvas, so a drag that exits the canvas bounds still updates — matches how OrbitControls itself tracks drags.
-  - [ ] Register the new listeners inside the existing `useEffect` that manages canvas listeners. `pointermove` and `pointercancel` go on `window`; keep `pointerdown`/`pointerup`/`wheel` on `gl.domElement`. (No `dblclick` listener needed — reset is keyboard-driven via Task 4's hook.) Remember to clean up all of them in the returned unmount function.
-  - [ ] Do NOT try to generalise with a pointer-capture API (`setPointerCapture`) — it's overkill for this scope and complicates testing.
+  - [x] Register the new listeners inside the existing `useEffect` that manages canvas listeners. `pointermove` and `pointercancel` go on `window`; keep `pointerdown`/`pointerup`/`wheel` on `gl.domElement`. (No `dblclick` listener needed — reset is keyboard-driven via Task 4's hook.) Remember to clean up all of them in the returned unmount function.
+  - [x] Do NOT try to generalise with a pointer-capture API (`setPointerCapture`) — it's overkill for this scope and complicates testing.
 
-- [ ] Task 2: Add reset slices + actions to `usePondStore` (AC: #4, #7)
-  - [ ] Import the `CameraFit` type from `fitCameraToPads.ts`.
-  - [ ] New state slices:
+- [x] Task 2: Add reset slices + actions to `usePondStore` (AC: #4, #7)
+  - [x] Import the `CameraFit` type from `fitCameraToPads.ts`.
+  - [x] New state slices:
     - `cameraResetRequestId: number` initialised to `0` — monotonically-increasing counter. The value itself is meaningless; only a **change** is the signal. Counter pattern (rather than a boolean flag) is deliberate: two back-to-back reset requests (e.g., ESC ESC, then some input, then ESC ESC again) must both fire fresh animations; a boolean would coalesce on the second. Matches the "fresh-object-ref" pattern used elsewhere in the store for imperative signals.
     - `pendingCameraFit: CameraFit | null` initialised to `null` — payload consumed by `PondCamera.useFrame` on counter-bump.
-  - [ ] New actions:
+  - [x] New actions:
     ```ts
     requestCameraReset: (fit: CameraFit) => void;
     clearCameraResetRequest: () => void;
@@ -245,30 +246,30 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
       set({ pendingCameraFit: null }),
     ```
     `clearCameraResetRequest` does NOT decrement the counter — only the payload is nulled. The counter keeps its current value so a subsequent request is still seen as "fresh" by PondCamera's ref-compare.
-  - [ ] `requestCameraReset` does **NOT** touch `cameraFocus` — closing any in-flight popup-focus lerp is PondCamera's responsibility (see Task 3 consumption order).
-  - [ ] Do not expose a selector for the counter — `PondCamera` reads it imperatively via `usePondStore.getState()` inside its `useFrame`, comparing against a local ref, to avoid a re-render per counter bump.
+  - [x] `requestCameraReset` does **NOT** touch `cameraFocus` — closing any in-flight popup-focus lerp is PondCamera's responsibility (see Task 3 consumption order).
+  - [x] Do not expose a selector for the counter — `PondCamera` reads it imperatively via `usePondStore.getState()` inside its `useFrame`, comparing against a local ref, to avoid a re-render per counter bump.
 
-- [ ] Task 3: Drive the reset animation in `PondCamera.useFrame` (AC: #4, #5, #9)
-  - [ ] Add refs:
+- [x] Task 3: Drive the reset animation in `PondCamera.useFrame` (AC: #4, #5, #9)
+  - [x] Add refs:
     - `resetAnimating: useRef(false)`
     - `lastResetRequestId: useRef(usePondStore.getState().cameraResetRequestId)` — seed to the current value at mount so a pre-mount counter bump doesn't retroactively fire on first frame.
     - Two pre-allocated module-scope `THREE.Vector3` temporaries: `resetTargetPos` and `resetTargetTarget`. Do not allocate per frame.
-  - [ ] **Top of each `useFrame`** (in this order):
+  - [x] **Top of each `useFrame`** (in this order):
     1. **Floor clamp** (AC #9): `if (camera.position.y < CAMERA_MIN_Y) camera.position.y = CAMERA_MIN_Y;`. Do NOT clamp `controls.target.y`.
     2. **Detect new reset request**: read `{ cameraResetRequestId, pendingCameraFit }` from the store imperatively. If `cameraResetRequestId !== lastResetRequestId.current` AND `pendingCameraFit !== null`:
        - `lastResetRequestId.current = cameraResetRequestId`
        - `resetAnimating.current = true`
        - `resetTargetPos.fromArray(pendingCameraFit.position)`; `resetTargetTarget.fromArray(pendingCameraFit.target)`
        - Null `cameraFocus` in the store (`usePondStore.setState({ cameraFocus: null })`) so an in-flight popup-focus lerp stops competing for the camera.
-  - [ ] **Branch order inside `useFrame`** (preserves existing behaviour + adds reset):
+  - [x] **Branch order inside `useFrame`** (preserves existing behaviour + adds reset):
     1. If `resetAnimating.current`: lerp `camera.position` toward `resetTargetPos` at `LERP_SPEED` and `controls.target` toward `resetTargetTarget` at `LERP_SPEED`; `controls.update()`. When both `camera.position.distanceTo(resetTargetPos) < RESET_ARRIVE_THRESHOLD` AND `controls.target.distanceTo(resetTargetTarget) < RESET_ARRIVE_THRESHOLD`, snap to exact targets, set `resetAnimating.current = false`, and call `usePondStore.getState().clearCameraResetRequest()` to null `pendingCameraFit` for cleanliness. **Return early** — do not also run the `cameraFocus` branch in the same tick.
     2. Else if `cameraFocus`: existing focus-lerp branch (unchanged).
     3. Else: existing `controls.update()`-only branch (unchanged — damping keeps the last user input easing out).
-  - [ ] Extend the existing `cancelAnimation()` helper to also clear `resetAnimating.current` AND call `clearCameraResetRequest()` (the user decided where to go instead, so don't leave a stale pending fit). Wire `cancelAnimation` into `handlePointerDown` (both LMB and MMB branches) and `handleWheel` so mid-reset input cancels the reset.
-  - [ ] Do NOT use the counter-only-no-payload path. If `cameraResetRequestId !== lastResetRequestId.current` BUT `pendingCameraFit === null` (e.g., payload was cleared by a cancellation race), update `lastResetRequestId.current` but do NOT start an animation — the request is considered consumed.
+  - [x] Extend the existing `cancelAnimation()` helper to also clear `resetAnimating.current` AND call `clearCameraResetRequest()` (the user decided where to go instead, so don't leave a stale pending fit). Wire `cancelAnimation` into `handlePointerDown` (both LMB and MMB branches) and `handleWheel` so mid-reset input cancels the reset.
+  - [x] Do NOT use the counter-only-no-payload path. If `cameraResetRequestId !== lastResetRequestId.current` BUT `pendingCameraFit === null` (e.g., payload was cleared by a cancellation race), update `lastResetRequestId.current` but do NOT start an animation — the request is considered consumed.
 
-- [ ] Task 4: New hook `useCameraResetOnDoubleEscape` (AC: #4)
-  - [ ] Create [frontend/src/hooks/useCameraResetOnDoubleEscape.ts](frontend/src/hooks/useCameraResetOnDoubleEscape.ts):
+- [x] Task 4: New hook `useCameraResetOnDoubleEscape` (AC: #4)
+  - [x] Create [frontend/src/hooks/useCameraResetOnDoubleEscape.ts](frontend/src/hooks/useCameraResetOnDoubleEscape.ts):
     ```ts
     import { useEffect, useRef } from 'react';
     import { useQueryClient } from '@tanstack/react-query';
@@ -314,18 +315,18 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
       }, [queryClient]);
     }
     ```
-  - [ ] Verify `TODOS_QUERY_KEY` matches the actual key used by `useTodos` in [todoApi.ts](frontend/src/api/todoApi.ts) (currently `['todos', 'list']` as `TODOS_KEY` — the const is local to the module so we can't import it without refactoring; re-declaring the tuple is fine for 3.1 scope, but leave the TODO above so a future test or refactor can hoist `TODOS_KEY` into a shared file).
-  - [ ] Do NOT `preventDefault()` or `stopPropagation()`. The existing [useClosePopupOnEscape](frontend/src/hooks/useClosePopupOnEscape.ts) and the `Escape` branch of [usePondSearchKeyboard](frontend/src/hooks/usePondSearchKeyboard.ts) must keep firing on every Escape to preserve their own side-effects (close popup, clear search). Our hook is purely additive — it observes timestamps and dispatches reset, nothing else.
-  - [ ] Mount the hook **once** in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) at the top of the component body, alongside the existing `usePondSearchKeyboard()` / `usePondSearchSync()` mount points. Do NOT mount inside `PondCamera` — that would tie keyboard-level concerns to the canvas-children render tree and break encapsulation.
-  - [ ] Verify handler ordering is irrelevant: all three Escape listeners are plain `window.addEventListener('keydown', ...)` and fire in registration order, but none of them stop propagation. Each does its job independently. If a future change introduces `stopPropagation()` on any of them, re-evaluate ordering.
+  - [x] Verify `TODOS_QUERY_KEY` matches the actual key used by `useTodos` in [todoApi.ts](frontend/src/api/todoApi.ts) (currently `['todos', 'list']` as `TODOS_KEY` — the const is local to the module so we can't import it without refactoring; re-declaring the tuple is fine for 3.1 scope, but leave the TODO above so a future test or refactor can hoist `TODOS_KEY` into a shared file).
+  - [x] Do NOT `preventDefault()` or `stopPropagation()`. The existing [useClosePopupOnEscape](frontend/src/hooks/useClosePopupOnEscape.ts) and the `Escape` branch of [usePondSearchKeyboard](frontend/src/hooks/usePondSearchKeyboard.ts) must keep firing on every Escape to preserve their own side-effects (close popup, clear search). Our hook is purely additive — it observes timestamps and dispatches reset, nothing else.
+  - [x] Mount the hook **once** in [PondScene.tsx](frontend/src/components/pond/PondScene.tsx) at the top of the component body, alongside the existing `usePondSearchKeyboard()` / `usePondSearchSync()` mount points. Do NOT mount inside `PondCamera` — that would tie keyboard-level concerns to the canvas-children render tree and break encapsulation.
+  - [x] Verify handler ordering is irrelevant: all three Escape listeners are plain `window.addEventListener('keydown', ...)` and fire in registration order, but none of them stop propagation. Each does its job independently. If a future change introduces `stopPropagation()` on any of them, re-evaluate ordering.
 
-- [ ] Task 5: Resize gate (AC: #6)
+- [ ] Task 5: Resize gate (AC: #6) — DEFERRED to reviewer (browser-only verification; no code expected to change)
   - [ ] No code changes expected. Manually verify in a browser: drag the window edge from wide → narrow → wide while the pond has pads. Confirm pads don't visibly jump, aspect ratio updates, and `OrbitControls` target stays put (the pond stays framed in the same world-space spot).
   - [ ] If and ONLY if a regression shows up (e.g., target drifts, aspect ratio stuck), add a comment in `PondCamera.tsx` documenting the observed bug and a minimal fix. Do not add speculative resize handling.
 
-- [ ] Task 6: Tests in `frontend/src/components/pond/PondCamera.test.tsx` (AC: #7)
-  - [ ] Mock `@react-three/fiber` (`Canvas`/`useFrame`/`useThree`) following [PondScene.test.tsx:8-22](frontend/src/components/pond/PondScene.test.tsx#L8-L22). Capture the function passed to `useFrame` so tests can invoke it synthetically (`const frameCallbacks: Array<() => void> = []; useFrame = (fn) => frameCallbacks.push(fn);`).
-  - [ ] Mock `@react-three/drei`'s `OrbitControls` to capture its props:
+- [x] Task 6: Tests in `frontend/src/components/pond/PondCamera.test.tsx` (AC: #7)
+  - [x] Mock `@react-three/fiber` (`Canvas`/`useFrame`/`useThree`) following [PondScene.test.tsx:8-22](frontend/src/components/pond/PondScene.test.tsx#L8-L22). Capture the function passed to `useFrame` so tests can invoke it synthetically (`const frameCallbacks: Array<() => void> = []; useFrame = (fn) => frameCallbacks.push(fn);`).
+  - [x] Mock `@react-three/drei`'s `OrbitControls` to capture its props:
     ```ts
     let orbitControlsProps: Record<string, unknown> = {};
     vi.mock('@react-three/drei', () => ({
@@ -335,79 +336,79 @@ So that I can navigate my pond spatially, recover from exploration, and never fe
       },
     }));
     ```
-  - [ ] Test case — **`OrbitControls` config props** (AC #1, #2, #3, #5):
+  - [x] Test case — **`OrbitControls` config props** (AC #1, #2, #3, #5):
     - Render `<PondCamera />`.
     - Assert `orbitControlsProps.maxPolarAngle === Math.PI / 2.2`.
     - Assert `orbitControlsProps.minDistance === 5` and `.maxDistance === 60`.
     - Assert `orbitControlsProps.enableDamping === true` and `.dampingFactor === 0.05`.
     - Assert `orbitControlsProps.enablePan === true` and `.zoomToCursor === true`.
     - Assert `orbitControlsProps.mouseButtons` matches `{ LEFT: THREE.MOUSE.PAN, MIDDLE: -1, RIGHT: THREE.MOUSE.ROTATE }`.
-  - [ ] Test case — **`requestCameraReset` store action** (AC #4, #7):
+  - [x] Test case — **`requestCameraReset` store action** (AC #4, #7):
     - Call `usePondStore.getState().requestCameraReset(fitA)` and `.requestCameraReset(fitB)`; assert `cameraResetRequestId` incremented by exactly 2; assert `pendingCameraFit === fitB` (latest wins — this is intentional; if a race sets two fits, the most recent is what PondCamera consumes).
     - Call `clearCameraResetRequest()`; assert `pendingCameraFit === null` but `cameraResetRequestId` is unchanged.
     - Assert `requestCameraReset` does NOT touch `cameraFocus` (set `cameraFocus` to a sentinel via `focusCamera(1, 2, 3)` first, then call `requestCameraReset(fit)`, assert `cameraFocus` is unchanged by the store action itself — the consumption in `useFrame` is where `cameraFocus` gets nulled, not inside the action).
-  - [ ] Test case — **`fitCameraToPads` pure helper** (`fitCameraToPads.test.ts`, AC #4):
+  - [x] Test case — **`fitCameraToPads` pure helper** (`fitCameraToPads.test.ts`, AC #4):
     - Empty list → returns `{ position: [0, 15, 20], target: [0, 0, 0] }`.
     - `[{ positionX: 0, positionY: 0, ... }]` (single pad at origin) → centroid `(0, 0)`, `distance = RESET_MIN_DISTANCE = 15`, position `(0, 15·cos(polar), 0 + 15·sin(polar)) ≈ (0, 9, 12)`, target `(0, 0, 0)`.
     - `[{ positionX: -5, positionY: -5 }, { positionX: 5, positionY: 5 }]` → centroid `(0, 0)`, diagonal `hypot(10, 10) ≈ 14.14`, `distance = max(15, 14.14·1.3) ≈ 18.38`, target `(0, 0, 0)`, position.y ≈ `18.38·0.6 = 11.03`.
     - Dispersed cluster with diagonal > `RESET_MAX_DISTANCE / RESET_BBOX_PADDING` — distance clamps at `RESET_MAX_DISTANCE = 60`.
     - Mixed list with some `positionX: null` or `positionY: null` → nulls filtered out, computation proceeds with the rest.
     - Centroid is **not** the origin when pads are clustered off-center: `[{ x: 10, z: 10 }, { x: 12, z: 12 }]` → centroid `(11, 11)`, target `(11, 0, 11)`, position `(11, ~9, 11 + ~12)`.
-  - [ ] Test case — **`screenSpacePanning` and `mouseButtons.MIDDLE` config** (AC #2, #8):
+  - [x] Test case — **`screenSpacePanning` and `mouseButtons.MIDDLE` config** (AC #2, #8):
     - Assert `orbitControlsProps.screenSpacePanning === false`.
-    - Assert `orbitControlsProps.mouseButtons.MIDDLE === -1`.
-  - [ ] Test case — **LMB click-no-drag on water is a no-op** (AC #2 click-to-centre retirement):
+    - Assert `orbitControlsProps.mouseButtons.MIDDLE === undefined` (MIDDLE omitted from the `mouseButtons` object so OrbitControls no-ops MMB, leaving it free for our own ascend/descend handler).
+  - [x] Test case — **LMB click-no-drag on water is a no-op** (AC #2 click-to-centre retirement):
     - Render `<PondCamera />`, dispatch a `pointerdown` + `pointerup` on the canvas with no intervening move (simulate click, not drag).
     - Capture `camera.position` before and after the click.
     - Assert `camera.position` is unchanged (not mutated by the retired lerp path).
     - Repeat with `activePopupTodoId = 'foo'` in the store — assert `closePopup` is called (the preserved popup-close path).
-  - [ ] Test case — **MMB-drag translates camera + target Y together** (AC #8):
+  - [x] Test case — **MMB-drag translates camera + target Y together** (AC #8):
     - Render `<PondCamera />`, capture the mock `controls` (from the `OrbitControls` stub or a separate mock target).
     - Set `camera.position.y = 10` and `controls.target.y = 0` (or whatever the mock starts at).
     - Dispatch `pointerdown` with `button = 1, clientY = 500` on the canvas; `pointermove` with `clientY = 400` on `window` (drag up 100 px); `pointerup` with `button = 1`.
     - Assert the delta applied to both `camera.position.y` and `controls.target.y` equals `100 * MMB_ASCEND_SENSITIVITY = 3.0` (within a floating-point epsilon).
-  - [ ] Test case — **MMB-descend clamps at `CAMERA_MIN_Y`** (AC #8):
+  - [x] Test case — **MMB-descend clamps at `CAMERA_MIN_Y`** (AC #8):
     - Set `camera.position.y = 1.0` (just above the floor).
     - Simulate MMB-drag downward far enough to want to descend by 5 units.
     - Assert `camera.position.y === CAMERA_MIN_Y` (clamped to 0.5, not -4.0).
     - Assert `controls.target.y` advanced by the truncated delta (`0.5 - 1.0 = -0.5`), not the full requested delta.
-  - [ ] Test case — **frame-level floor clamp** (AC #9):
+  - [x] Test case — **frame-level floor clamp** (AC #9):
     - Manually set `camera.position.y = -2.0` (simulate a bug that pushed it underwater).
     - Run the captured `useFrame` callback once.
     - Assert `camera.position.y === CAMERA_MIN_Y`.
     - Verify `controls.target.y` is NOT mutated by the frame-level clamp (only camera.y is floored).
-  - [ ] Test case — **double-Escape dispatches reset with computed fit** (`useCameraResetOnDoubleEscape.test.ts`, AC #4):
+  - [x] Test case — **double-Escape dispatches reset with computed fit** (`useCameraResetOnDoubleEscape.test.ts`, AC #4):
     - Set up a `QueryClient`, seed it with `queryClient.setQueryData(['todos', 'list'], [makeTodo({ positionX: 10, positionY: 10 })])`.
     - Mount a component that uses `useCameraResetOnDoubleEscape()` wrapped in `<QueryClientProvider client={queryClient}>`.
     - Dispatch a native `keydown` with `key='Escape'` on `window`. Assert `cameraResetRequestId` unchanged and `pendingCameraFit` still null (single ESC doesn't reset).
     - Mock `performance.now()` via `vi.useFakeTimers()` + `vi.setSystemTime()` OR by stubbing `performance.now` directly. Advance time by 300 ms.
     - Dispatch a second `keydown` with `key='Escape'`. Assert `cameraResetRequestId` incremented by 1, assert `pendingCameraFit` matches `fitCameraToPads([{ positionX: 10, positionY: 10 }])` (can import and call the helper directly to compute the expected fit).
-  - [ ] Test case — **double-Escape with empty cache falls back to default fit** (AC #4):
+  - [x] Test case — **double-Escape with empty cache falls back to default fit** (AC #4):
     - No seeded todos (or explicit empty array). Double-ESC. Assert `pendingCameraFit` equals the default fit (`{ position: [0, 15, 20], target: [0, 0, 0] }`).
-  - [ ] Test case — **Escape > 600 ms apart does NOT trigger reset** (AC #4):
+  - [x] Test case — **Escape > 600 ms apart does NOT trigger reset** (AC #4):
     - Dispatch ESC, advance mock time by 700 ms, dispatch ESC. Assert counter unchanged.
-  - [ ] Test case — **Escape inside an `<input>` is ignored** (AC #4 input guard):
+  - [x] Test case — **Escape inside an `<input>` is ignored** (AC #4 input guard):
     - Dispatch `keydown` with `key='Escape'` and `target` set to an `<input>` element. Repeat twice within 600 ms. Assert counter unchanged.
-  - [ ] Test case — **consume-on-trigger prevents triple-tap double-reset** (AC #4):
+  - [x] Test case — **consume-on-trigger prevents triple-tap double-reset** (AC #4):
     - Dispatch ESC, advance 100 ms, dispatch ESC (reset fires — counter = 1). Advance 100 ms, dispatch ESC. Assert counter is still 1 (the third ESC resets the timestamp; a fourth within window would be needed to fire again).
-  - [ ] Test case — **reset lerp converges to pendingCameraFit** (AC #4):
+  - [x] Test case — **reset lerp converges to pendingCameraFit** (AC #4):
     - Set `camera.position` to `(0, 5, 5)` and `controls.target` to `(-3, 0, -3)` on the mock (user orbited somewhere arbitrary).
     - Call `requestCameraReset({ position: [10, 9, 12], target: [10, 0, 0] })` (a fit pointing at a pad cluster near X=10).
     - Run the captured `useFrame` callback N times (e.g., 60 ticks = ~1 second at 60 fps).
     - Assert `camera.position.distanceTo(new Vector3(10, 9, 12)) < 0.1` and `controls.target.distanceTo(new Vector3(10, 0, 0)) < 0.1`.
     - Assert `pendingCameraFit === null` after arrival (cleared via `clearCameraResetRequest`).
     - One more frame tick does NOT change camera.position (animation finished).
-  - [ ] Test case — **wheel mid-reset cancels + clears pending fit** (AC #4):
+  - [x] Test case — **wheel mid-reset cancels + clears pending fit** (AC #4):
     - Call `requestCameraReset(someFit)`, run 3 frame ticks (partial progress toward the fit).
     - Dispatch a `wheel` event on the canvas.
     - Run 3 more frame ticks; assert `camera.position` does NOT converge to `someFit.position` (the reset was cancelled; `controls.update()` only runs from here on).
     - Assert `pendingCameraFit === null` (the cancellation path clears it so a subsequent equal-fit request is still seen as fresh by counter compare).
-  - [ ] Reset `usePondStore` state between tests (`beforeEach` → `setState` the counter back to 0) so tests stay independent.
+  - [x] Reset `usePondStore` state between tests (`beforeEach` → `setState` the counter back to 0) so tests stay independent.
 
-- [ ] Task 7: Full-suite verification + browser walkthrough (AC: #1–#9)
-  - [ ] `cd frontend && npx vitest run` — expect all pre-existing tests plus the new `PondCamera.test.tsx` + `useCameraResetOnDoubleEscape.test.ts` green.
-  - [ ] `cd frontend && npx tsc -b` — clean.
-  - [ ] Browser walkthrough (each bullet is a separate check):
+- [x] Task 7: Full-suite verification + browser walkthrough (AC: #1–#9) — code paths verified by unit tests; browser walkthrough DEFERRED to reviewer
+  - [x] `cd frontend && npx vitest run` — 171/171 green (145 pre-existing + 26 new: 8 fitCameraToPads + 7 hook + 11 PondCamera).
+  - [x] `cd frontend && npx tsc -b` — clean.
+  - [ ] Browser walkthrough (DEFERRED to reviewer — dev ran in a headless environment. Each bullet's code path is covered by a unit test where feasible; browser-only sensory checks remain):
     - [ ] Scroll mouse wheel over the pond — zoom smooths in and out with damping; try to zoom past min/max — stops at the clamp, no flicker.
     - [ ] **LMB-drag up on empty water** — pond slides forward (toward viewer). Drag down — pond slides back. Drag sideways — strafe. Release — damping eases out smoothly.
     - [ ] **LMB-click with no drag** on empty water — nothing happens (click-to-centre is retired). Open a popup then LMB-click outside — popup closes (preserved).
@@ -519,10 +520,54 @@ Architecture.md line 619–621 notes that atmosphere modes should eventually adj
 
 ### Agent Model Used
 
-(to be filled in by dev)
+Claude Opus 4.7 (1M context) via Claude Code / bmad-dev-story workflow.
 
 ### Debug Log References
 
+- Hook test initially failed on 5/7 cases because `lastEscapeTs = useRef(0)` made the first ESC look "within 600 ms of t=0". Fixed by seeding the ref to `Number.NEGATIVE_INFINITY`; also updated the consume-on-trigger path to reset to `NEGATIVE_INFINITY` for symmetry. Single commit of the fix alongside the test, all 7 hook tests then green.
+- Three.js warning "Multiple instances of Three.js being imported" fires during tests — pre-existing noise, not caused by this story. Noted for a future tooling-hygiene sweep.
+
 ### Completion Notes List
 
+- **AC #1 (zoom + damping)**: already wired in PondCamera.tsx from Story 1.2; verified via OrbitControls config-props test.
+- **AC #2 (ground-plane pan + click-to-centre retired)**: set `screenSpacePanning={false}` on OrbitControls; removed the two lines of click-to-centre lerp in `handlePointerUp` while preserving the popup-close branch; verified via two unit tests (click no-drag is a no-op; click with popup calls closePopup).
+- **AC #3 (orbit + underwater guard)**: already wired; verified maxPolarAngle via config-props test.
+- **AC #4 (double-Escape reset to fit-to-pads)**: new `fitCameraToPads` helper (pure, 8 tests) + new `useCameraResetOnDoubleEscape` hook (7 tests incl. double-tap timing, input guard, consume-on-trigger, empty-cache fallback) + reset-animation branch in `PondCamera.useFrame` driven by a new `pendingCameraFit` store slice + `cameraResetRequestId` counter (ref-compare; new requests restart animation). Verified via 3 PondCamera tests (convergence to fit, wheel cancellation clears fit, counter bump with null fit is a no-op).
+- **AC #5 (smooth damping)**: `enableDamping=true`, `dampingFactor=0.05` unchanged; covered by config-props test.
+- **AC #6 (window resize)**: no code changes needed; browser verification deferred to reviewer.
+- **AC #7 (test coverage)**: 27 new unit tests added (8 fitCameraToPads + 7 hook + 12 PondCamera) + 4 store-slice tests. Full suite 172/172 green, zero regressions. `tsc -b` clean. *(+1 PondCamera test from the 2026-04-22 CR patches for off-canvas MMB release; +1 `minPolarAngle` assertion inside the existing config-props test.)*
+- **AC #8 (MMB ascend/descend with floor)**: MMB pointerdown begins drag + `preventDefault`; pointermove on window tracks `clientY` delta; `delta = -dy * MMB_ASCEND_SENSITIVITY` applied to both `camera.position.y` and `controls.target.y` (rigid body); descend delta truncated when it would push camera.y below `CAMERA_MIN_Y = 0.5`. Verified via 3 PondCamera tests (ascend drag, descend-clamp, MMB-cancels-reset).
+- **AC #9 (frame-level floor)**: first op in `useFrame` is `if (camera.position.y < CAMERA_MIN_Y) camera.position.y = CAMERA_MIN_Y`. Verified via 2 PondCamera tests (below-floor clamps; above-floor no-op).
+- **Browser walkthrough (Task 7)**: headless dev environment; all bullets deferred to reviewer for browser-only sensory verification (damping feel, actual forward-drag behavior, underwater visual check). Every code path under a bullet has a unit test counterpart.
+- **Reserved bindings**: Shift+LMB click/drag left untouched per story spec (reserved for Epic 4.2 group selection).
+
 ### File List
+
+**New:**
+- `frontend/src/components/pond/fitCameraToPads.ts` — pure helper: pads → CameraFit. Reinstates the centroid + bbox-diagonal math from commit f4088d3, scoped to the reset path.
+- `frontend/src/components/pond/fitCameraToPads.test.ts` — 8 unit tests (empty, single pad, two pads, dispersed max-clamp, off-centre cluster, null-filter, polar-angle sanity check).
+- `frontend/src/components/pond/PondCamera.test.tsx` — 12 unit tests (config props incl. `minPolarAngle`-unset assertion, click-to-centre retirement, MMB ascend/descend + floor clamp + off-canvas pointerup cleanup, reset animation + fit, wheel-cancel, null-fit consumption, frame-level floor).
+- `frontend/src/hooks/useCameraResetOnDoubleEscape.ts` — double-Escape → compute fit from React Query cache → `requestCameraReset`.
+- `frontend/src/hooks/useCameraResetOnDoubleEscape.test.ts` — 7 unit tests (single ESC no-op, double ESC triggers, expired window, input guard, consume-on-trigger, empty cache, cleanup on unmount).
+
+**Modified:**
+- `frontend/src/components/pond/PondCamera.tsx` — hoisted DEFAULT_CAMERA_POSITION/TARGET + CAMERA_MIN_Y + MMB_ASCEND_SENSITIVITY + RESET_ARRIVE_THRESHOLD + pre-allocated reset Vector3 temporaries; added resetAnimating + lastResetRequestId + mmbDragPrevY refs; extended cancelAnimation to clear pendingCameraFit; added MMB branch to handlePointerDown/Up + new handlePointerMove + handleMmbOrCancel; added `screenSpacePanning={false}` to OrbitControls + removed MIDDLE from mouseButtons; added frame-level camera.y floor + reset-animation branch at top of useFrame; retired click-to-centre lerp in handlePointerUp.
+- `frontend/src/stores/usePondStore.ts` — imported CameraFit; added `cameraResetRequestId` + `pendingCameraFit` slices; added `requestCameraReset(fit)` + `clearCameraResetRequest()` actions.
+- `frontend/src/stores/usePondStore.test.ts` — added 4 tests covering the new slice + actions; extended beforeEach to reset the new slices.
+- `frontend/src/components/pond/PondScene.tsx` — imported + mounted `useCameraResetOnDoubleEscape()`; added pairing comment on the Canvas default-position prop.
+
+### Review Findings
+
+- [x] [Review][Patch] MMB pointerup off-canvas leaves `mmbDragPrevY` set — ghost drag persists. **Fix applied 2026-04-22:** added a window-level `pointerup` listener wired to `handleMmbOrCancel` (already covers `button === 1` and `pointercancel`). Off-canvas MMB release now clears `mmbDragPrevY` just like an on-canvas release. New regression test `MMB pointerup on window (off-canvas release) clears drag state` asserts that a subsequent `pointermove` does NOT continue translating the camera. [`frontend/src/components/pond/PondCamera.tsx`, `frontend/src/components/pond/PondCamera.test.tsx`]
+- [x] [Review][Patch] Story spec note (Task 1b) incorrectly said "Do NOT set to `undefined`"; correct approach is to omit `MIDDLE` from `mouseButtons` (what the code does). **Fix applied 2026-04-22:** corrected Task 1b note, AC #2 prose, AC #7 (Task 6) test-outline bullet to describe omission (drei passes `undefined` → OrbitControls no-ops MMB), matching the shipped implementation. [`_bmad-output/implementation-artifacts/3-1-interactive-camera-controls.md`]
+- [x] [Review][Patch] Config-props test missing `minPolarAngle` assertion (AC #3/#7 — should assert it is not set, confirming the default of 0 is preserved). **Fix applied 2026-04-22:** added `expect(orbitControlsProps.minPolarAngle).toBeUndefined()` to the existing config-props test; aligned Task 6 outline to document the new assertion. [`frontend/src/components/pond/PondCamera.test.tsx`, `_bmad-output/implementation-artifacts/3-1-interactive-camera-controls.md`]
+- [x] [Review][Defer → Fixed 2026-04-22] `mouseNDC` NDC computation used `window.innerWidth/innerHeight` instead of canvas `getBoundingClientRect`. Originally logged as deferred (pre-existing since Story 1.x), but promoted to a fix in the CR-patch cycle because the change is small, strictly-better, and makes the popup-close-on-water-click path robust to any future non-fullscreen canvas layout. `mockCanvas.getBoundingClientRect` stubbed in the test to a 1024×768 rect so JSDOM's default zeros don't make raycasts miss. deferred-work.md flipped to `[FIXED]`. [`frontend/src/components/pond/PondCamera.tsx` — `handlePointerUp`, `frontend/src/components/pond/PondCamera.test.tsx`]
+- [x] [Review][Defer] Module-scope mutable Vector3 singletons (`resetTargetPos`, `resetTargetTarget`, etc.) shared across multiple `PondCamera` instances — deferred, singleton in production; test isolation maintained by `resetMockState` [`frontend/src/components/pond/PondCamera.tsx`]
+
+### Change Log
+
+| Date       | Change                                                           | Author              |
+|------------|------------------------------------------------------------------|---------------------|
+| 2026-04-22 | Story 3.1 implementation complete; marked ready for review.      | Claude Opus 4.7     |
+| 2026-04-22 | Code review complete — 3 patches, 2 defers, ~20 dismissed.       | Claude Sonnet 4.6   |
+| 2026-04-22 | 3 CR patches applied (off-canvas MMB release, minPolarAngle assertion, spec-note correction) + defer #1 (canvas-relative NDC) promoted to fix; 1 defer remaining; 172/172 tests green. | Claude Opus 4.7     |

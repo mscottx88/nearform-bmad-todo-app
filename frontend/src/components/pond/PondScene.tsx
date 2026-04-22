@@ -8,6 +8,7 @@ import { useCompleteTodo } from '../../hooks/usePopupComplete';
 import { useDeleteTodoAction } from '../../hooks/usePopupDelete';
 import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
 import { usePondSearchSync } from '../../hooks/usePondSearchSync';
+import { useCameraResetOnDoubleEscape } from '../../hooks/useCameraResetOnDoubleEscape';
 import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
@@ -26,6 +27,9 @@ export function PondScene() {
   // side-effect-only; they don't change PondScene's render output.
   usePondSearchKeyboard();
   usePondSearchSync();
+  // Story 3.1 AC #4: double-Escape within 600ms → camera reset.
+  // Additive — does not interfere with the two Escape handlers above.
+  useCameraResetOnDoubleEscape();
 
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
@@ -150,6 +154,9 @@ export function PondScene() {
     <>
     <Canvas
       gl={{ antialias: true, alpha: false }}
+      // Default camera position MUST match DEFAULT_CAMERA_POSITION in
+      // PondCamera.tsx — the reset-animation fallback relies on this
+      // pairing. If you change one, change the other.
       camera={{ fov: 50, near: 0.1, far: 200, position: [0, 15, 20] }}
       style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh' }}
       onCreated={handleCreated}

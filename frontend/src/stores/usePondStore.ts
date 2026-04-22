@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AtmosphereMode, SearchHit, Todo } from '../types';
+import type { CameraFit } from '../components/pond/fitCameraToPads';
 
 const ATMOSPHERE_MODES: Array<AtmosphereMode | 'base'> = ['base', 'zen', 'cyberpunk'];
 
@@ -108,6 +109,16 @@ interface PondState {
    */
   colorPreviews: Map<string, string>;
 
+  // Story 3.1: camera-reset slices. `cameraResetRequestId` is a
+  // monotonically-increasing counter — only a *change* is the signal.
+  // The counter pattern (not a boolean flag) lets two back-to-back
+  // reset requests both fire fresh animations; a boolean would
+  // coalesce. `pendingCameraFit` holds the computed target pose
+  // consumed by PondCamera.useFrame on counter-bump and cleared on
+  // animation arrival or cancellation.
+  cameraResetRequestId: number;
+  pendingCameraFit: CameraFit | null;
+
   // Story 5.3: type-anywhere search slices.
   //
   // `searchQuery` is the raw text the user has typed (not yet
@@ -170,6 +181,20 @@ interface PondState {
   /** Reset the sampler to the no-op default (called by WaterSurface unmount). */
   unregisterElevationSampler: () => void;
   focusCamera: (x: number, z: number, zoom?: number) => void;
+  /**
+   * Story 3.1: request a camera-reset animation toward `fit`. Atomically
+   * bumps `cameraResetRequestId` and sets `pendingCameraFit`. PondCamera
+   * reads both on counter-change. Does NOT touch `cameraFocus` — that's
+   * PondCamera's responsibility to clear when it starts the reset lerp.
+   */
+  requestCameraReset: (fit: CameraFit) => void;
+  /**
+   * Story 3.1: clear `pendingCameraFit` (e.g. on animation arrival or
+   * user cancellation). Does NOT decrement `cameraResetRequestId` — the
+   * counter keeps its value so a subsequent request is still seen as
+   * fresh by PondCamera's ref-compare.
+   */
+  clearCameraResetRequest: () => void;
   openPopup: (todoId: string, x: number, z: number) => void;
   closePopup: () => void;
   startCompletion: (todo: Todo, creatureType: string, rarity: string) => void;
@@ -224,6 +249,8 @@ export const usePondStore = create<PondState>((set, get) => ({
   deletingTodos: new Map(),
   errorTodos: new Map(),
   colorPreviews: new Map(),
+  cameraResetRequestId: 0,
+  pendingCameraFit: null,
   searchQuery: '',
   searchActive: false,
   searchResults: new Map(),
@@ -261,6 +288,14 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   focusCamera: (x: number, z: number, zoom?: number) =>
     set({ cameraFocus: { x, z, zoom } }),
+
+  requestCameraReset: (fit) =>
+    set((state) => ({
+      cameraResetRequestId: state.cameraResetRequestId + 1,
+      pendingCameraFit: fit,
+    })),
+
+  clearCameraResetRequest: () => set({ pendingCameraFit: null }),
 
   openPopup: (todoId: string, x: number, z: number) => {
     set({ activePopupTodoId: todoId });
