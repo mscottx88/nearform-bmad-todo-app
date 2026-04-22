@@ -6,7 +6,7 @@ from src.config import settings
 from src.database import SessionLocal, get_db
 from src.main import app
 from src.models.creature import Creature
-from src.models.group import GroupMembership
+from src.models.group import Group, GroupMembership
 from src.models.todo import Todo
 from tests._safeguard import require_test_database
 
@@ -26,6 +26,7 @@ def _clean_db() -> None:  # type: ignore[misc]
     with SessionLocal() as session:
         session.query(Creature).delete()
         session.query(GroupMembership).delete()
+        session.query(Group).delete()
         session.query(Todo).delete()
         session.commit()
 

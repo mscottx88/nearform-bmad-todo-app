@@ -6,9 +6,36 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from src.exceptions import TodoNotFoundError
+from src.models.group import GroupMembership
 from src.models.todo import Todo
-from src.schemas.todo import TodoCreate, TodoUpdate
+from src.schemas.todo import TodoCreate, TodoResponse, TodoUpdate
 from src.workers import embedding_worker
+
+
+def _build_response(
+    todo: Todo,
+    group_id: uuid.UUID | None,
+) -> TodoResponse:
+    """Shape a Todo ORM row + its (optional) group membership into
+    a TodoResponse. Story 4.6 — `group_id` is not a column on the
+    Todo model; callers pass the join-table-derived value explicitly.
+    """
+    return TodoResponse.model_validate(
+        {**TodoResponse.model_validate(todo).model_dump(), "group_id": group_id}
+    )
+
+
+def _group_id_for(db: Session, todo_id: uuid.UUID) -> uuid.UUID | None:
+    """Single-row lookup of a pad's group membership. Returns None
+    for solo pads. Used by update/delete/restore/create paths where
+    we need to echo the current group_id back in the response.
+    """
+    row = (
+        db.query(GroupMembership.group_id)
+        .filter(GroupMembership.todo_id == todo_id)
+        .first()
+    )
+    return row[0] if row else None
 
 
 def _get_active_todo(
@@ -28,13 +55,15 @@ def _get_active_todo(
     return todo
 
 
-def create_todo(db: Session, data: TodoCreate) -> Todo:
+def create_todo(db: Session, data: TodoCreate) -> TodoResponse:
     todo = Todo(**data.model_dump(exclude_unset=True))
     db.add(todo)
     db.commit()
     db.refresh(todo)
     embedding_worker.enqueue_embedding(todo.id)
-    return todo
+    # New todos are always solo — no membership possible until a
+    # subsequent POST /api/groups references the id.
+    return _build_response(todo, None)
 
 
 def list_todos(
@@ -42,11 +71,16 @@ def list_todos(
     include_active: bool = True,
     include_completed: bool = False,
     include_deleted: bool = False,
-) -> list[Todo]:
+) -> list[TodoResponse]:
     # Story 3.3: flag-driven visibility. Defaults preserve the pre-3.3
     # contract (active-only) so every caller that hasn't opted in sees
     # exactly the same pond. `archived` is never surfaced (out of scope
     # for 3.3 — see story Dev Notes § "Archived is still out of scope").
+    #
+    # Story 4.6: also joins `GroupMembership` so each row carries its
+    # optional `group_id`. Left-outer-join so solo pads (no membership)
+    # still appear with `group_id = None`. The join is CHEAP — a
+    # single index hit per row on `group_memberships.todo_id` (PK).
     clauses: list[ColumnElement[bool]] = []
     if include_active:
         clauses.append(
@@ -63,8 +97,12 @@ def list_todos(
         # All three flags off → "show nothing" is a valid state. Do NOT
         # coerce to active-only; the empty pond is the feature.
         return []
-    return (
-        db.query(Todo)
+    rows = (
+        db.query(Todo, GroupMembership.group_id)
+        .outerjoin(
+            GroupMembership,
+            Todo.id == GroupMembership.todo_id,
+        )
         .filter(
             Todo.archived == False,  # noqa: E712
             or_(*clauses),
@@ -72,6 +110,7 @@ def list_todos(
         .order_by(Todo.created_at.desc())
         .all()
     )
+    return [_build_response(todo, gid) for todo, gid in rows]
 
 
 def get_todo(db: Session, todo_id: uuid.UUID) -> Todo:
@@ -82,25 +121,25 @@ def update_todo(
     db: Session,
     todo_id: uuid.UUID,
     data: TodoUpdate,
-) -> Todo:
+) -> TodoResponse:
     todo = _get_active_todo(db, todo_id)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(todo, field, value)
     db.commit()
     db.refresh(todo)
-    return todo
+    return _build_response(todo, _group_id_for(db, todo.id))
 
 
-def delete_todo(db: Session, todo_id: uuid.UUID) -> Todo:
+def delete_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
     todo = _get_active_todo(db, todo_id)
     todo.deleted = True
     todo.deleted_at = datetime.now(UTC)
     db.commit()
     db.refresh(todo)
-    return todo
+    return _build_response(todo, _group_id_for(db, todo.id))
 
 
-def restore_todo(db: Session, todo_id: uuid.UUID) -> Todo:
+def restore_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
     # Story 3.3: flip `deleted=false` on a soft-deleted todo so it
     # re-surfaces as an active pad. Bypasses the `_get_active_todo`
     # filter (which rejects deleted rows) by querying directly. No-op
@@ -112,4 +151,4 @@ def restore_todo(db: Session, todo_id: uuid.UUID) -> Todo:
     todo.deleted_at = None
     db.commit()
     db.refresh(todo)
-    return todo
+    return _build_response(todo, _group_id_for(db, todo.id))

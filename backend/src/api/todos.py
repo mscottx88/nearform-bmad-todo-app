@@ -19,8 +19,7 @@ def create_todo(
     data: TodoCreate,
     db: Session = Depends(get_db),
 ) -> TodoResponse:
-    todo = todo_service.create_todo(db, data)
-    return TodoResponse.model_validate(todo)
+    return todo_service.create_todo(db, data)
 
 
 @router.get("", response_model=list[TodoResponse])
@@ -31,13 +30,12 @@ def list_todos(
     db: Session = Depends(get_db),
 ) -> list[TodoResponse]:
     # Story 3.3: flag-driven visibility. Defaults preserve pre-3.3 contract.
-    todos = todo_service.list_todos(
+    return todo_service.list_todos(
         db,
         include_active=include_active,
         include_completed=include_completed,
         include_deleted=include_deleted,
     )
-    return [TodoResponse.model_validate(t) for t in todos]
 
 
 @router.patch(
@@ -49,8 +47,7 @@ def update_todo(
     data: TodoUpdate,
     db: Session = Depends(get_db),
 ) -> TodoResponse:
-    todo = todo_service.update_todo(db, todo_id, data)
-    return TodoResponse.model_validate(todo)
+    return todo_service.update_todo(db, todo_id, data)
 
 
 @router.delete(
@@ -61,8 +58,7 @@ def delete_todo(
     todo_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> TodoResponse:
-    todo = todo_service.delete_todo(db, todo_id)
-    return TodoResponse.model_validate(todo)
+    return todo_service.delete_todo(db, todo_id)
 
 
 @router.post(
@@ -76,5 +72,4 @@ def restore_todo(
     # Story 3.3: undelete a soft-deleted todo so it re-surfaces as
     # active. The popup on a deleted pad uses this instead of the
     # PATCH flow because PATCH's `_get_active_todo` rejects deleted rows.
-    todo = todo_service.restore_todo(db, todo_id)
-    return TodoResponse.model_validate(todo)
+    return todo_service.restore_todo(db, todo_id)

@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-22 # 4.2 drag + /spread-out implemented; moved to review
+last_updated: 2026-04-22 # 4.6 backend tasks 1+2 complete; 141/141 tests green
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,7 @@ development_status:
   4-3-position-persistence: backlog
   4-4-frontend-a11y-sweep: backlog  # promoted from 2-3/2-7 CR defers — prefers-reduced-motion honoured across LilyPad animations; popup ARIA/dialog semantics + focus trap + Escape-to-close + keyboard-navigable action buttons; SVG callout pointer-events fix
   4-5-react-strict-compliance-sweep: backlog  # promoted from 2-7 CR defer — fix ref mutations/reads during render in PondScene (hasSeenInitialLoadRef) and similar patterns; verify by running the app under <StrictMode> and checking the console is clean
-  4-6-lily-pad-clustering-and-groups: ready-for-dev  # SelectionPopup at centroid (Group/Ungroup/Spread Out/Label); cluster glow ring; cluster drag rigid unit; auto-spread on join/leave; /spread-out group aware; no new migration
+  4-6-lily-pad-clustering-and-groups: in-progress  # SelectionPopup at centroid (Group/Ungroup/Spread Out/Label); cluster glow ring; cluster drag rigid unit; auto-spread on join/leave; /spread-out group aware; no new migration
   epic-4-retrospective: pending
 
   # Epic 5: Intelligent Search

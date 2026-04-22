@@ -57,3 +57,10 @@ class TodoResponse(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # Story 4.6: optional group membership. Populated via the
+    # list_todos outer-join against group_memberships; null for
+    # solo pads. The Todo ORM model itself has no group_id column
+    # (membership lives in the separate join table) so this field
+    # is ALWAYS set explicitly by the service — pydantic's
+    # from_attributes mode does NOT auto-populate it.
+    group_id: uuid.UUID | None = None

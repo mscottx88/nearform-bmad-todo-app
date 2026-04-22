@@ -1,6 +1,6 @@
 # Story 4.6: Lily Pad Clustering & Groups
 
-Status: ready-for-dev
+Status: in-progress
 
 > **Scope note — the deferred grouping system from original Epic 4.2.** PRD FR10–FR12 (group pads, ungroup, cluster label) plus the cluster-drag and drag-in/out-of-clusters portion of FR13. The basic single-pad drag landed in Story 4.2.
 >
@@ -152,8 +152,8 @@ As a user, I want to group lily pads via the existing Action Popup — seeing gr
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: Backend — schemas and service** (AC: #26–#29)
-  - [ ] Create [backend/src/schemas/group.py](backend/src/schemas/group.py):
+- [x] **Task 1: Backend — schemas and service** (AC: #26–#29)
+  - [x] Create [backend/src/schemas/group.py](backend/src/schemas/group.py):
     ```python
     import uuid
     from datetime import datetime
@@ -174,19 +174,19 @@ As a user, I want to group lily pads via the existing Action Popup — seeing gr
         member_ids: list[uuid.UUID]
         created_at: datetime
     ```
-  - [ ] Create [backend/src/services/group_service.py](backend/src/services/group_service.py) (all sync, `db: Session`):
+  - [x] Create [backend/src/services/group_service.py](backend/src/services/group_service.py) (all sync, `db: Session`):
     - `create_group(db, data: GroupCreate) -> GroupResponse` — validate no member already in a group; insert `Group` + `GroupMembership` rows; commit; return `GroupResponse`.
     - `get_group(db, group_id: uuid.UUID) -> Group` — raises `GroupNotFoundError`.
     - `update_group(db, group_id: uuid.UUID, data: GroupUpdate) -> GroupResponse` — partial update; for `member_ids`, delete old rows then insert new.
     - `delete_group(db, group_id: uuid.UUID) -> None` — delete `Group` row; CASCADE handles memberships.
-  - [ ] Extend `todo_service.list_todos` to return `group_id` via left-join on `GroupMembership` (see Dev Notes).
-  - [ ] Add `group_id: uuid.UUID | None = None` to `backend/src/schemas/todo.py:TodoResponse`.
-  - [ ] Write `backend/tests/services/test_group_service.py`: create round-trip, create fails if member already grouped, update label only, update member_ids replaces set, delete removes group (todos stay), `list_todos` includes `group_id`.
+  - [x] Extend `todo_service.list_todos` to return `group_id` via left-join on `GroupMembership` (see Dev Notes).
+  - [x] Add `group_id: uuid.UUID | None = None` to `backend/src/schemas/todo.py:TodoResponse`.
+  - [x] Write `backend/tests/services/test_group_service.py`: create round-trip, create fails if member already grouped, update label only, update member_ids replaces set, delete removes group (todos stay), `list_todos` includes `group_id`.
 
-- [ ] **Task 2: Backend — API router** (AC: #26–#28)
-  - [ ] Create [backend/src/api/groups.py](backend/src/api/groups.py) with `POST`, `PATCH /{group_id}`, `DELETE /{group_id}`. All sync route handlers.
-  - [ ] Wire `groups.router` into [backend/src/main.py](backend/src/main.py).
-  - [ ] Write `backend/tests/api/test_groups.py`: POST creates → 201; POST with already-grouped member → 400; PATCH label → 200; PATCH member_ids → 200; DELETE → 204; DELETE missing → 404.
+- [x] **Task 2: Backend — API router** (AC: #26–#28)
+  - [x] Create [backend/src/api/groups.py](backend/src/api/groups.py) with `POST`, `PATCH /{group_id}`, `DELETE /{group_id}`. All sync route handlers.
+  - [x] Wire `groups.router` into [backend/src/main.py](backend/src/main.py).
+  - [x] Write `backend/tests/api/test_groups.py`: POST creates → 201; POST with already-grouped member → 400; PATCH label → 200; PATCH member_ids → 200; DELETE → 204; DELETE missing → 404.
 
 - [ ] **Task 3: Frontend — types + API hooks** (AC: #4, #6–#8, #18–#25, #30)
   - [ ] Add `groupId: string | null` to `frontend/src/types/index.ts:Todo`.
@@ -527,11 +527,21 @@ The backend service rejects `POST /api/groups` if any `member_id` is already in 
 
 ## Dev Agent Record
 
-_To be completed during implementation._
-
 ### Implementation Notes
 
+**Backend (Tasks 1+2) — 2026-04-22.** Schemas, service, and router all landed per spec. Key calls made beyond the spec:
+
+- **Service floor on `member_ids` is 2 (both on POST and PATCH).** A group of one is meaningless UI, so the service rejects with `group_too_small` at the boundary rather than letting it persist. The Ungroup flow in the frontend handles the "reducing to 1" case by calling DELETE instead of PATCH (consistent with AC #6).
+- **Added `GroupTooSmallError` to `exceptions.py`** (not explicitly listed in the story, but needed to keep validation errors typed — the `AppError` global handler renders a stable envelope, which the frontend already relies on).
+- **`TodoResponse.group_id` propagates through ALL mutation paths, not just `list_todos`.** `update_todo`, `delete_todo`, and `restore_todo` now return `TodoResponse` (was raw `Todo` ORM) with `group_id` populated via a new `_group_id_for` helper. Without this, PATCHing a grouped pad's position would flash `group_id: null` into the React Query cache until the next list refetch landed. Router is correspondingly simpler (no more `TodoResponse.model_validate(t)` calls — service returns the right shape).
+- **`_require_todos_exist` also rejects soft-deleted todos.** Soft-deleted pads are invisible in the UI; letting them into a group would render a ghost member. The guard lives in a shared private helper so both create and update enforce it.
+- **`conftest.py` now cleans `Group` rows too.** Previously only `GroupMembership` was wiped between tests — with groups surviving across tests, the `member_already_grouped` guard would false-positive depending on test ordering.
+
+**Quality gate:** 141/141 backend tests green (27 new — 16 service + 11 API). `ruff check src/` + `ruff format --check src/` clean. `mypy src/ --strict` clean (28 files, no issues).
+
 ### Debug Log
+
+- One `ruff format` reformat on `group_service.py` (89-char lines wrapped by black-compatible formatter) — fixed in place.
 
 ### Completion Checklist
 
