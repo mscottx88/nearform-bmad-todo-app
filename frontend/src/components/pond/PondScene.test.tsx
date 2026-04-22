@@ -63,6 +63,10 @@ vi.mock('./ClusterLabel', () => ({
   ),
 }));
 
+vi.mock('./ClusterHalo', () => ({
+  ClusterHalo: () => null,
+}));
+
 vi.mock('./ClusterDragHandle', () => ({
   ClusterDragHandle: () => null,
 }));

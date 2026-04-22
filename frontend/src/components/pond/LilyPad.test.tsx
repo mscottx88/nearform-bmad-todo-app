@@ -397,21 +397,22 @@ describe('LilyPad', () => {
     });
   });
 
-  // ─── Story 4.6: cluster glow ring (AC #11) ───
-  describe('cluster glow ring (AC #11)', () => {
-    it('renders one GlowSource (primary halo) when groupId is null', () => {
-      const { container } = render(
+  // ─── Story 4.6: cluster ring (AC #11) ───
+  // The ring around a group is rendered by ClusterHalo (scene-level), not
+  // by a second per-pad GlowSource. LilyPad renders one GlowSource always.
+  describe('cluster ring (AC #11)', () => {
+    it('renders exactly one GlowSource regardless of groupId', () => {
+      const { container: c1 } = render(
         <LilyPad todo={{ ...mockTodo, groupId: null }} />,
       );
-      // Each GlowSource renders one circlegeometry element.
-      expect(container.querySelectorAll('circlegeometry')).toHaveLength(1);
+      expect(c1.querySelectorAll('circlegeometry')).toHaveLength(1);
     });
 
-    it('renders two GlowSources (primary + cluster ring) when groupId is set', () => {
-      const { container } = render(
+    it('renders exactly one GlowSource when groupId is set (ring is ClusterHalo)', () => {
+      const { container: c2 } = render(
         <LilyPad todo={{ ...mockTodo, groupId: 'group-abc' }} />,
       );
-      expect(container.querySelectorAll('circlegeometry')).toHaveLength(2);
+      expect(c2.querySelectorAll('circlegeometry')).toHaveLength(1);
     });
   });
 });

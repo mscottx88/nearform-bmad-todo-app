@@ -48,7 +48,14 @@ export function registerSpreadOutCommand(
     project: (world) => world,
     execute: () => {
       const todos = getTodos();
-      const targets = computeSpreadPositions(todos, new Map());
+      // Story 4.6 Task 15 (AC #30): pass real group memberships so grouped
+      // pads move as rigid units. Non-grouped pads map to nothing (omitted).
+      const groupings = new Map(
+        todos
+          .filter((t) => t.groupId != null)
+          .map((t) => [t.id, t.groupId!]),
+      );
+      const targets = computeSpreadPositions(todos, groupings);
       if (targets.size > 0) {
         usePondStore.getState().setTargetPositions(targets);
       }

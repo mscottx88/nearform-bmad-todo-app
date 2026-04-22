@@ -19,6 +19,7 @@ import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
 import { ClusterLabel } from './ClusterLabel';
+import { ClusterHalo } from './ClusterHalo';
 import { ClusterDragHandle } from './ClusterDragHandle';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
@@ -269,6 +270,14 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
+      {/* Story 4.6 AC #11: single neon-cyan ring encircling each group.
+          One ClusterHalo per group, updated each frame via useFrame. */}
+      {Array.from(groups.keys()).map((gid) => {
+        const memberPositions = renderTodos
+          .filter((t) => t.groupId === gid)
+          .map((t) => ({ x: t.positionX ?? 0, z: t.positionY ?? 0 }));
+        return <ClusterHalo key={gid} memberPositions={memberPositions} />;
+      })}
       {/* Story 4.6 AC #12: floating cluster labels. One per group with a
           non-null label; each projects its centroid to screen each frame. */}
       {Array.from(groups.entries())
