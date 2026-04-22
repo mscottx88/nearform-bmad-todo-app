@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-22 # stories 4.2 + 4.6 created — drag/spread-out and clustering/groups
+last_updated: 2026-04-22 # stories 4.2 + 4.6 + 5.6 created — drag/spread-out, clustering/groups, cluster-aware search (FR20)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -102,6 +102,7 @@ development_status:
   5-3-type-anywhere-search-with-surface-submerge: done  # CR applied 8 patches (stale search state, backspace derived reset, whitespace-only skip, substring safeguard tightening, explicit ftsSupported check, sqrt NaN guard, 500-char cap, spec-text drift); 141/141 frontend + 96/96 backend
   5-4-re-embed-on-text-update: backlog  # promoted from 5-1 CR defer — PATCH /api/todos with new text must reset embedding_status to pending and re-enqueue
   5-5-embedding-reaper-for-pending-rows: backlog  # promoted from 5-1 CR defer — startup or scheduled scan that re-enqueues stuck embedding_status='pending' rows older than a threshold
+  5-6-cluster-aware-search: ready-for-dev  # FR20: matched clusters surface as units; non-matching siblings at 0.35 saturation; matchingGroupIds store slice; depends on story 4.6
   epic-5-retrospective: pending
 
   # Epic 6: REMOVED (2026-04-16) — trash lizard, auto-archive, and first-run tutorial dropped from scope per PRD simplification
