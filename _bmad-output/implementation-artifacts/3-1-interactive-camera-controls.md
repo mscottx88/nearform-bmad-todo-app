@@ -1,6 +1,6 @@
 # Story 3.1: Interactive Camera Controls
 
-Status: review
+Status: done
 
 > **Scope note:** First story of Epic 3 "Exploring the Pond". Fulfils PRD FR30 (orbit/zoom/pan) and FR31 (camera reset to default — trigger changed from epics.md's "double-click empty water" to **double-Escape** per Dev Notes rationale). **Partially wired** in [frontend/src/components/pond/PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx) from Story 1.2 — damping, min/max zoom, polar-angle constraint, LEFT=pan, RIGHT=orbit are present but **pan is broken** (screen-space instead of ground-plane, so forward/back mouse-drag doesn't work). Net-new work:
 > 1. Fix LMB pan to ground-plane (`screenSpacePanning={false}`) so drag-up = forward (AC #2).
@@ -571,3 +571,4 @@ Claude Opus 4.7 (1M context) via Claude Code / bmad-dev-story workflow.
 | 2026-04-22 | Story 3.1 implementation complete; marked ready for review.      | Claude Opus 4.7     |
 | 2026-04-22 | Code review complete — 3 patches, 2 defers, ~20 dismissed.       | Claude Sonnet 4.6   |
 | 2026-04-22 | 3 CR patches applied (off-canvas MMB release, minPolarAngle assertion, spec-note correction) + defer #1 (canvas-relative NDC) promoted to fix; 1 defer remaining; 172/172 tests green. | Claude Opus 4.7     |
+| 2026-04-22 | Story closed (review -> done); all CR patches applied, defer #1 fixed (48619b2), defer #2 remains [OPEN] with logged rationale. | Claude Opus 4.7     |
