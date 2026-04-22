@@ -235,6 +235,18 @@ export function ActionPopup({
               ),
             )}
           </button>
+          {/* Pad color swatch — immediately below the Set Color button. */}
+          {swatchOpen && (
+            <PopupColorSwatch
+              committedColor={todo.color || '#00ff88'}
+              onHover={setPreviewColor}
+              onCommit={(color) => {
+                onCommitColor(color);
+                collapse();
+              }}
+              onCollapse={collapse}
+            />
+          )}
           {/* Story 4.6: Group button only shows for non-grouped pads.
               Disabled (aria-disabled + pointer-events:none) when no
               other pads are selected — the user must Shift/Ctrl-click
@@ -330,22 +342,6 @@ export function ActionPopup({
                 )}
               </div>
             </>
-          )}
-          {/* Story 4.1: inline swatch sub-panel. Rendered as a child of
-              the panel root so it inherits the pointer-event absorption
-              (AC #9). Conditional render so the keyboard Escape handler
-              inside PopupColorSwatch is only mounted when the panel is
-              actually open. */}
-          {swatchOpen && (
-            <PopupColorSwatch
-              committedColor={todo.color || '#00ff88'}
-              onHover={setPreviewColor}
-              onCommit={(color) => {
-                onCommitColor(color);
-                collapse();
-              }}
-              onCollapse={collapse}
-            />
           )}
         </div>
       </div>
