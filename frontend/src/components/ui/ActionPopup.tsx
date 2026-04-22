@@ -122,8 +122,8 @@ export function ActionPopup({
   return (
     <Html
       position={[todo.positionX ?? 0, 0.4, todo.positionY ?? 0]}
-      zIndexRange={[100, 0]}
-      style={{ pointerEvents: 'none' }}
+      zIndexRange={[16777271, 0]}
+      style={{ pointerEvents: 'none', zIndex: 9999 }}
     >
       <div className="action-popup">
         <svg
