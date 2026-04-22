@@ -74,11 +74,14 @@ export function PondScene() {
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup();
   const deleteGroup = useDeleteGroup();
-  // Session-local caches for group metadata. Updated from mutation onSuccess
-  // so inputs pre-fill correctly after the user sets a value.
-  // Key = groupId, value = latest known label / color (null if explicitly cleared).
-  const groupLabelCacheRef = useRef<Map<string, string | null>>(new Map());
-  const groupColorCacheRef = useRef<Map<string, string | null>>(new Map());
+  // Session-local caches for group metadata. Stored as state (not refs)
+  // so that updating them triggers a re-render and the `groups` useMemo
+  // below re-runs. A ref would not work: React Query's structural sharing
+  // returns the same `todos` reference when only group fields change (no
+  // todo columns are mutated), so `renderTodos` stays stable and the
+  // useMemo wouldn't fire on a cache-only change.
+  const [groupLabels, setGroupLabels] = useState<Map<string, string | null>>(new Map());
+  const [groupColors, setGroupColors] = useState<Map<string, string | null>>(new Map());
 
   // Story 2.6 AC #1, #3: the initial staggered cascade is a ONE-SHOT — once
   // the first non-empty data set has been rendered, any subsequent mount
@@ -136,7 +139,7 @@ export function PondScene() {
 
   // Story 4.6: derive group metadata from the live todo list. The backend
   // returns `group_id` on each todo but not the group label. Labels are
-  // cached session-locally in `groupLabelCacheRef` and updated from
+  // cached session-locally in `groupLabels` state and updated from
   // mutation onSuccess callbacks so the Label input pre-fills correctly.
   const groups = useMemo<Map<string, Group>>(() => {
     const map = new Map<string, Group>();
@@ -145,8 +148,8 @@ export function PondScene() {
         const members = renderTodos.filter((t) => t.groupId === todo.groupId);
         map.set(todo.groupId, {
           id: todo.groupId,
-          label: groupLabelCacheRef.current.get(todo.groupId) ?? null,
-          color: groupColorCacheRef.current.get(todo.groupId) ?? null,
+          label: groupLabels.get(todo.groupId) ?? null,
+          color: groupColors.get(todo.groupId) ?? null,
           positionX: null,
           positionY: null,
           createdAt: '',
@@ -155,7 +158,7 @@ export function PondScene() {
       }
     }
     return map;
-  }, [renderTodos]);
+  }, [renderTodos, groupLabels, groupColors]);
 
   if (glError) {
     return (
@@ -382,7 +385,7 @@ export function PondScene() {
               { memberIds },
               {
                 onSuccess: (group) => {
-                  groupLabelCacheRef.current.set(group.id, group.label);
+                  setGroupLabels((prev) => new Map(prev).set(group.id, group.label));
                   autoSpread(renderTodos.filter((t) => memberIds.includes(t.id)));
                 },
               },
@@ -438,7 +441,7 @@ export function PondScene() {
               { id: gid, label },
               {
                 onSuccess: (group) => {
-                  groupLabelCacheRef.current.set(group.id, group.label);
+                  setGroupLabels((prev) => new Map(prev).set(group.id, group.label));
                 },
               },
             );
@@ -449,7 +452,7 @@ export function PondScene() {
               { id: gid, color },
               {
                 onSuccess: (group) => {
-                  groupColorCacheRef.current.set(group.id, group.color);
+                  setGroupColors((prev) => new Map(prev).set(group.id, group.color));
                 },
               },
             );
