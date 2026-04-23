@@ -672,6 +672,7 @@ export function LilyPad({
     // paths.
     if (errorEntry) {
       stickyDragRef.current = false;
+      restStartTime.current = 0;
       return;
     }
     const px = todo.positionX ?? 0;
@@ -682,6 +683,16 @@ export function LilyPad({
       Math.abs(py - target.z) < SPREAD_ARRIVE_THRESHOLD
     ) {
       stickyDragRef.current = false;
+      // Jitter-fix (2026-04-23): reset the resting-phase clock so the
+      // drift amplitude ramps from 0 over ~3s again. Without this, a
+      // pad that was pinned (sticky) through a drag would start
+      // drifting at FULL 0.08/0.06-unit amplitude the moment sticky
+      // cleared — several freshly-committed pads simultaneously
+      // resuming full-amplitude drift reads as collective jitter.
+      // Resetting restartTime reads as "these pads just landed and
+      // are still settling in" even though all the physics has
+      // already resolved.
+      restStartTime.current = 0;
     }
   }, [todo.positionX, todo.positionY, errorEntry]);
 
