@@ -137,10 +137,6 @@ vi.mock('../../stores/usePondStore', () => ({
   // selection-visual branch (useFrame oscillation) is therefore
   // inactive for these tests.
   selectIsSelected: () => () => false,
-  // Story 4.6: pop animation is inactive by default — no pending pop
-  // for this pad. Individual tests drive the branch by re-mocking
-  // this selector (see "pop animation" describe block below).
-  selectPendingPop: () => () => undefined,
 }));
 
 const mockTodo: Todo = {

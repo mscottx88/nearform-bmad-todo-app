@@ -29,7 +29,6 @@ function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
     deletedAt: null,
     createdAt: '2026-04-16T00:00:00Z',
     updatedAt: '2026-04-16T00:00:00Z',
-    groupId: null,
     ...overrides,
   };
 }

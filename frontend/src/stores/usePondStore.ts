@@ -519,23 +519,6 @@ export const usePondStore = create<PondState>((set, get) => ({
     }
   },
 
-  setGroupColorPreview: (groupId: string, color: string | null) => {
-    // Mirrors setColorPreview — identity-preserving no-op when the
-    // desired state is already in place.
-    const current = get().groupColorPreviews;
-    if (color === null) {
-      if (!current.has(groupId)) return;
-      const next = new Map(current);
-      next.delete(groupId);
-      set({ groupColorPreviews: next });
-    } else {
-      if (current.get(groupId) === color) return;
-      const next = new Map(current);
-      next.set(groupId, color);
-      set({ groupColorPreviews: next });
-    }
-  },
-
   // Story 5.3: search actions.
   appendSearchChar: (ch: string) =>
     set((state) => {
