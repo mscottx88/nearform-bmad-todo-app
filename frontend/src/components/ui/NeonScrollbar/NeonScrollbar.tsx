@@ -41,6 +41,20 @@ interface NeonScrollbarProps {
   virtualYLoadedCount?: number;
   /** Called on track click / drag-release with target 0-based item index. */
   onVirtualYNavigate?: (targetRow: number) => void;
+  /**
+   * Fired when the thumb enters or leaves hover state. Consumers in
+   * this repo use it to swap the firefly cursor to the frog-hand
+   * grab glyph while the cursor is over a draggable thumb. Optional
+   * — the rag-csv-crew source does not use this and can safely omit.
+   */
+  onThumbHover?: (hovered: boolean) => void;
+  /**
+   * Fired at thumb drag-start and drag-end (vertical thumb only —
+   * horizontal is infrequent and not draggable in our current
+   * layouts). Consumers swap cursorMode to 'grabbing' during drag
+   * and back to 'grab' on release.
+   */
+  onThumbDrag?: (dragging: boolean) => void;
 }
 
 const MIN_THUMB_PX = 28;
@@ -58,6 +72,8 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   virtualYStart,
   virtualYLoadedCount,
   onVirtualYNavigate,
+  onThumbHover,
+  onThumbDrag,
 }) => {
   const innerRef = useRef<HTMLDivElement | null>(null);
   const thumbYRef = useRef<HTMLDivElement>(null);
@@ -71,6 +87,8 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   const virtualYStartRef = useRef(0);
   const virtualYLoadedCountRef = useRef(0);
   const onVirtualYNavigateRef = useRef(onVirtualYNavigate);
+  const onThumbHoverRef = useRef(onThumbHover);
+  const onThumbDragRef = useRef(onThumbDrag);
   const virtualStateRef = useRef<{ thumbH: number; visibleRows: number } | null>(null);
   const isDraggingVirtualRef = useRef(false);
 
@@ -79,6 +97,8 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   virtualYStartRef.current = virtualYStart ?? 0;
   virtualYLoadedCountRef.current = virtualYLoadedCount ?? 0;
   onVirtualYNavigateRef.current = onVirtualYNavigate;
+  onThumbHoverRef.current = onThumbHover;
+  onThumbDragRef.current = onThumbDrag;
 
   const setInnerRef = useCallback(
     (el: HTMLDivElement | null): void => {
@@ -273,6 +293,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
         dragStartScroll = inner.scrollTop;
       }
       document.body.style.userSelect = 'none';
+      onThumbDragRef.current?.(true);
     };
 
     const onMouseMove = (e: MouseEvent): void => {
@@ -308,13 +329,25 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       }
       isVirtual = false;
       isDraggingVirtualRef.current = false;
+      onThumbDragRef.current?.(false);
     };
+
+    // Hover callbacks — consumers use these to swap the app's custom
+    // cursor glyph (e.g. firefly → frog hand) while the thumb is
+    // under the pointer. Separate from drag so a brief hover without
+    // a click still emits the grab affordance.
+    const onThumbEnter = (): void => onThumbHoverRef.current?.(true);
+    const onThumbLeave = (): void => onThumbHoverRef.current?.(false);
+    thumbY.addEventListener('mouseenter', onThumbEnter);
+    thumbY.addEventListener('mouseleave', onThumbLeave);
 
     thumbY.addEventListener('mousedown', onMouseDown);
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
 
     return (): void => {
+      thumbY.removeEventListener('mouseenter', onThumbEnter);
+      thumbY.removeEventListener('mouseleave', onThumbLeave);
       thumbY.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);

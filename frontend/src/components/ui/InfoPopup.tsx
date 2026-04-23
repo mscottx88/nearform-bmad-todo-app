@@ -133,7 +133,11 @@ export function InfoPopup({
   const [editText, setEditText] = useState(todo.text);
   const EDITOR_DEFAULT_HEIGHT = 180;
   const EDITOR_MIN_HEIGHT = 80;
-  const EDITOR_MAX_HEIGHT = 480;
+  // Max resize height is viewport-relative so the user can stretch
+  // the editor across most of the screen when composing long text.
+  // The fallback covers SSR / jsdom (tests) where window is absent.
+  const EDITOR_MAX_HEIGHT =
+    typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 160) : 800;
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
   // Keep editText in sync with the incoming todo while NOT editing —
@@ -224,7 +228,9 @@ export function InfoPopup({
   // the drag stays locked to the handle even when the cursor (and
   // the handle itself, which moves as the panel reflows) can't
   // perfectly track each other — gets rid of the "clunky" feel of
-  // window-level listeners lagging a fast drag.
+  // window-level listeners lagging a fast drag. Also swaps the
+  // app-wide cursorMode to 'grabbing' during drag so the frog-hand
+  // glyph reads as "gripping" through the whole gesture.
   const handleEditorResizeStart = (e: React.PointerEvent<HTMLDivElement>): void => {
     e.stopPropagation();
     e.preventDefault();
@@ -236,6 +242,7 @@ export function InfoPopup({
       // listeners below still fire via standard event propagation.
     }
     editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
+    usePondStore.getState().setCursorMode('grabbing');
     const onMove = (ev: PointerEvent): void => {
       const start = editorResizeRef.current;
       if (!start) return;
@@ -252,10 +259,26 @@ export function InfoPopup({
       handle.removeEventListener('pointermove', onMove);
       handle.removeEventListener('pointerup', onUp);
       handle.removeEventListener('pointercancel', onUp);
+      // Revert to 'grab' on release — if the cursor is no longer
+      // over the handle, the subsequent pointerLeave on the handle
+      // will flip back to 'firefly'.
+      usePondStore.getState().setCursorMode('grab');
     };
     handle.addEventListener('pointermove', onMove);
     handle.addEventListener('pointerup', onUp);
     handle.addEventListener('pointercancel', onUp);
+  };
+
+  // Pointer hover handlers on the resize handle — mirror LilyPad's
+  // firefly ↔ grab swap so the frog hand appears as soon as the
+  // cursor enters the handle, not just during an active drag.
+  const handleEditorResizeEnter = (): void => {
+    const store = usePondStore.getState();
+    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
+  };
+  const handleEditorResizeLeave = (): void => {
+    const store = usePondStore.getState();
+    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
   };
 
   return (
@@ -297,11 +320,27 @@ export function InfoPopup({
                   its border stays stationary while the textarea (no
                   border) shifts vertically underneath as the user
                   scrolls. `className` threads our editor-box style
-                  onto the scrollbar's outer wrapper. */}
+                  onto the scrollbar's outer wrapper. onThumbHover /
+                  onThumbDrag swap the custom firefly cursor to the
+                  frog-hand grab glyph while the user interacts with
+                  the scrollbar thumb, matching the affordance
+                  LilyPad uses on hover/drag. */}
               <NeonScrollbar
                 color="cyan"
                 className="info-popup__editor-textbox"
                 style={{ maxHeight: editorHeight }}
+                onThumbHover={(hovered) => {
+                  const store = usePondStore.getState();
+                  if (hovered) {
+                    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
+                  } else {
+                    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
+                  }
+                }}
+                onThumbDrag={(dragging) => {
+                  const store = usePondStore.getState();
+                  store.setCursorMode(dragging ? 'grabbing' : 'grab');
+                }}
               >
                 <textarea
                   className="info-popup__editor-textarea"
@@ -322,6 +361,8 @@ export function InfoPopup({
               <div
                 className="info-popup__editor-resize"
                 onPointerDown={handleEditorResizeStart}
+                onPointerEnter={handleEditorResizeEnter}
+                onPointerLeave={handleEditorResizeLeave}
                 aria-label="Resize editor"
                 role="separator"
                 aria-orientation="horizontal"
