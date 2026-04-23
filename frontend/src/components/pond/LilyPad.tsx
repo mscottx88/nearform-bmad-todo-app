@@ -1709,6 +1709,23 @@ export function LilyPad({
             posZ +
             Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp +
             siblingNudgeRef.current.z;
+
+          // Story 4.6 AC #21–#25: cluster-handle grip-phase translation.
+          // When a cluster-drag handle is in grip phase, it writes a
+          // (dx, dz) offset for its groupId into the store each move.
+          // Every group member applies that offset on top of its rest
+          // position so the cluster translates rigidly as a unit. The
+          // offset is cleared on pointerup; positions are committed via
+          // PATCH /api/todos in PondScene's handle onDragEnd.
+          const clusterTrans = usePondStore.getState().clusterTranslation;
+          if (
+            clusterTrans &&
+            todo.groupId &&
+            clusterTrans.groupId === todo.groupId
+          ) {
+            group.position.x += clusterTrans.dx;
+            group.position.z += clusterTrans.dz;
+          }
         }
       }
 
