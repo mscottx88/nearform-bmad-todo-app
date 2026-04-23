@@ -190,7 +190,21 @@ interface PondState {
   // Story 4.6: accumulated translation delta from a cluster-drag grip
   // phase. Siblings (non-handle-holder members) read this in useFrame
   // and apply the delta to their rest position. Null at rest.
-  clusterTranslation: { groupId: string; dx: number; dz: number } | null;
+  //
+  // `baselines` is the pre-drag snapshot of each member's world position,
+  // captured on pointerdown and frozen for the duration of the drag AND
+  // the post-release refetch window. LilyPad / ClusterHalo use
+  // `baseline + (dx, dz)` rather than `todo.positionX + (dx, dz)` so the
+  // refetch delivering new positionX/Y mid-transition doesn't double-
+  // apply the offset (the pre-4.6-fix flash was at 2×dx for one tick
+  // between React Query's cache update and the effect that clears
+  // clusterTranslation).
+  clusterTranslation: {
+    groupId: string;
+    dx: number;
+    dz: number;
+    baselines: Map<string, { x: number; z: number }>;
+  } | null;
 
   // Story 4.6: transient pop-animation triggers keyed by todo id.
   // Value is the R3F-clock time at which the pop was fired. LilyPad
@@ -376,9 +390,22 @@ interface PondState {
   ) => void;
 
   // Story 4.6: cluster-translation setter/clearer.
-  /** Set the cumulative (dx, dz) offset for a cluster-handle drag. Null clears. */
+  /**
+   * Set the cumulative (dx, dz) offset for a cluster-handle drag along
+   * with the pre-drag baseline positions of each member. Null clears.
+   * Consumers (LilyPad, ClusterHalo) compute `baseline + (dx, dz)` so
+   * refetched todo.positionX values mid-transition don't double-apply
+   * the offset.
+   */
   setClusterTranslation: (
-    translation: { groupId: string; dx: number; dz: number } | null,
+    translation:
+      | {
+          groupId: string;
+          dx: number;
+          dz: number;
+          baselines: Map<string, { x: number; z: number }>;
+        }
+      | null,
   ) => void;
 
   // Story 4.6: pop animation triggers.

@@ -3,16 +3,29 @@
 // drei's <Html> component so the DOM content is created outside R3F's
 // custom reconciler (createPortal from react-dom would fail inside Canvas).
 //
-// Two-phase drag:
-//   slide — mouse inside halo: handle tracks halo boundary, cluster still.
-//   grip  — mouse outside halo: cluster translates rigidly via onTranslate.
+// Drag model (revised 2026-04-22 per user direction): the handle is
+// FIXED at its anchor (bbox-lower-right of the halo) — it no longer
+// slides along the halo boundary while the cursor stays inside. As
+// soon as the user starts dragging, the entire cluster translates
+// rigidly. Implementation:
+//   pointerdown → snapshot baselines + the mouse's world position
+//   pointermove → translation = currentMouseWorld − startMouseWorld;
+//                 write clusterTranslation so LilyPad + ClusterHalo
+//                 apply the offset on top of the baselines
+//   pointerup   → onDragEnd callback; PondScene fires PATCHes and
+//                 holds clusterTranslation until the refetch arrives
 //
-// Event routing note (2026-04-22 fix): uses setPointerCapture on the
-// handle div so drag events (move/up/cancel) fire reliably on the div's
-// own React handlers throughout the drag — even when the mouse leaves
-// the div bounds. The earlier window-listener pattern silently dropped
-// moves in some browser/R3F event-routing combinations, leaving the
-// handle stuck in 'slide' phase forever.
+// Baselines travel with clusterTranslation so consumers compute
+// `baseline + (dx, dz)` rather than `todo.positionX + (dx, dz)` — this
+// prevents the 2× offset flash when the refetch delivers new positionX
+// values before the post-release clear effect runs (same reason
+// LilyPad's single-pad drag has stickyDragRef).
+//
+// Event routing: setPointerCapture on the handle div so drag events
+// (move/up/cancel) fire reliably on the div's own React handlers
+// throughout the drag, even when the cursor leaves the div bounds. No
+// preventDefault on pointerdown — that would suppress the compatibility
+// mousemove events that CursorFirefly relies on.
 import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
@@ -36,8 +49,6 @@ const WATER_PLANE_HANDLE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 interface ClusterDragHandleProps {
   groupId: string;
   members: Todo[];
-  /** Called during grip phase with the cumulative (dx, dz) from drag start. */
-  onTranslate: (dx: number, dz: number) => void;
   /** Called on pointerup — caller commits member positions and clears translation. */
   onDragEnd: () => void;
 }
@@ -45,7 +56,6 @@ interface ClusterDragHandleProps {
 export function ClusterDragHandle({
   groupId,
   members,
-  onTranslate,
   onDragEnd,
 }: ClusterDragHandleProps) {
   const groupRef = useRef<THREE.Group>(null);
@@ -54,27 +64,26 @@ export function ClusterDragHandle({
   const contentRef = useRef<HTMLDivElement>(null);
   const { camera, gl, size } = useThree();
 
-  // Drag phase.
-  const phaseRef = useRef<'idle' | 'slide' | 'grip'>('idle');
-  // Centroid captured at pointerdown — stays frozen during slide phase.
-  const capturedCentroidRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  const capturedRadiusRef = useRef(0);
-  // Handle world position updated each frame (resting) or per move (dragging).
-  const handleWorldPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  // Frozen at grip transition: gripOffset = H − C (direction × R from centroid).
-  const gripOffsetRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  // Evolving centroid during grip phase.
-  const currentCentroidRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  // Cumulative translation passed to onTranslate each move during grip.
-  const cumulativeDxRef = useRef(0);
-  const cumulativeDzRef = useRef(0);
+  // Drag-active flag — true between pointerdown and pointerup/cancel.
+  const isDraggingRef = useRef(false);
+  // Mouse world position at pointerdown — frozen for the drag duration
+  // so each move's translation is computed relative to start.
+  const dragStartWorldRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  // Snapshot of each member's pre-drag position, frozen at pointerdown
+  // and written into clusterTranslation so consumers can compute
+  // baseline + offset without reading potentially-updated todo.positionX.
+  const baselinesRef = useRef<Map<string, { x: number; z: number }>>(new Map());
+  // Baseline centroid + halo radius + bbox, captured once so the handle
+  // (which stays fixed at bbox-lower-right of the baseline) doesn't
+  // recompute from the moved positions each frame during a drag.
+  const baselineCentroidRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  const baselineRadiusRef = useRef(0);
+  const baselineBboxRef = useRef<{ minX: number; maxX: number; minZ: number; maxZ: number }>(
+    { minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
+  );
   // True while the cursor is over the handle div itself — maintains visibility
   // during the brief window between pad pointerLeave and handle pointerEnter.
   const isHandleHoveredRef = useRef(false);
-  // Pointer tracking — setPointerCapture routes all move/up/cancel events
-  // back to the capturing div, so we bind React handlers on the element
-  // itself rather than chasing window listeners (which silently dropped
-  // events in some R3F event-routing scenarios).
   const pointerIdRef = useRef<number | null>(null);
 
   const getMouseWorld = (
@@ -95,19 +104,15 @@ export function ClusterDragHandle({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    // NOTE: do NOT call e.preventDefault() here. preventDefault on
-    // pointerdown suppresses the compatibility mouse events that
-    // CursorFirefly's window.mousemove listener relies on — the firefly
-    // would freeze in place while the handle is being dragged.
-    // setPointerCapture (below) gives us reliable pointer-event routing
-    // without needing preventDefault to block defaults.
+    // NOTE: do NOT call e.preventDefault(). preventDefault on pointerdown
+    // suppresses the compatibility mouse events that CursorFirefly's
+    // window.mousemove listener relies on — the firefly would freeze in
+    // place while the handle is being dragged. setPointerCapture alone
+    // gives us reliable pointer-event routing without the side effect.
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
-      // Some browsers throw if the element is no longer connected; the
-      // fallback is simply no capture, which is still functional because
-      // React bubbles pointermove/up to the div as long as the pointer
-      // stays over it.
+      // Some browsers throw if the element is no longer connected.
     }
     pointerIdRef.current = e.pointerId;
 
@@ -118,65 +123,52 @@ export function ClusterDragHandle({
     const centroid = computeCentroid(memberPositions);
     const R = computeHaloRadius(memberPositions, centroid);
     const bbox = computeBbox(memberPositions);
-    const handlePos = computeHandleWorldPos(centroid, bbox, R);
 
-    capturedCentroidRef.current = { ...centroid };
-    capturedRadiusRef.current = R;
-    handleWorldPosRef.current = { ...handlePos };
-    currentCentroidRef.current = { ...centroid };
-    cumulativeDxRef.current = 0;
-    cumulativeDzRef.current = 0;
-    phaseRef.current = 'slide';
+    baselineCentroidRef.current = { ...centroid };
+    baselineRadiusRef.current = R;
+    baselineBboxRef.current = { ...bbox };
+
+    const baselines = new Map<string, { x: number; z: number }>();
+    for (const m of members) {
+      baselines.set(m.id, { x: m.positionX ?? 0, z: m.positionY ?? 0 });
+    }
+    baselinesRef.current = baselines;
+
+    const startWorld = getMouseWorld(e.clientX, e.clientY);
+    dragStartWorldRef.current = startWorld ?? { ...centroid };
+
+    isDraggingRef.current = true;
+    // Initial zero-translation write so LilyPad / ClusterHalo switch to
+    // baseline-driven rendering on this same frame.
+    usePondStore.getState().setClusterTranslation({
+      groupId,
+      dx: 0,
+      dz: 0,
+      baselines,
+    });
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
     if (e.buttons === 0) {
-      // Missed pointerup — treat as release so we don't leave the handle
-      // stuck in slide/grip phase.
+      // Missed pointerup — treat as release so we don't leave the
+      // handle stuck in the dragging state.
       endDrag(e);
       return;
     }
+    if (!isDraggingRef.current) return;
 
     const M = getMouseWorld(e.clientX, e.clientY);
     if (!M) return;
 
-    const C = capturedCentroidRef.current;
-    const R = capturedRadiusRef.current;
-    const mdx = M.x - C.x;
-    const mdz = M.z - C.z;
-    const dist = Math.sqrt(mdx * mdx + mdz * mdz);
-    const safeDist = dist < 1e-6 ? 1e-6 : dist;
-
-    if (phaseRef.current === 'slide') {
-      // Handle tracks halo boundary: H = C + normalize(M − C) * R
-      const newH = { x: C.x + (mdx / safeDist) * R, z: C.z + (mdz / safeDist) * R };
-      handleWorldPosRef.current = newH;
-      if (dist > R) {
-        // Grip transition: freeze gripOffset = H − C
-        gripOffsetRef.current = { x: newH.x - C.x, z: newH.z - C.z };
-        phaseRef.current = 'grip';
-      }
-    } else if (phaseRef.current === 'grip') {
-      // C_new = M − gripOffset; delta = C_new − C_current; handle = M
-      const newCx = M.x - gripOffsetRef.current.x;
-      const newCz = M.z - gripOffsetRef.current.z;
-      const ddx = newCx - currentCentroidRef.current.x;
-      const ddz = newCz - currentCentroidRef.current.z;
-      currentCentroidRef.current = { x: newCx, z: newCz };
-      cumulativeDxRef.current += ddx;
-      cumulativeDzRef.current += ddz;
-      handleWorldPosRef.current = { ...M };
-      onTranslate(cumulativeDxRef.current, cumulativeDzRef.current);
-      // AC #24 camera-follow engagement DEFERRED — writing followTarget
-      // here triggers a runaway: PondCamera pans toward the centroid,
-      // which shifts the cursor's raycast world-point under the mouse,
-      // which shifts the centroid further, which pans more. The user
-      // reports the mouse "goes super fast off screen" as the feedback
-      // loop accelerates. Consistent with the pop-in/pop-out defer
-      // (commit 863acbd) — camera stays still during the drag; the
-      // cluster translates under the user's cursor instead.
-    }
+    const dx = M.x - dragStartWorldRef.current.x;
+    const dz = M.z - dragStartWorldRef.current.z;
+    usePondStore.getState().setClusterTranslation({
+      groupId,
+      dx,
+      dz,
+      baselines: baselinesRef.current,
+    });
   };
 
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -184,11 +176,10 @@ export function ClusterDragHandle({
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
-      // Capture may already be released by the browser (e.g., on
-      // element removal during the drag). Swallow.
+      // Capture may already be released by the browser.
     }
     pointerIdRef.current = null;
-    phaseRef.current = 'idle';
+    isDraggingRef.current = false;
     onDragEnd();
   };
 
@@ -199,32 +190,44 @@ export function ClusterDragHandle({
     const isVisible =
       store.hoveredGroupId === groupId ||
       isHandleHoveredRef.current ||
-      phaseRef.current !== 'idle';
+      isDraggingRef.current;
 
     if (contentRef.current) {
       contentRef.current.style.display = isVisible ? 'block' : 'none';
     }
 
-    // Compute handle and centroid world positions.
-    let handlePos: { x: number; z: number };
+    // Compute handle + centroid world positions. During a drag, use the
+    // baselines + live translation so the handle rides with the cluster.
+    // At rest, recompute from the current memberPositions.
     let centroid: { x: number; z: number };
+    let R: number;
+    let bbox: { minX: number; maxX: number; minZ: number; maxZ: number };
 
-    if (phaseRef.current !== 'idle') {
-      handlePos = handleWorldPosRef.current;
-      centroid =
-        phaseRef.current === 'grip'
-          ? currentCentroidRef.current
-          : capturedCentroidRef.current;
+    if (isDraggingRef.current) {
+      const trans = store.clusterTranslation;
+      const dx = trans?.groupId === groupId ? trans.dx : 0;
+      const dz = trans?.groupId === groupId ? trans.dz : 0;
+      centroid = {
+        x: baselineCentroidRef.current.x + dx,
+        z: baselineCentroidRef.current.z + dz,
+      };
+      R = baselineRadiusRef.current;
+      bbox = {
+        minX: baselineBboxRef.current.minX + dx,
+        maxX: baselineBboxRef.current.maxX + dx,
+        minZ: baselineBboxRef.current.minZ + dz,
+        maxZ: baselineBboxRef.current.maxZ + dz,
+      };
     } else {
       const memberPositions = members.map((t) => ({
         x: t.positionX ?? 0,
         z: t.positionY ?? 0,
       }));
       centroid = computeCentroid(memberPositions);
-      const R = computeHaloRadius(memberPositions, centroid);
-      const bbox = computeBbox(memberPositions);
-      handlePos = computeHandleWorldPos(centroid, bbox, R);
+      R = computeHaloRadius(memberPositions, centroid);
+      bbox = computeBbox(memberPositions);
     }
+    const handlePos = computeHandleWorldPos(centroid, bbox, R);
 
     // Position the Three.js group at the handle (drei's Html projects this to screen).
     groupRef.current.position.set(handlePos.x, 0.4, handlePos.z);
@@ -246,9 +249,6 @@ export function ClusterDragHandle({
           style={{
             display: 'none',
             // Solid neon-ringed disc with an outward chevron glyph.
-            // Previous 16px text + soft textShadow read as "barely
-            // noticeable" in the pond scene — this disc + bold glyph
-            // makes the affordance clearly visible at glance.
             width: '36px',
             height: '36px',
             borderRadius: '50%',
@@ -264,9 +264,7 @@ export function ClusterDragHandle({
             textAlign: 'center',
             textShadow: '0 0 6px #00eeff',
             // cursor: 'none' so the global custom firefly cursor stays
-            // visible when hovering the handle. Previous 'grab' /
-            // 'grabbing' values overrode the root `cursor: none` and
-            // brought back the system cursor over the handle.
+            // visible when hovering the handle.
             cursor: 'none',
             userSelect: 'none',
             pointerEvents: 'auto',

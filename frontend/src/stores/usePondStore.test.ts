@@ -629,18 +629,25 @@ describe('usePondStore', () => {
       usePondStore.setState({ clusterTranslation: null });
     });
 
-    it('stores the translation delta', () => {
-      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 0.5, dz: -1.2 });
-      expect(usePondStore.getState().clusterTranslation).toEqual({
-        groupId: 'g',
-        dx: 0.5,
-        dz: -1.2,
-      });
+    it('stores the translation delta + baselines', () => {
+      const baselines = new Map([['pad-1', { x: 1, z: 2 }]]);
+      usePondStore
+        .getState()
+        .setClusterTranslation({ groupId: 'g', dx: 0.5, dz: -1.2, baselines });
+      const trans = usePondStore.getState().clusterTranslation;
+      expect(trans?.dx).toBe(0.5);
+      expect(trans?.dz).toBe(-1.2);
+      expect(trans?.baselines.get('pad-1')).toEqual({ x: 1, z: 2 });
     });
 
-    it('accepts successive updates (grip phase accumulates)', () => {
-      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 0.5, dz: 0 });
-      usePondStore.getState().setClusterTranslation({ groupId: 'g', dx: 1.0, dz: 0 });
+    it('accepts successive updates (offset accumulates)', () => {
+      const baselines = new Map([['pad-1', { x: 0, z: 0 }]]);
+      usePondStore
+        .getState()
+        .setClusterTranslation({ groupId: 'g', dx: 0.5, dz: 0, baselines });
+      usePondStore
+        .getState()
+        .setClusterTranslation({ groupId: 'g', dx: 1.0, dz: 0, baselines });
       expect(usePondStore.getState().clusterTranslation?.dx).toBe(1.0);
     });
   });

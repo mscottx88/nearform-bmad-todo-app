@@ -30,19 +30,29 @@ export function ClusterHalo({ groupId, memberPositions, color = '#00eeff' }: Clu
   useFrame(() => {
     if (!meshRef.current || memberPositions.length < 2) return;
 
-    const centroid = computeCentroid(memberPositions);
-    const R = computeHaloRadius(memberPositions, centroid);
-
-    // Story 4.6: during a handle grip-phase drag, the whole group
-    // translates rigidly. LilyPad already applies this offset to each
-    // pad; the halo must ride with them or it lags behind at the
-    // pre-drag centroid. Read imperatively via getState() — no
-    // re-render on every drag move.
+    // Story 4.6: during a cluster-handle drag (and the post-release
+    // refetch window), compute the centroid / radius from the BASELINES
+    // in clusterTranslation rather than the current memberPositions.
+    // memberPositions updates as soon as React Query's refetch lands,
+    // which would briefly double-offset the halo the same way it did
+    // the pads. Baselines are frozen at drag start.
     const clusterTrans = usePondStore.getState().clusterTranslation;
-    const offsetX = clusterTrans?.groupId === groupId ? clusterTrans.dx : 0;
-    const offsetZ = clusterTrans?.groupId === groupId ? clusterTrans.dz : 0;
+    let centroid: { x: number; z: number };
+    let R: number;
+    if (clusterTrans?.groupId === groupId && clusterTrans.baselines.size > 0) {
+      const baselines = Array.from(clusterTrans.baselines.values());
+      const baseCentroid = computeCentroid(baselines);
+      R = computeHaloRadius(baselines, baseCentroid);
+      centroid = {
+        x: baseCentroid.x + clusterTrans.dx,
+        z: baseCentroid.z + clusterTrans.dz,
+      };
+    } else {
+      centroid = computeCentroid(memberPositions);
+      R = computeHaloRadius(memberPositions, centroid);
+    }
 
-    meshRef.current.position.set(centroid.x + offsetX, RING_Y, centroid.z + offsetZ);
+    meshRef.current.position.set(centroid.x, RING_Y, centroid.z);
     // Scale x and z uniformly by R; y scale is irrelevant for a flat ring.
     meshRef.current.scale.set(R, R, 1);
   });

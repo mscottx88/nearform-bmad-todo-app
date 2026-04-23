@@ -450,21 +450,25 @@ export function PondScene() {
             key={gid}
             groupId={gid}
             members={members}
-            onTranslate={(dx, dz) => {
-              usePondStore.getState().setClusterTranslation({ groupId: gid, dx, dz });
-            }}
             onDragEnd={() => {
               const store = usePondStore.getState();
               const translation = store.clusterTranslation;
               if (translation?.groupId === gid) {
-                const finalMembers = renderTodos.filter((t) => t.groupId === gid);
+                // Expected final positions are baseline + (dx, dz) —
+                // NOT (current todo.positionX) + (dx, dz). During the
+                // drag, todo.positionX stays at its pre-drag value
+                // (the backend hasn't been told yet), so both
+                // formulations happen to agree here; but using
+                // baselines is explicit and survives any future
+                // optimistic-update plumbing that might change
+                // todo.positionX mid-drag.
                 const expected = new Map<string, { x: number; z: number }>();
-                for (const m of finalMembers) {
-                  const newX = (m.positionX ?? 0) + translation.dx;
-                  const newZ = (m.positionY ?? 0) + translation.dz;
-                  expected.set(m.id, { x: newX, z: newZ });
+                for (const [memberId, baseline] of translation.baselines) {
+                  const newX = baseline.x + translation.dx;
+                  const newZ = baseline.z + translation.dz;
+                  expected.set(memberId, { x: newX, z: newZ });
                   updateTodo.mutate({
-                    id: m.id,
+                    id: memberId,
                     positionX: newX,
                     positionY: newZ,
                   });
@@ -484,11 +488,10 @@ export function PondScene() {
                 }, 3000);
                 pendingClusterPatchRef.current = { groupId: gid, expected, timer };
                 // Re-fit camera with updated member positions.
-                const updated = renderTodos.map((t) =>
-                  t.groupId === gid
-                    ? { ...t, positionX: (t.positionX ?? 0) + translation.dx, positionY: (t.positionY ?? 0) + translation.dz }
-                    : t,
-                );
+                const updated = renderTodos.map((t) => {
+                  const exp = expected.get(t.id);
+                  return exp ? { ...t, positionX: exp.x, positionY: exp.z } : t;
+                });
                 store.requestCameraReset(fitCameraToPads(updated));
               } else {
                 // No translation to commit — clear immediately.
