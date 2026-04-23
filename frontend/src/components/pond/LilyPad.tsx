@@ -1898,15 +1898,26 @@ export function LilyPad({
             // AWAY from its pusher(s) — the direction of the summed
             // push vector. lerpAngle handles the 0 / 2π wrap so a pad
             // near angle 0 doesn't sweep the long way around to reach
-            // a target near 2π. Uses the same 0.7 rate as the position
-            // lerp so rotation and motion converge together.
-            const pushMagSq = pushX * pushX + pushZ * pushZ;
-            if (pushMagSq > 1e-8) {
+            // a target near 2π.
+            //
+            // Rotation lerp rate (0.08) is intentionally much slower
+            // than the position lerp (0.7). A pad on water has
+            // angular inertia — it shouldn't snap to face away from
+            // its pusher instantly. At 0.08 per frame, the rotation
+            // closes ~60% of the gap over 10 frames (~170 ms at 60
+            // fps) and ~90% over 28 frames (~470 ms), which reads
+            // as a gentle spin rather than a jitter. Scaled also by
+            // push magnitude so weak glancing pushes produce less
+            // rotation than head-on shoves — a detail but it reads
+            // more physically.
+            const pushMag = Math.sqrt(pushX * pushX + pushZ * pushZ);
+            if (pushMag > 1e-4) {
               const targetAngle = Math.atan2(pushZ, pushX);
+              const rate = Math.min(0.08 * pushMag, 0.25);
               siblingRotationRef.current = lerpAngle(
                 siblingRotationRef.current,
                 targetAngle,
-                0.7,
+                rate,
               );
             }
             // Lerp at 0.7 → ~97% convergence in 3 frames (~50ms at
