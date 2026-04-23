@@ -97,6 +97,12 @@ export function ClusterDragHandle({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Only LEFT mouse button drags the group. Right-button (e.button===2)
+    // is reserved for OrbitControls pan (see PondCamera); middle-button
+    // (e.button===1) is reserved for MMB ascend/descend. User feedback
+    // 2026-04-23: "Only left mouse button should be able to drag the
+    // group, not right or middle".
+    if (e.button !== 0) return;
     e.stopPropagation();
     // NOTE: do NOT call e.preventDefault(). preventDefault on pointerdown
     // suppresses the compatibility mouse events that CursorFirefly's
