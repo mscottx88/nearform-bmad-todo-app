@@ -43,6 +43,15 @@ class Todo(Base):
         Float,
         nullable=True,
     )
+    # 2026-04-23: rotation_y is the pad's one-time random Y-axis
+    # rotation (radians, [0, 2π)), server-generated on insert so the
+    # pad looks the same on every reload. Client never sends it. Not
+    # updatable — a pad's orientation is fixed for its lifetime.
+    rotation_y: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default=sa.text("random() * 2 * pi()"),
+    )
     embedding = mapped_column(Vector(768), nullable=True)
     embedding_status: Mapped[str] = mapped_column(
         String(20),

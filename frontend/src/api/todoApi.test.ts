@@ -22,6 +22,7 @@ function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
     color: '#00eeff',
     positionX: 0,
     positionY: 0,
+    rotationY: 0,
     embeddingStatus: 'complete',
     archived: false,
     archivedAt: null,

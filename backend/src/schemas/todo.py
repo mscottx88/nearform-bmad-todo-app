@@ -75,6 +75,10 @@ class TodoResponse(BaseModel):
     color: str
     position_x: float | None
     position_y: float | None
+    # 2026-04-23: server-assigned one-time random Y rotation (radians).
+    # Persisted so the pad keeps the same visual orientation across
+    # refreshes instead of re-randomising on every mount.
+    rotation_y: float
     embedding_status: str
     archived: bool
     archived_at: datetime | None

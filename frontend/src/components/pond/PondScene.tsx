@@ -10,7 +10,6 @@ import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
 import { usePondSearchSync } from '../../hooks/usePondSearchSync';
 import { useCameraResetOnDoubleEscape } from '../../hooks/useCameraResetOnDoubleEscape';
 import type { Todo } from '../../types';
-import { fitCameraToPads } from './fitCameraToPads';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
@@ -216,13 +215,6 @@ export function PondScene() {
           key={todo.id}
           todo={todo}
           onDropComplete={handleDropComplete}
-          onDragEnd={(newX, newZ) => {
-            // Re-fit the camera after each pad drag so all pads stay in view.
-            const updated = renderTodos.map((t) =>
-              t.id === todo.id ? { ...t, positionX: newX, positionY: newZ } : t,
-            );
-            usePondStore.getState().requestCameraReset(fitCameraToPads(updated));
-          }}
           focused={activePopupTodoId === todo.id}
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />

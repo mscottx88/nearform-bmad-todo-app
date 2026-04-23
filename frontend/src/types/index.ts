@@ -5,6 +5,7 @@ export interface Todo {
   color: string;
   positionX: number | null;
   positionY: number | null;
+  rotationY: number;
   embeddingStatus: 'pending' | 'complete' | 'failed';
   archived: boolean;
   archivedAt: string | null;

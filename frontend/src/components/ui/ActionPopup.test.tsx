@@ -14,6 +14,7 @@ const mockTodo: Todo = {
   color: '#00eeff',
   positionX: 2,
   positionY: 3,
+  rotationY: 0,
   embeddingStatus: 'pending',
   archived: false,
   archivedAt: null,

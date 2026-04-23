@@ -6,6 +6,35 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 
 
+def test_create_todo_assigns_random_rotation(client: TestClient) -> None:
+    # 2026-04-23: rotation_y is server-generated random at insert so
+    # pads keep the same orientation across reloads. Client never
+    # sends it. Two consecutive creates should land on different
+    # rotations (modulo astronomically-unlikely collisions) and both
+    # values must be in [0, 2π).
+    import math
+
+    r1 = client.post("/api/todos", json={"text": "First"}).json()["rotation_y"]
+    r2 = client.post("/api/todos", json={"text": "Second"}).json()["rotation_y"]
+    assert 0 <= r1 < 2 * math.pi
+    assert 0 <= r2 < 2 * math.pi
+    assert r1 != r2
+
+
+def test_update_positions_does_not_change_rotation(client: TestClient) -> None:
+    # rotation_y is write-once — position batch updates must leave
+    # it untouched so a pad's orientation stays stable for its life.
+    create_resp = client.post("/api/todos", json={"text": "Stable rotation"})
+    todo_id = create_resp.json()["id"]
+    original_rotation = create_resp.json()["rotation_y"]
+    response = client.patch(
+        "/api/todos/positions",
+        json={"positions": [{"id": todo_id, "position_x": 4.0, "position_y": 5.0}]},
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["rotation_y"] == original_rotation
+
+
 def test_create_todo(client: TestClient) -> None:
     response = client.post(
         "/api/todos",

@@ -413,7 +413,12 @@ export function LilyPad({
     () => Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS,
   );
   const [driftSeed] = useState(() => Math.random() * Math.PI * 2);
-  const [rotationY] = useState(() => Math.random() * Math.PI * 2);
+  // 2026-04-23: server-assigned rotation — persisted so refreshing
+  // doesn't re-randomise each pad's facing direction. Read directly
+  // from the todo prop; no local useState lock-in needed because
+  // `rotation_y` is write-once on the backend (not updatable via
+  // PATCH), so the prop is stable for this pad's lifetime.
+  const rotationY = todo.rotationY;
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);

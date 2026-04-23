@@ -17,6 +17,7 @@ function makeTodo(id: string, x: number, y: number): Todo {
     color: '#00ff88',
     positionX: x,
     positionY: y,
+    rotationY: 0,
     embeddingStatus: 'pending',
     archived: false,
     archivedAt: null,
