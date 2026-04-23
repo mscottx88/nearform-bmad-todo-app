@@ -79,7 +79,14 @@ export function computeSpreadPositions(
   const original = new Map<string, PadPosition>();
   const working = new Map<string, PadPosition>();
   for (const t of todos) {
-    const pos: PadPosition = { x: t.positionX ?? 0, z: t.positionY ?? 0 };
+    // `?? 0` only catches null/undefined — NaN and Infinity would pass
+    // through and poison the entire solver (NaN propagates through every
+    // dx/dist/push computation and silently corrupts neighbouring pads).
+    // Treat any non-finite input as (0, 0) so the algorithm still
+    // converges and the bad row is simply re-seeded to origin.
+    const px = Number.isFinite(t.positionX) ? (t.positionX as number) : 0;
+    const pz = Number.isFinite(t.positionY) ? (t.positionY as number) : 0;
+    const pos: PadPosition = { x: px, z: pz };
     original.set(t.id, { ...pos });
     working.set(t.id, pos);
   }

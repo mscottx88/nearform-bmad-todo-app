@@ -391,8 +391,6 @@ const RECENT_THRESHOLD_MS = 3000;
 interface LilyPadProps {
   todo: Todo;
   onDropComplete?: (x: number, z: number) => void;
-  /** Called after a real drag completes with the final world (x, z). */
-  onDragEnd?: (x: number, z: number) => void;
   focused?: boolean;
   // Story 2.6: ms to wait before entering the 'forming' phase. PondScene
   // passes index * STAGGER_STEP_MS on initial load so pads cascade in.
@@ -403,7 +401,6 @@ interface LilyPadProps {
 export function LilyPad({
   todo,
   onDropComplete,
-  onDragEnd,
   focused = false,
   dropDelayMs = 0,
 }: LilyPadProps) {
@@ -486,6 +483,11 @@ export function LilyPad({
   const isDraggingRef = useRef(false);
   const dragStartScreenRef = useRef<{ x: number; y: number } | null>(null);
   const dragPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  // True once any raycast during this drag cycle landed on the water
+  // plane. Skips the release-time PATCH when no raycast ever succeeded
+  // (e.g. camera angle that never intersects y=0), preventing a no-op
+  // or stale-seed position commit.
+  const raycastSucceededRef = useRef(false);
   // Story 4.2: "sticky drag" — after pointerUp the pad stays
   // pinned at `dragPosRef` until the updated `todo.positionX/Y`
   // arrives via React Query's refetch. Without this, the
@@ -642,6 +644,17 @@ export function LilyPad({
   // over without a visible snap.
   useEffect(() => {
     if (!stickyDragRef.current) return;
+    // If the update failed after the retry budget was exhausted, the
+    // server never received the new position — refetch will not match
+    // dragPosRef. Release sticky so the pad rejoins normal drift and
+    // the 2.6 decay visual is free to read, instead of pinning the pad
+    // at a position the backend knows nothing about. On next refetch
+    // the pad snaps to the server's truth, matching other update-error
+    // paths.
+    if (errorEntry) {
+      stickyDragRef.current = false;
+      return;
+    }
     const px = todo.positionX ?? 0;
     const py = todo.positionY ?? 0;
     const target = dragPosRef.current;
@@ -651,7 +664,22 @@ export function LilyPad({
     ) {
       stickyDragRef.current = false;
     }
-  }, [todo.positionX, todo.positionY]);
+  }, [todo.positionX, todo.positionY, errorEntry]);
+
+  // Cleanup effect — on unmount, if this pad currently owns the
+  // activeDragAnchor, clear it. Without this, a pad deleted mid-drag
+  // would leave a frozen anchor pointing at a dead id; every other
+  // pad's useFrame nudge logic would keep repelling from the ghost
+  // position indefinitely.
+  useEffect(() => {
+    const id = todo.id;
+    return () => {
+      const store = usePondStore.getState();
+      if (store.activeDragAnchor?.padId === id) {
+        store.setActiveDragAnchor(null);
+      }
+    };
+  }, [todo.id]);
 
   // P7: clear any lingering error-decay entry on unmount. Without this,
   // `errorTodos` accumulates entries for pads that were dissolved (terminal
@@ -764,11 +792,23 @@ export function LilyPad({
 
       dragStartScreenRef.current = { x: e.clientX, y: e.clientY };
       isDraggingRef.current = false;
-      // Seed dragPosRef with the pad's current world position so a
-      // sub-threshold release (click) has valid coords to fall back
-      // on (the click branch uses posX/posZ directly, but useFrame
-      // reads dragPosRef on the NEXT frame and needs a sane value).
-      dragPosRef.current = { x: posX, z: posZ };
+      raycastSucceededRef.current = false;
+      // Seed dragPosRef with the pad's current visible position so a
+      // sub-threshold release (click) has valid coords, and so a rapid
+      // drag-after-drag (while sticky is still waiting for a refetch)
+      // doesn't snap back to stale posX/posZ for a frame. The visible
+      // pad position (group.position) already reflects drift / sticky /
+      // prior-nudge offsets; falling back to posX/posZ only if the
+      // group hasn't rendered yet keeps the legacy behaviour on mount.
+      const groupNow = groupRef.current;
+      // groupNow?.position is the Three.js group's live world XZ; falling
+      // back to posX/posZ if the ref is null (pre-mount) or if the test
+      // harness stubs the group without a .position vector.
+      if (groupNow?.position) {
+        dragPosRef.current = { x: groupNow.position.x, z: groupNow.position.z };
+      } else {
+        dragPosRef.current = { x: posX, z: posZ };
+      }
       activePointerIdRef.current = e.nativeEvent.pointerId;
 
       const onWindowMove = (ev: PointerEvent) => {
@@ -777,10 +817,36 @@ export function LilyPad({
         if (!start) return;
         // Pointer released outside our tracking (e.g. browser
         // cancelled without firing pointerup) — `buttons` bitmask
-        // is 0 when no button is pressed. Force-terminate the
-        // drag here so a later hover can't re-activate follow.
+        // is 0 when no button is pressed. Treat as a cancelled
+        // interaction: detach listeners silently, no popup, no PATCH.
+        // Opening a popup on an off-window release would surprise the
+        // user (their pointer released outside the app).
         if (ev.buttons === 0) {
-          onWindowUp(ev);
+          dragStartScreenRef.current = null;
+          isDraggingRef.current = false;
+          detachWindowListeners();
+          const cancelStore = usePondStore.getState();
+          cancelStore.setActiveDragAnchor(null);
+          if (cancelStore.cursorMode === 'grabbing') {
+            cancelStore.setCursorMode('grab');
+          }
+          return;
+        }
+        // Pad entered completing/deleting mid-drag (keyboard shortcut,
+        // external trigger). Abort silently — the pad is dissolving;
+        // PATCHing its position would race with the completion/delete.
+        const moveState = usePondStore.getState();
+        if (
+          moveState.completingTodos.has(todo.id) ||
+          moveState.deletingTodos.has(todo.id)
+        ) {
+          dragStartScreenRef.current = null;
+          isDraggingRef.current = false;
+          detachWindowListeners();
+          moveState.setActiveDragAnchor(null);
+          if (moveState.cursorMode === 'grabbing') {
+            moveState.setCursorMode('grab');
+          }
           return;
         }
         const dx = ev.clientX - start.x;
@@ -796,8 +862,12 @@ export function LilyPad({
           // Swap to the closed-fist cursor for the duration of the drag.
           dragStartStore.setCursorMode('grabbing');
         }
-        // Convert client coords → canvas NDC → water-plane hit.
+        // Convert client coords → canvas NDC → water-plane hit. If the
+        // canvas rect has no area yet (mid-resize, offscreen, detached)
+        // the NDC math produces NaN which would poison dragPosRef and
+        // propagate into every group.position write. Skip this frame.
         const rect = gl.domElement.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
         dragNDC.set(
           ((ev.clientX - rect.left) / rect.width) * 2 - 1,
           -((ev.clientY - rect.top) / rect.height) * 2 + 1,
@@ -807,6 +877,7 @@ export function LilyPad({
           const newX = worldDragPoint.x;
           const newZ = worldDragPoint.z;
           dragPosRef.current = { x: newX, z: newZ };
+          raycastSucceededRef.current = true;
 
           // Publish the drag anchor so every other pad's useFrame
           // slide-out-of-the-way nudge (NUDGE_RADIUS) tracks the
@@ -820,6 +891,7 @@ export function LilyPad({
       const onWindowUp = (ev: PointerEvent) => {
         if (activePointerIdRef.current !== ev.pointerId) return;
         const wasDrag = isDraggingRef.current;
+        const didRaycast = raycastSucceededRef.current;
         dragStartScreenRef.current = null;
         isDraggingRef.current = false;
         detachWindowListeners();
@@ -840,19 +912,28 @@ export function LilyPad({
         // the pad visually at dragPosRef until the refetched prop
         // catches up so the pad doesn't flash back to its old spot
         // between PATCH fire and cache invalidation.
-        stickyDragRef.current = true;
-        updateTodo.mutate({
-          id: todo.id,
-          positionX: dragPosRef.current.x,
-          positionY: dragPosRef.current.z,
-        });
-        onDragEnd?.(dragPosRef.current.x, dragPosRef.current.z);
+        //
+        // Skip PATCH if no raycast ever succeeded — dragPosRef still
+        // holds the pointerDown seed, so writing it back would be a
+        // no-op PATCH (or worse, commit a stale seed that differs
+        // from the pad's visible drifted position). Also clear any
+        // pending spread target so the pad doesn't lerp away from
+        // the drop point once sticky releases.
+        const releaseStore = usePondStore.getState();
+        releaseStore.clearTargetPosition(todo.id);
+        if (didRaycast) {
+          stickyDragRef.current = true;
+          updateTodo.mutate({
+            id: todo.id,
+            positionX: dragPosRef.current.x,
+            positionY: dragPosRef.current.z,
+          });
+        }
 
         // Tear down drag-time store slices. activeDragAnchor clears so
         // other pads stop repelling; cursor reverts from 'grabbing' to
         // 'grab' (pointer almost always still over the pad since the
         // pad followed the cursor).
-        const releaseStore = usePondStore.getState();
         releaseStore.setActiveDragAnchor(null);
         if (releaseStore.cursorMode === 'grabbing') {
           releaseStore.setCursorMode('grab');
@@ -1447,13 +1528,18 @@ export function LilyPad({
       const liveAnchor = usePondStore.getState().activeDragAnchor;
       const hadLiveAnchor = hadDragAnchorRef.current;
       hadDragAnchorRef.current = liveAnchor !== null;
+      // Only commit a sibling-nudge as a persistent position change
+      // when the displacement is visually meaningful. 0.3 world units
+      // (~30% of a pad radius) beats the sub-5cm "passing nudges" that
+      // would otherwise fan out a PATCH per nearby pad on every drag
+      // release. Interim until story 4-8 lands a batch-position endpoint.
       if (
         hadLiveAnchor &&
         liveAnchor === null &&
         !isDraggingRef.current &&
         !stickyDragRef.current &&
-        (Math.abs(siblingNudgeRef.current.x) > 0.05 ||
-          Math.abs(siblingNudgeRef.current.z) > 0.05)
+        (Math.abs(siblingNudgeRef.current.x) > 0.3 ||
+          Math.abs(siblingNudgeRef.current.z) > 0.3)
       ) {
         const commitX = posX + siblingNudgeRef.current.x;
         const commitZ = posZ + siblingNudgeRef.current.z;
@@ -1539,14 +1625,24 @@ export function LilyPad({
             const tdx = posX - anchor.x;
             const tdz = posZ - anchor.z;
             const dist = Math.sqrt(tdx * tdx + tdz * tdz);
-            if (dist < NUDGE_RADIUS && dist > 1e-4) {
+            if (dist < NUDGE_RADIUS) {
               // Push the sibling to EXACTLY NUDGE_RADIUS from anchor
               // along the radial — guarantees no residual overlap.
               //   target = anchor + dir * NUDGE_RADIUS
               //   nudge  = target − posX = dir * (NUDGE_RADIUS − dist)
+              // Coincident case (dist ≤ 1e-4): pick a deterministic
+              // direction seeded by the pad's driftSeed so overlapping
+              // pads still separate instead of silently overlapping
+              // during the drag. Mirrors the jitter approach used by
+              // spreadOut.ts for exactly-coincident pairs.
               const push = NUDGE_RADIUS - dist;
-              nudgeX = (tdx / dist) * push;
-              nudgeZ = (tdz / dist) * push;
+              if (dist > 1e-4) {
+                nudgeX = (tdx / dist) * push;
+                nudgeZ = (tdz / dist) * push;
+              } else {
+                nudgeX = Math.cos(driftSeed) * push;
+                nudgeZ = Math.sin(driftSeed) * push;
+              }
             }
           }
           // (Sibling-nudge commit-on-release moved above the drag/sticky

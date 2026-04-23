@@ -1,6 +1,6 @@
 # Story 4.2: Lily Pad Drag & Spread-Out
 
-Status: review
+Status: done
 
 > **Scope note — replaces the original 4.2 "Lily Pad Clustering & Groups"** (which was a full group/cluster story). That story was too large to ship as a unit; the PRD's FR12 (drag to reposition) and the new `/spread-out` command are the two concrete deliverables here. The full group/ungroup system (shared aura, G/U keyboard shortcuts, POST /api/groups, etc.) is deferred to a later story.
 >
@@ -306,10 +306,10 @@ Three.js's `onClick` fires after `onPointerUp` on the same mesh. This creates a 
 
 ### Deferred items
 
-- **Batch position endpoint** (`PATCH /api/todos/positions`): the architecture specifies this for efficiency when many pads move simultaneously. For spread-out with < 30 pads, individual PATCHes are fine. Promote to a story when the pad count grows or position saves become measurably slow.
-- **Position persistence during drag of clusters**: once groups exist (future story), dragging a cluster should move all its members. The drag handler currently only updates `todo.id`. The architecture's `PATCH /api/todos/positions` batch endpoint is the natural home for that.
+- **Batch position endpoint** (`PATCH /api/todos/positions`): the architecture specifies this for efficiency when many pads move simultaneously. Promoted to story 4-8 (2026-04-23) as a direct follow-up — /spread-out arrival and the retained 4.6 sibling-nudge commit both fan out individual PATCHes on release, which the batch endpoint will collapse into a single request.
+- **Position persistence during drag of a selection**: once story 4-7 lands the selection-drag-and-repel mechanic, dragging a selection should move all its members. The current drag handler only updates `todo.id`. The batch endpoint in story 4-8 is the natural home for that.
 - **2-second debounce on continuous repositioning**: story 4.3 specified debounced position saves. This story uses a single on-release PATCH, which is simpler and sufficient. The 2s debounce is appropriate for a "drag then place" UX where the user adjusts position slowly.
-- **Collision avoidance during drag** (pads repel each other as you drag over them): not in scope — would require real-time O(n) force computation per drag event; deferred.
+- **Collision avoidance during drag** — previously "not in scope" was retained from the sprint-change-proposal-2026-04-23 as the `NUDGE_RADIUS` sibling-repulsion mechanic (dragged pad pushes nearby non-selected pads aside). Interim commit threshold is raised to 0.3 world units; story 4-8's batch endpoint will replace the per-pad PATCH fan-out.
 
 ---
 
@@ -317,11 +317,11 @@ Three.js's `onClick` fires after `onPointerUp` on the same mesh. This creates a 
 
 ### Implementation Notes
 
-- **OrbitControls LMB-pan dropped entirely** — rather than adding a `padInteractionActive` store flag to toggle `OrbitControls.enabled` during pad drag (per-user suggestion, simpler than the initial subscribe-based plan), the fix is a one-line config: `mouseButtons={{ RIGHT: THREE.MOUSE.ROTATE }}` with LEFT omitted. Plain left-drag is now always a pad interaction; users retain pan via Ctrl+RMB (OrbitControls' built-in modifier swap on the ROTATE button). See [PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx).
+- **OrbitControls LMB-pan dropped entirely** — rather than adding a `padInteractionActive` store flag to toggle `OrbitControls.enabled` during pad drag (per-user suggestion, simpler than the initial subscribe-based plan), the fix is a one-line config: `mouseButtons={{ RIGHT: THREE.MOUSE.PAN }}` with LEFT omitted. Plain left-drag is now always a pad interaction; plain right-drag pans the camera, and Ctrl+RMB flips RIGHT to ROTATE via OrbitControls' built-in modifier swap. See [PondCamera.tsx](frontend/src/components/pond/PondCamera.tsx).
 - **`queryClient` extracted to `api/queryClient.ts`** — the `/spread-out` closure in [main.tsx](frontend/src/main.tsx) needs non-React access to the React Query cache to read visible todos. Moving the client into a shared module is cleaner than a window-global or a registration hook.
-- **`dragPosRef` seeded on pointerDown** (not at ref init) so the pad's current world position always provides a valid fallback on a sub-threshold release (click path). Kept the initial `useRef({x: 0, z: 0})` as a dummy default to avoid reading `posX`/`posZ` before they're computed.
-- **`setPointerCapture` in a try/catch** — jsdom/non-Element targets in unit tests don't implement the method; wrapping keeps test harnesses green without a brittle `typeof` probe.
-- **No batch `PATCH /api/todos/positions`** yet — each pad fires its own PATCH on drag release or spread-out arrival. Noted as a deferred item (see story Dev Notes).
+- **`dragPosRef` seeded on pointerDown** from the pad's live `group.position` (falling back to `posX`/`posZ` only if the group hasn't rendered yet), so a sub-threshold release (click path) and a rapid drag-after-drag (sticky still waiting for refetch) both have visually-correct fallback coords. The initial `useRef({x: 0, z: 0})` remains as a dummy default to avoid reading `posX`/`posZ` before they're computed.
+- **Window-level pointer pipeline (no `setPointerCapture`)** — mesh-level `onPointerDown` attaches `pointermove` / `pointerup` / `pointercancel` listeners directly to `window`. This replaces the originally-planned mesh `onPointerMove`/`onPointerUp` + `setPointerCapture` approach: R3F's event system never fires the mesh's pointerup when the pointer releases off-canvas, leaving stale drag state that re-engaged on the next hover. Window listeners always terminate cleanly regardless of where the pointer ends up, and are torn down inside the up/cancel handlers plus a dedicated unmount cleanup effect.
+- **No batch `PATCH /api/todos/positions`** yet — each pad fires its own PATCH on drag release or spread-out arrival. Noted as a deferred item (see story Dev Notes). Story 4-8 will land the batch endpoint + batch-commit for the sibling-nudge path.
 
 ### Debug Log
 
@@ -345,3 +345,48 @@ Three.js's `onClick` fires after `onPointerUp` on the same mesh. This creates a 
 - [ ] TypeScript clean (`npx tsc --noEmit`)
 - [ ] Backend ruff clean (no changes expected, but confirm)
 - [ ] Committed at task checkpoints per CLAUDE.md
+
+---
+
+### Review Findings (2026-04-23)
+
+Reviewed via `/bmad-code-review` against current-state diff (`12ed4ca^..HEAD`, story-4.2-touched files). 3 parallel adversarial layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor); deduplicated and triaged.
+
+#### Decisions needed — resolved
+
+- [x] [Review][Decision] **Off-window pointerup opens popup via `buttons===0` forced-up branch** — *Resolved 2026-04-23: treat off-window release as cancelled (no popup, detach listeners silently). Reclassified as patch below.*
+- [x] [Review][Decision] **Sibling-nudge PATCH fan-out on drag release** — *Resolved 2026-04-23: (a) raise per-pad commit threshold from 0.05 → 0.3 as an interim (patch below); (b) promote proper batch endpoint + nudge-commit batching to a new story `4-8-batch-position-endpoint` (added to sprint-status.yaml).*
+
+#### Patch findings
+
+- [x] [Review][Patch] **Treat off-window `buttons===0` release as cancelled** [frontend/src/components/pond/LilyPad.tsx ~L709-712 + LilyPad.test.tsx L327-347] — In `onWindowMove`, when `buttons===0`, detach window listeners and skip the sub-threshold click branch. Update the ossifying test to assert `openPopupMock` is NOT called for that path.
+- [x] [Review][Patch] **Raise sibling-nudge per-pad commit threshold 0.05 → 0.3 (interim)** [frontend/src/components/pond/LilyPad.tsx ~L829-850] — Only commits meaningfully-nudged pads; mitigates PATCH fan-out until 4-8 batch endpoint lands.
+- [x] [Review][Patch] **Sticky drag pins pad forever on PATCH failure / backend clamping** [frontend/src/components/pond/LilyPad.tsx:595-606] — `stickyDragRef` cleared only by refetched `todo.positionX/Y` arriving within 0.05 of `dragPosRef`. On mutation error or server-side clamp, refetch never matches; pad pinned visually forever.
+- [x] [Review][Patch] **Pad unmount mid-drag leaves dead `activeDragAnchor`** [frontend/src/components/pond/LilyPad.tsx — unmount cleanup] — `setActiveDragAnchor(null)` only runs in onWindowUp. If the pad is deleted while dragging, anchor persists with a dead id; every other pad permanently nudges against a ghost.
+- [x] [Review][Patch] **NaN/Infinity positions pollute `computeSpreadPositions`** [frontend/src/utils/spreadOut.ts:82] — `?? 0` doesn't catch NaN/Infinity; dx/dist/push propagate NaN; entire solver corrupts. Use `Number.isFinite(...)` guards.
+- [x] [Review][Patch] **Zero-sized canvas rect produces NaN raycast** [frontend/src/components/pond/LilyPad.tsx:774-784] — `gl.domElement.getBoundingClientRect()` width/height 0 during resize/offscreen → dragNDC NaN → pad at NaN world position.
+- [x] [Review][Patch] **Drag continues when pad enters completing/deleting mid-drag** [frontend/src/components/pond/LilyPad.tsx — onWindowMove/onWindowUp] — Guards only exist at pointerDown. Mid-drag state flip (keyboard, external trigger) lets drag complete and PATCH on a dissolving pad.
+- [x] [Review][Patch] **`/spread-out` target not cleared on drag release** [frontend/src/components/pond/LilyPad.tsx — drag-release branch] — `clearTargetPosition` fires on threshold-cross, not release. If `/spread-out` runs mid-drag, after sticky clears the pad lerps away from the user's drop point toward the stale target.
+- [x] [Review][Patch] **Drag-release PATCHes bogus position when raycast never hit water plane** [frontend/src/components/pond/LilyPad.tsx — drag-release branch] — Camera angle that misses the plane leaves `dragPosRef` stale; release still fires PATCH. Add "raycast ever succeeded" flag.
+- [x] [Review][Patch] **`siblingNudge` coincident case (dist ≤ 1e-4) silently skipped** [frontend/src/components/pond/LilyPad.tsx — nudge branch] — Overlapping pads remain overlapping during drag; apply deterministic jitter like spreadOut.ts.
+- [x] [Review][Patch] **Rapid drag-after-drag flashes pad to pre-PATCH position for one frame** [frontend/src/components/pond/LilyPad.tsx — pointerDown body] — Seeding `dragPosRef = {x: posX, z: posZ}` uses stale `todo.positionX` while sticky waits for refetch. Seed from `group.position` when sticky.
+- [x] [Review][Patch] **`onDragEnd?: (x, z) => void` declared and called but never consumed** [frontend/src/components/pond/LilyPad.tsx:498, 507, 776] — Dead interface surface.
+- [x] [Review][Patch] **`spreadOutCommand.test.ts` spies shadowed by `setState` overwrites** [frontend/src/utils/spreadOutCommand.test.ts:1905-1909] — `vi.spyOn` captures pre-overwrite function; subsequent `setState({ setTargetPositions: mockSet })` breaks the spy. Assert directly on store state.
+- [x] [Review][Patch] **Dev Agent Record stale: mentions `setPointerCapture try/catch`; actual impl uses window listeners** [spec file Dev Agent Record → Implementation Notes]
+- [x] [Review][Patch] **Dev Agent Record stale: OrbitControls LMB bullet implies RIGHT stayed ROTATE; actual binding is RIGHT=PAN, Ctrl+RMB=ROTATE** [spec file Dev Agent Record → Implementation Notes]
+- [x] [Review][Patch] **"Collision avoidance during drag — not in scope" deferred-item is now stale** [spec file Dev Notes → Deferred items] — per sprint-change-proposal-2026-04-23 the 4.6 sibling-repulsion mechanic was retained. Rephrase or remove.
+
+#### Deferred
+
+- [x] [Review][Defer] **Multi-touch `activeDragAnchor` singleton: last-written pad wins** [frontend/src/components/pond/LilyPad.tsx + usePondStore.ts] — deferred, pre-existing; multi-touch drag not a stated requirement.
+- [x] [Review][Defer] **`hadDragAnchorRef` misses anchor null-transition if pad is in forming/completing phase** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; narrow timing window.
+- [x] [Review][Defer] **Anchor X→null→Y within a single frame skips commit-nudge** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; narrow timing window.
+- [x] [Review][Defer] **`MAX_ITERATIONS` (80) hit on extreme pad counts without warning** [frontend/src/utils/spreadOut.ts] — deferred, pre-existing; no observable impact at current pad counts.
+- [x] [Review][Defer] **HMR double-register of `/spread-out` command crashes in dev** [frontend/src/main.tsx + slashCommands.ts] — deferred, pre-existing; dev-only.
+- [x] [Review][Defer] **Two consecutive `/spread-out` runs can stick sticky if second target differs** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; narrow.
+- [x] [Review][Defer] **Spread-out arrival fires PATCH for pads that moved only 0.01–0.05 units** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; marginal network waste.
+- [x] [Review][Defer] **`dragPosRef` seeded to posX/posZ ignores drift offset → tiny visible pop at threshold** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; minor visual.
+- [x] [Review][Defer] **`e.stopPropagation()` + shift-click keeps popup open on sibling pad** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; edge UX, partly in 4.6/4.7 selection domain.
+- [x] [Review][Defer] **`queryClient.getQueriesData` merges across visibility triples; targets persist for unmounted pads** [frontend/src/main.tsx] — deferred, pre-existing; narrow.
+- [x] [Review][Defer] **`selectTargetPosition` selector declared but unused** [frontend/src/stores/usePondStore.ts] — deferred, pre-existing; harmless dead export.
+- [x] [Review][Defer] **Drag threshold comment references PondCamera 5px (stale after LEFT removal)** [frontend/src/components/pond/LilyPad.tsx] — deferred, pre-existing; comment-only drift.

@@ -312,25 +312,25 @@ describe('LilyPad', () => {
       expect(updateTodoMutateMock).not.toHaveBeenCalled();
     });
 
-    it('force-terminates the drag if pointermove arrives with no buttons pressed (missed pointerup)', () => {
-      // Simulates the browser's occasional "pointerup never fires"
-      // scenario (e.g. pointer released off-window during a drag).
-      // The next pointermove will arrive with buttons === 0 — the
-      // handler treats that as a synthetic up to prevent the pad
-      // from re-attaching on future hover.
+    it('cancels the drag silently if pointermove arrives with no buttons pressed (off-window release)', () => {
+      // Simulates the browser's "pointerup never fires" scenario —
+      // the pointer is released outside the window/tab and the next
+      // pointermove arrives with buttons === 0. Treat as cancelled:
+      // detach listeners so a later hover cannot re-engage drag, but
+      // do NOT open a popup (the user released outside the app, the
+      // interaction was not a completed click).
       const { container } = render(<LilyPad todo={mockTodo} />);
       const padMesh = container.querySelector('mesh');
       expect(padMesh).toBeTruthy();
       if (!padMesh) return;
       fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
-      // Mouse moved but NO button down → forced up.
+      // Mouse moved but NO button down → cancelled.
       fireEvent.pointerMove(window, { clientX: 200, clientY: 100, pointerId: 1, buttons: 0 });
       // A subsequent hover-move must NOT re-engage drag.
       fireEvent.pointerMove(window, { clientX: 300, clientY: 200, pointerId: 1, buttons: 0 });
-      // Because no drag actually crossed the threshold, this
-      // should register as a click (openPopup fires once).
-      expect(openPopupMock).toHaveBeenCalledTimes(1);
-      // No PATCH — the click branch took over.
+      // Off-window release is NOT a completed click — no popup.
+      expect(openPopupMock).not.toHaveBeenCalled();
+      // And no PATCH either — the drag was aborted.
       expect(updateTodoMutateMock).not.toHaveBeenCalled();
     });
   });

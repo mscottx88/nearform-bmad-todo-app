@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-23 # groups feature removed per sprint-change-proposal-2026-04-23; 4.6 superseded, 5.6 retired, 4.7 added to backlog; 299/299 frontend + 114/114 backend tests green
+last_updated: 2026-04-23 # story 4.2 code review complete — decision 2 promoted to new 4-8 backlog entry (batch position endpoint)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -88,12 +88,13 @@ development_status:
   # Epic 4: Organizing the Pond
   epic-4: in-progress  # opened 2026-04-17 with story 4.1
   4-1-popup-color-swatch-neon-selector: done  # 5 CR patches applied (Escape race, preview leak, empty-string, completed-pad flash, keyboard test); 102/102 tests green
-  4-2-lily-pad-drag-and-spread-out: review  # drag individual pads to reposition; /spread-out slash command resolves overlaps; group-aware algorithm interface (singletons now, real groups later)
+  4-2-lily-pad-drag-and-spread-out: done  # drag individual pads to reposition; /spread-out slash command resolves overlaps; 14 CR patches applied (buttons===0 cancel, sticky clear on error, anchor unmount cleanup, NaN guard, zero-rect guard, completing/deleting mid-drag guard, spread-target clear on release, raycast-succeeded gate, coincident nudge jitter, group-position seed, dead onDragEnd removed, test rewrites, doc corrections, nudge threshold 0.05→0.3 interim); 299/299 tests green; decision 2 promoted to 4-8
   4-3-position-persistence: backlog
   4-4-frontend-a11y-sweep: backlog  # promoted from 2-3/2-7 CR defers — prefers-reduced-motion honoured across LilyPad animations; popup ARIA/dialog semantics + focus trap + Escape-to-close + keyboard-navigable action buttons; SVG callout pointer-events fix
   4-5-react-strict-compliance-sweep: backlog  # promoted from 2-7 CR defer — fix ref mutations/reads during render in PondScene (hasSeenInitialLoadRef) and similar patterns; verify by running the app under <StrictMode> and checking the console is clean
   4-6-lily-pad-clustering-and-groups: superseded  # 2026-04-23: groups feature removed per sprint-change-proposal-2026-04-23.md; archived as *.superseded.md. Selection-drag-and-repel replacement in story 4.7.
   4-7-selection-drag-and-repel: backlog  # NEW 2026-04-23 — FR13 revision + FR40. Shift/Ctrl-click selection drags together as a temporary unit; non-selected pads slide out of the way.
+  4-8-batch-position-endpoint: backlog  # NEW 2026-04-23 — promoted from 4-2 CR decision 2. PATCH /api/todos/positions batch endpoint + frontend wiring to replace per-pad PATCH fan-out from sibling-nudge drag release and /spread-out arrival.
   epic-4-retrospective: pending
 
   # Epic 5: Intelligent Search
