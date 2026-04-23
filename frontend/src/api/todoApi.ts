@@ -116,6 +116,55 @@ export function useUpdateTodo() {
   });
 }
 
+/**
+ * Story 4-8: batch position update.
+ *
+ * Replaces the per-pad PATCH fan-out that drag-release fired for the
+ * dragged pad plus every sibling whose cascade nudge crossed the
+ * commit threshold. One request, one invalidation, one retry budget.
+ *
+ * Request shape: `{ positions: [{ id, positionX, positionY }, ...] }`.
+ * Axios's `decamelize-keys` request interceptor flips the keys to
+ * snake_case on the wire; the backend's `TodoPositionsUpdate` model
+ * is defined in snake_case directly.
+ *
+ * Error handling mirrors `useUpdateTodo`: on mutation entry every id
+ * in the batch has its decay cleared; on exhausted-retry error every
+ * id gets a fresh `setTodoError('update', ...)` — so a partial
+ * network failure decays all involved pads together. Successful
+ * response triggers a single prefix-invalidate on `TODOS_KEY`.
+ */
+export interface UpdatePositionEntry {
+  id: string;
+  positionX: number;
+  positionY: number;
+}
+
+export function useUpdateTodoPositions() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (entries: UpdatePositionEntry[]) => {
+      const { data } = await apiClient.patch<Todo[]>('/todos/positions', {
+        positions: entries,
+      });
+      return data;
+    },
+    onMutate: (entries) => {
+      const store = usePondStore.getState();
+      for (const e of entries) store.clearTodoError(e.id);
+    },
+    onSuccess: (_data, entries) => {
+      const store = usePondStore.getState();
+      for (const e of entries) store.clearTodoError(e.id);
+      queryClient.invalidateQueries({ queryKey: TODOS_KEY });
+    },
+    onError: (err, entries) => {
+      const store = usePondStore.getState();
+      for (const e of entries) store.setTodoError(e.id, 'update', err as Error);
+    },
+  });
+}
+
 export function useRestoreTodo() {
   // Story 3.3: POST /api/todos/:id/restore flips a soft-deleted row's
   // `deleted` back to `false`. Used by the ActionPopup UNDELETE button

@@ -7,7 +7,12 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from src.exceptions import TodoNotFoundError
 from src.models.todo import Todo
-from src.schemas.todo import TodoCreate, TodoResponse, TodoUpdate
+from src.schemas.todo import (
+    TodoCreate,
+    TodoPositionEntry,
+    TodoResponse,
+    TodoUpdate,
+)
 from src.workers import embedding_worker
 
 
@@ -90,6 +95,57 @@ def update_todo(
     db.commit()
     db.refresh(todo)
     return TodoResponse.model_validate(todo)
+
+
+def update_positions(
+    db: Session,
+    entries: list[TodoPositionEntry],
+) -> list[TodoResponse]:
+    """Batch-update positions for many pads in one round-trip.
+
+    Story 4-8. Replaces the per-pad PATCH fan-out that drag-release
+    fired for the dragged pad plus each sibling whose cascade nudge
+    exceeded the commit threshold — previously N PATCHes per release;
+    now exactly one.
+
+    Missing or soft-deleted ids are silently skipped rather than
+    raising 404. This keeps the batch robust against the race where a
+    pad is deleted between drag-start and drag-release: the remaining
+    entries still commit. The client distinguishes "applied" from
+    "dropped" by comparing the returned response's ids against the
+    request's ids.
+    """
+    if not entries:
+        return []
+    ids = [e.id for e in entries]
+    rows = (
+        db.query(Todo)
+        .filter(
+            Todo.id.in_(ids),
+            Todo.deleted == False,  # noqa: E712
+        )
+        .all()
+    )
+    found: dict[uuid.UUID, Todo] = {row.id: row for row in rows}
+    # Apply updates in the request's order. Each entry addresses at
+    # most one Todo (request ids are expected unique; if duplicated,
+    # the LAST entry wins — matches SQL last-write semantics).
+    for entry in entries:
+        todo = found.get(entry.id)
+        if todo is None:
+            continue
+        todo.position_x = entry.position_x
+        todo.position_y = entry.position_y
+    db.commit()
+    # Return responses in input order, skipping missing ids.
+    responses: list[TodoResponse] = []
+    for entry in entries:
+        todo = found.get(entry.id)
+        if todo is None:
+            continue
+        db.refresh(todo)
+        responses.append(TodoResponse.model_validate(todo))
+    return responses
 
 
 def delete_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:

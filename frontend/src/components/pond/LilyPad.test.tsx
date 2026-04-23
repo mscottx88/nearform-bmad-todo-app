@@ -16,7 +16,12 @@ const { updateTodoMutateMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../api/todoApi', () => ({
-  useUpdateTodo: () => ({ mutate: updateTodoMutateMock }),
+  // Story 4-8: LilyPad now calls useUpdateTodoPositions (batch). The
+  // existing test spy is reused under the new hook name so every
+  // existing test's mutate-was-called assertion continues to work —
+  // the test just sees a single-entry array where it previously saw
+  // `{ id, positionX, positionY }`.
+  useUpdateTodoPositions: () => ({ mutate: updateTodoMutateMock }),
   TODOS_KEY: ['todos', 'list'],
 }));
 
@@ -292,17 +297,22 @@ describe('LilyPad', () => {
 
       expect(openPopupMock).not.toHaveBeenCalled();
       expect(updateTodoMutateMock).toHaveBeenCalled();
-      const arg = updateTodoMutateMock.mock.calls[0][0] as {
+      // Story 4-8: batch shape — mutate receives an array of entries.
+      // The dragged pad is always the first entry; any cascade-
+      // displaced siblings follow. Test harness has an empty
+      // `displacedPads` Map so the batch is exactly one entry.
+      const batch = updateTodoMutateMock.mock.calls[0][0] as Array<{
         id: string;
         positionX: number;
         positionY: number;
-      };
-      expect(arg.id).toBe('123');
+      }>;
+      expect(batch).toHaveLength(1);
+      expect(batch[0].id).toBe('123');
       // Position should be a real number (not NaN), and differ
       // from the pad's original (5, 7) — confirming the raycast
       // ran and updated the drag target.
-      expect(Number.isFinite(arg.positionX)).toBe(true);
-      expect(Number.isFinite(arg.positionY)).toBe(true);
+      expect(Number.isFinite(batch[0].positionX)).toBe(true);
+      expect(Number.isFinite(batch[0].positionY)).toBe(true);
       expect(clearTargetPositionMock).toHaveBeenCalledWith('123');
     });
 

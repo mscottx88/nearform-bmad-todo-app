@@ -40,6 +40,7 @@ const mockRestoreTodoMutate = vi.fn();
 vi.mock('../../api/todoApi', () => ({
   useTodos: () => ({ data: mockUseTodosData, isLoading: false }),
   useUpdateTodo: () => ({ mutate: mockUpdateTodoMutate }),
+  useUpdateTodoPositions: () => ({ mutate: mockUpdateTodoMutate }),
   useRestoreTodo: () => ({ mutate: mockRestoreTodoMutate }),
 }));
 

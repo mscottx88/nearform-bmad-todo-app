@@ -41,6 +41,31 @@ class TodoUpdate(BaseModel):
         return _not_whitespace_only(value)
 
 
+class TodoPositionEntry(BaseModel):
+    """Single pad's new position in a batch update.
+
+    Story 4-8: part of the `PATCH /api/todos/positions` batch body.
+    Both coordinates are required (no partial-axis updates) — the
+    endpoint only services "drag placed this pad at (x, y)" scenarios.
+    """
+
+    id: uuid.UUID
+    position_x: float
+    position_y: float
+
+
+class TodoPositionsUpdate(BaseModel):
+    """Batch position update body.
+
+    Story 4-8: `min_length=1` rejects empty batches (no reason to hit
+    the endpoint with nothing to do); `max_length=500` caps the
+    payload against pathological requests (current largest expected
+    batch is a full pond of ~30 pads after a drag release + cascade).
+    """
+
+    positions: list[TodoPositionEntry] = Field(min_length=1, max_length=500)
+
+
 class TodoResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

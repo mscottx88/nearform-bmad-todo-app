@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from src.database import get_db
-from src.schemas.todo import TodoCreate, TodoResponse, TodoUpdate
+from src.schemas.todo import (
+    TodoCreate,
+    TodoPositionsUpdate,
+    TodoResponse,
+    TodoUpdate,
+)
 from src.services import todo_service
 
 router = APIRouter(prefix="/api/todos", tags=["todos"])
@@ -36,6 +41,21 @@ def list_todos(
         include_completed=include_completed,
         include_deleted=include_deleted,
     )
+
+
+# Story 4-8: batch position endpoint. Registered BEFORE the
+# parameterized `/{todo_id}` PATCH so FastAPI's route matcher picks
+# the literal "positions" path segment instead of trying to parse it
+# as a UUID (which would fail but still churn through validation).
+@router.patch(
+    "/positions",
+    response_model=list[TodoResponse],
+)
+def update_positions(
+    data: TodoPositionsUpdate,
+    db: Session = Depends(get_db),
+) -> list[TodoResponse]:
+    return todo_service.update_positions(db, data.positions)
 
 
 @router.patch(

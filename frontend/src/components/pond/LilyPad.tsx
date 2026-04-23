@@ -13,7 +13,10 @@ import {
   selectSearchHit,
   selectIsSelected,
 } from '../../stores/usePondStore';
-import { useUpdateTodo } from '../../api/todoApi';
+import {
+  useUpdateTodoPositions,
+  type UpdatePositionEntry,
+} from '../../api/todoApi';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 import { GlowSource } from './GlowSource';
 
@@ -513,12 +516,14 @@ export function LilyPad({
   // position has shifted noticeably. Separate from siblingNudgeRef so
   // the publish/clear decision is cheap (ref read, no Map clone).
   const isPublishedRef = useRef(false);
-  // Story 4.2: useUpdateTodo — fires PATCH {position_x, position_y}
-  // on drag-release AND on spread-out arrival. Already wires
-  // clearTodoError/setTodoError into the 2.6 decay system, so a
-  // failed position save decays the pad exactly like any other
-  // update failure — no additional error handling needed here.
-  const updateTodo = useUpdateTodo();
+  // Story 4-8: batch position PATCH. Fires on drag release (with the
+  // dragged pad plus all cascade-displaced siblings in one call), on
+  // spread-out arrival (single-entry batch), and previously on the
+  // per-sibling nudge commit — that last path is now folded into the
+  // drag-release batch so the commit block no longer dispatches its
+  // own mutation. Error handling (retry decay, clearTodoError/
+  // setTodoError on every id in the batch) lives inside the hook.
+  const updatePositions = useUpdateTodoPositions();
   // Story 4.2: camera + canvas are needed by the window-level
   // pointermove handler to raycast raw clientX/Y against the water
   // plane. Using useThree (rather than passing these in as props)
@@ -941,11 +946,37 @@ export function LilyPad({
         const releaseStore = usePondStore.getState();
         releaseStore.clearTargetPosition(todo.id);
         if (didRaycast) {
+          // Story 4-8: batch drag-release PATCH. Collect every pad
+          // that was cascade-displaced (published to displacedPads)
+          // alongside this dragged pad, then fire ONE PATCH for the
+          // whole set. The sibling-nudge commit block in useFrame
+          // still resets its own local visual state (sticky,
+          // dragPosRef, nudgeRef) but no longer dispatches its own
+          // mutation — the dragger owns the write.
           stickyDragRef.current = true;
-          updateTodo.mutate({
+          const batch: UpdatePositionEntry[] = [];
+          batch.push({
             id: todo.id,
             positionX: dragPosRef.current.x,
             positionY: dragPosRef.current.z,
+          });
+          releaseStore.displacedPads.forEach((pos, displacedId) => {
+            if (displacedId === todo.id) return;
+            batch.push({
+              id: displacedId,
+              positionX: pos.x,
+              positionY: pos.z,
+            });
+          });
+          updatePositions.mutate(batch);
+          // Each committed sibling drops out of displacedPads right
+          // away — on the next frame they'd already mirror their
+          // committed position via posX (after refetch) but clearing
+          // eagerly prevents any chance of a cascade-chase against a
+          // stale secondary anchor.
+          releaseStore.displacedPads.forEach((_, displacedId) => {
+            if (displacedId === todo.id) return;
+            releaseStore.clearDisplacedPad(displacedId);
           });
         }
 
@@ -965,7 +996,7 @@ export function LilyPad({
       window.addEventListener('pointerup', onWindowUp);
       window.addEventListener('pointercancel', onWindowUp);
     },
-    [todo.id, posX, posZ, camera, gl, updateTodo, detachWindowListeners],
+    [todo.id, posX, posZ, camera, gl, updatePositions, detachWindowListeners],
   );
 
   const padShape = useMemo(
@@ -1547,11 +1578,18 @@ export function LilyPad({
       const liveAnchor = usePondStore.getState().activeDragAnchor;
       const hadLiveAnchor = hadDragAnchorRef.current;
       hadDragAnchorRef.current = liveAnchor !== null;
-      // Only commit a sibling-nudge as a persistent position change
-      // when the displacement is visually meaningful. 0.3 world units
-      // (~30% of a pad radius) beats the sub-5cm "passing nudges" that
-      // would otherwise fan out a PATCH per nearby pad on every drag
-      // release. Interim until story 4-8 lands a batch-position endpoint.
+      // Story 4-8: sibling-nudge commit is now LOCAL ONLY. On
+      // drag-release (activeDragAnchor transitions non-null → null)
+      // this block still pins the pad at its displaced position via
+      // sticky + dragPosRef and resets the nudge ref — but the PATCH
+      // for the new position is dispatched by the DRAGGER as a single
+      // batch (see onWindowUp above, which reads `displacedPads` and
+      // builds the full payload). That collapses the previous N-way
+      // PATCH fan-out into one request.
+      //
+      // The 0.3 visual threshold still filters tiny passing nudges
+      // from acquiring stickyness they didn't earn. (Below-threshold
+      // displacements keep their ref value and no local visual flip.)
       if (
         hadLiveAnchor &&
         liveAnchor === null &&
@@ -1564,15 +1602,15 @@ export function LilyPad({
         const commitZ = posZ + siblingNudgeRef.current.z;
         dragPosRef.current = { x: commitX, z: commitZ };
         stickyDragRef.current = true;
-        updateTodo.mutate({
-          id: todo.id,
-          positionX: commitX,
-          positionY: commitZ,
-        });
         siblingNudgeRef.current = { x: 0, z: 0 };
-        // Cascade: pad just committed — unpublish from secondary
-        // anchors so downstream pads don't keep chasing this id's
-        // (now-cleared) displacement.
+        // The dragger's onWindowUp batch fires via the shared
+        // `displacedPads` map; we don't need to publish ourselves
+        // here because we were already published while being shoved
+        // (and the dragger reads the map eagerly before clearing it).
+        // But if we were below the PUBLISH threshold when the
+        // dragger fired, we'd miss the batch — clear ourselves
+        // regardless so future cascade reads don't chase a stale
+        // position.
         if (isPublishedRef.current) {
           usePondStore.getState().clearDisplacedPad(todo.id);
           isPublishedRef.current = false;
@@ -1628,11 +1666,18 @@ export function LilyPad({
             // arrives matching the target.
             dragPosRef.current = { x: spreadTarget.x, z: spreadTarget.z };
             stickyDragRef.current = true;
-            updateTodo.mutate({
-              id: todo.id,
-              positionX: spreadTarget.x,
-              positionY: spreadTarget.z,
-            });
+            // Story 4-8: use the batch endpoint for consistency even
+            // on a single-pad arrival. Spread arrivals stagger across
+            // frames so they don't aggregate — each pad fires its own
+            // one-entry batch. Still a single PATCH path, shared
+            // error handling with the drag-release batch.
+            updatePositions.mutate([
+              {
+                id: todo.id,
+                positionX: spreadTarget.x,
+                positionY: spreadTarget.z,
+              },
+            ]);
           }
         } else {
           // Story 4.6 (user feedback 2026-04-22): ANY pad being dragged
@@ -1730,12 +1775,15 @@ export function LilyPad({
             );
           }
 
-          // Cascade publish/unpublish — only pads shoved beyond this
-          // threshold act as secondary anchors. Keeps small transient
-          // displacements from triggering runaway chain reactions, and
-          // keeps `displacedPads` sparse (only shoved pads, not
-          // every pad that drifted 0.01 units).
-          const DISPLACED_PUBLISH_THRESHOLD = 0.5;
+          // Cascade publish/unpublish — a shoved pad both (a) acts as
+          // a secondary anchor for downstream chain reactions and (b)
+          // joins the dragger's drag-release batch PATCH (story 4-8).
+          // Threshold is aligned with the commit threshold below so
+          // every pad that passes the visual-commit bar also makes it
+          // into the backend batch — otherwise small-but-committed
+          // displacements would be visually pinned (sticky) but never
+          // reach the server, resetting on refresh.
+          const DISPLACED_PUBLISH_THRESHOLD = 0.3;
           const nudgeMag = Math.sqrt(
             siblingNudgeRef.current.x * siblingNudgeRef.current.x +
               siblingNudgeRef.current.z * siblingNudgeRef.current.z,

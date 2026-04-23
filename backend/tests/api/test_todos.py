@@ -123,6 +123,102 @@ def test_update_todo_color(client: TestClient) -> None:
     assert response.json()["color"] == "#ffd700"
 
 
+def test_update_positions_batch(client: TestClient) -> None:
+    # Create three pads with distinct starting positions. The batch
+    # endpoint then shifts all three in a single request; the response
+    # echoes the committed state and GET reflects the same values.
+    id_a = client.post("/api/todos", json={"text": "A"}).json()["id"]
+    id_b = client.post("/api/todos", json={"text": "B"}).json()["id"]
+    id_c = client.post("/api/todos", json={"text": "C"}).json()["id"]
+    response = client.patch(
+        "/api/todos/positions",
+        json={
+            "positions": [
+                {"id": id_a, "position_x": 1.5, "position_y": 2.5},
+                {"id": id_b, "position_x": -3.0, "position_y": 4.0},
+                {"id": id_c, "position_x": 0.0, "position_y": -1.0},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 3
+    # Response preserves input order.
+    assert [row["id"] for row in body] == [id_a, id_b, id_c]
+    assert body[0]["position_x"] == 1.5
+    assert body[0]["position_y"] == 2.5
+    assert body[1]["position_x"] == -3.0
+    assert body[2]["position_y"] == -1.0
+
+
+def test_update_positions_skips_missing_ids(client: TestClient) -> None:
+    # Mixed batch: one real id, one fabricated id. The batch applies
+    # the real one and silently drops the missing — keeps drag-release
+    # batches robust against a sibling being deleted between drag-start
+    # and drag-release.
+    real_id = client.post("/api/todos", json={"text": "Real"}).json()["id"]
+    fake_id = str(uuid.uuid4())
+    response = client.patch(
+        "/api/todos/positions",
+        json={
+            "positions": [
+                {"id": real_id, "position_x": 7.0, "position_y": 8.0},
+                {"id": fake_id, "position_x": 99.0, "position_y": 99.0},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == real_id
+    assert body[0]["position_x"] == 7.0
+
+
+def test_update_positions_rejects_empty_batch(client: TestClient) -> None:
+    response = client.patch("/api/todos/positions", json={"positions": []})
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+
+
+def test_update_positions_does_not_touch_other_fields(client: TestClient) -> None:
+    # Batch must leave text / completed / color untouched — it is a
+    # position-only endpoint. Verifies no accidental setattr of other
+    # request keys via model_dump side effects.
+    create_resp = client.post(
+        "/api/todos",
+        json={"text": "Stays intact", "color": "#ff00aa"},
+    )
+    todo_id = create_resp.json()["id"]
+    # Complete the pad first so we can see if the batch accidentally
+    # flips it.
+    client.patch(f"/api/todos/{todo_id}", json={"completed": True})
+    response = client.patch(
+        "/api/todos/positions",
+        json={"positions": [{"id": todo_id, "position_x": 5.5, "position_y": 6.5}]},
+    )
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["position_x"] == 5.5
+    assert row["position_y"] == 6.5
+    assert row["text"] == "Stays intact"
+    assert row["color"] == "#ff00aa"
+    assert row["completed"] is True
+
+
+def test_update_positions_skips_soft_deleted(client: TestClient) -> None:
+    # A soft-deleted row in the batch is dropped from the response and
+    # its position on disk remains unchanged. Mirrors the single-PATCH
+    # `_get_active_todo` filter.
+    todo_id = client.post("/api/todos", json={"text": "About to die"}).json()["id"]
+    client.delete(f"/api/todos/{todo_id}")
+    response = client.patch(
+        "/api/todos/positions",
+        json={"positions": [{"id": todo_id, "position_x": 1.0, "position_y": 2.0}]},
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_update_todo_not_found(client: TestClient) -> None:
     fake_id = str(uuid.uuid4())
     response = client.patch(
