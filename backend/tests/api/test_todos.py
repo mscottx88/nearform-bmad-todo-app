@@ -205,18 +205,26 @@ def test_update_positions_does_not_touch_other_fields(client: TestClient) -> Non
     assert row["completed"] is True
 
 
-def test_update_positions_skips_soft_deleted(client: TestClient) -> None:
-    # A soft-deleted row in the batch is dropped from the response and
-    # its position on disk remains unchanged. Mirrors the single-PATCH
-    # `_get_active_todo` filter.
-    todo_id = client.post("/api/todos", json={"text": "About to die"}).json()["id"]
+def test_update_positions_accepts_soft_deleted(client: TestClient) -> None:
+    # Soft-deleted pads remain draggable through `/show-deleted`, and
+    # the client's drag pipeline drives position through this batch
+    # endpoint. Position is a layout attribute that should persist
+    # regardless of deletion state, so the batch MUST apply to a
+    # soft-deleted row.
+    create_resp = client.post("/api/todos", json={"text": "Deleted but draggable"})
+    todo_id = create_resp.json()["id"]
     client.delete(f"/api/todos/{todo_id}")
     response = client.patch(
         "/api/todos/positions",
         json={"positions": [{"id": todo_id, "position_x": 1.0, "position_y": 2.0}]},
     )
     assert response.status_code == 200
-    assert response.json() == []
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["id"] == todo_id
+    assert body[0]["position_x"] == 1.0
+    assert body[0]["position_y"] == 2.0
+    assert body[0]["deleted"] is True
 
 
 def test_update_todo_not_found(client: TestClient) -> None:

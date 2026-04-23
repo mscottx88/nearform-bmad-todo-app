@@ -108,24 +108,18 @@ def update_positions(
     exceeded the commit threshold — previously N PATCHes per release;
     now exactly one.
 
-    Missing or soft-deleted ids are silently skipped rather than
-    raising 404. This keeps the batch robust against the race where a
-    pad is deleted between drag-start and drag-release: the remaining
-    entries still commit. The client distinguishes "applied" from
-    "dropped" by comparing the returned response's ids against the
-    request's ids.
+    Missing ids are silently skipped — keeps the batch robust against
+    the race where a pad is deleted between drag-start and drag-
+    release. Soft-deleted rows (`deleted=true`) are NOT filtered out:
+    `/show-deleted` renders those pads as interactive, and their
+    layout should persist when nudged or dragged just like an active
+    pad. Position is a layout attribute, orthogonal to completion /
+    deletion state.
     """
     if not entries:
         return []
     ids = [e.id for e in entries]
-    rows = (
-        db.query(Todo)
-        .filter(
-            Todo.id.in_(ids),
-            Todo.deleted == False,  # noqa: E712
-        )
-        .all()
-    )
+    rows = db.query(Todo).filter(Todo.id.in_(ids)).all()
     found: dict[uuid.UUID, Todo] = {row.id: row for row in rows}
     # Apply updates in the request's order. Each entry addresses at
     # most one Todo (request ids are expected unique; if duplicated,
