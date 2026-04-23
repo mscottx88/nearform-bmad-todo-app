@@ -138,6 +138,7 @@ export interface UpdatePositionEntry {
   id: string;
   positionX: number;
   positionY: number;
+  rotationY: number;
 }
 
 export function useUpdateTodoPositions() {

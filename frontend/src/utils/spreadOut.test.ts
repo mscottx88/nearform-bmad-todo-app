@@ -14,6 +14,7 @@ function makeTodo(id: string, x: number | null, y: number | null): Todo {
     positionX: x,
     positionY: y,
     rotationY: 0,
+    driftSeed: 0,
     embeddingStatus: 'pending',
     archived: false,
     archivedAt: null,

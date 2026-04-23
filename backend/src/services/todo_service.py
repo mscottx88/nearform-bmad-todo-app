@@ -130,6 +130,7 @@ def update_positions(
             continue
         todo.position_x = entry.position_x
         todo.position_y = entry.position_y
+        todo.rotation_y = entry.rotation_y
     db.commit()
     # Return responses in input order, skipping missing ids.
     responses: list[TodoResponse] = []

@@ -42,16 +42,20 @@ class TodoUpdate(BaseModel):
 
 
 class TodoPositionEntry(BaseModel):
-    """Single pad's new position in a batch update.
+    """Single pad's new position + rotation in a batch update.
 
     Story 4-8: part of the `PATCH /api/todos/positions` batch body.
-    Both coordinates are required (no partial-axis updates) — the
-    endpoint only services "drag placed this pad at (x, y)" scenarios.
+    All fields are required. 2026-04-23: rotation_y is now part of
+    the batch so pushed-aside pads persist their cascade-rotated
+    facing direction. The dragger sends its CURRENT rotation (no
+    change). Each cascaded sibling sends the rotation it lerped to
+    during the push.
     """
 
     id: uuid.UUID
     position_x: float
     position_y: float
+    rotation_y: float
 
 
 class TodoPositionsUpdate(BaseModel):
@@ -75,10 +79,13 @@ class TodoResponse(BaseModel):
     color: str
     position_x: float | None
     position_y: float | None
-    # 2026-04-23: server-assigned one-time random Y rotation (radians).
-    # Persisted so the pad keeps the same visual orientation across
-    # refreshes instead of re-randomising on every mount.
+    # 2026-04-23: server-assigned Y rotation (radians). Initial value
+    # is random at insert; cascade-driven rotation updates persist via
+    # the batch position endpoint.
     rotation_y: float
+    # 2026-04-23: server-assigned random drift phase. Write-once —
+    # stable across reloads so ambient motion stays consistent.
+    drift_seed: float
     embedding_status: str
     archived: bool
     archived_at: datetime | None

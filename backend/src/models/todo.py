@@ -43,11 +43,23 @@ class Todo(Base):
         Float,
         nullable=True,
     )
-    # 2026-04-23: rotation_y is the pad's one-time random Y-axis
-    # rotation (radians, [0, 2π)), server-generated on insert so the
-    # pad looks the same on every reload. Client never sends it. Not
-    # updatable — a pad's orientation is fixed for its lifetime.
+    # 2026-04-23: rotation_y is the pad's Y-axis rotation (radians,
+    # [0, 2π) initially, server-assigned random on insert). Updated
+    # on drag-release batch PATCH so a pad that was pushed by the
+    # cascade rotates to face away from its pusher and persists that
+    # new orientation. Client provides the new angle in the batch;
+    # backend stores it as-is.
     rotation_y: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        server_default=sa.text("random() * 2 * pi()"),
+    )
+    # 2026-04-23: drift_seed controls the phase of the pad's ambient
+    # sinusoidal drift on the water surface. Server-assigned random
+    # at insert; write-once (client never sets or updates it). Makes
+    # drift phase stable across reloads so the pond looks the same
+    # every session.
+    drift_seed: Mapped[float] = mapped_column(
         Float,
         nullable=False,
         server_default=sa.text("random() * 2 * pi()"),

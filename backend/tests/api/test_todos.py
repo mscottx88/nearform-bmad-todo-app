@@ -21,18 +21,30 @@ def test_create_todo_assigns_random_rotation(client: TestClient) -> None:
     assert r1 != r2
 
 
-def test_update_positions_does_not_change_rotation(client: TestClient) -> None:
-    # rotation_y is write-once — position batch updates must leave
-    # it untouched so a pad's orientation stays stable for its life.
-    create_resp = client.post("/api/todos", json={"text": "Stable rotation"})
+def test_update_positions_applies_rotation(client: TestClient) -> None:
+    # 2026-04-23 (revised): rotation_y is now part of the batch so a
+    # cascade-pushed pad can persist the facing direction it rotated
+    # to during the shove. The batch value overwrites the stored
+    # rotation_y.
+    create_resp = client.post("/api/todos", json={"text": "Rotates on push"})
     todo_id = create_resp.json()["id"]
-    original_rotation = create_resp.json()["rotation_y"]
     response = client.patch(
         "/api/todos/positions",
-        json={"positions": [{"id": todo_id, "position_x": 4.0, "position_y": 5.0}]},
+        json={
+            "positions": [
+                {
+                    "id": todo_id,
+                    "position_x": 4.0,
+                    "position_y": 5.0,
+                    "rotation_y": 1.57,
+                }
+            ]
+        },
     )
     assert response.status_code == 200
-    assert response.json()[0]["rotation_y"] == original_rotation
+    row = response.json()[0]
+    assert row["position_x"] == 4.0
+    assert row["rotation_y"] == 1.57
 
 
 def test_create_todo(client: TestClient) -> None:
@@ -163,9 +175,9 @@ def test_update_positions_batch(client: TestClient) -> None:
         "/api/todos/positions",
         json={
             "positions": [
-                {"id": id_a, "position_x": 1.5, "position_y": 2.5},
-                {"id": id_b, "position_x": -3.0, "position_y": 4.0},
-                {"id": id_c, "position_x": 0.0, "position_y": -1.0},
+                {"id": id_a, "position_x": 1.5, "position_y": 2.5, "rotation_y": 0.1},
+                {"id": id_b, "position_x": -3.0, "position_y": 4.0, "rotation_y": 0.2},
+                {"id": id_c, "position_x": 0.0, "position_y": -1.0, "rotation_y": 0.3},
             ]
         },
     )
@@ -191,8 +203,13 @@ def test_update_positions_skips_missing_ids(client: TestClient) -> None:
         "/api/todos/positions",
         json={
             "positions": [
-                {"id": real_id, "position_x": 7.0, "position_y": 8.0},
-                {"id": fake_id, "position_x": 99.0, "position_y": 99.0},
+                {"id": real_id, "position_x": 7.0, "position_y": 8.0, "rotation_y": 0.0},
+                {
+                    "id": fake_id,
+                    "position_x": 99.0,
+                    "position_y": 99.0,
+                    "rotation_y": 0.0,
+                },
             ]
         },
     )
@@ -223,7 +240,16 @@ def test_update_positions_does_not_touch_other_fields(client: TestClient) -> Non
     client.patch(f"/api/todos/{todo_id}", json={"completed": True})
     response = client.patch(
         "/api/todos/positions",
-        json={"positions": [{"id": todo_id, "position_x": 5.5, "position_y": 6.5}]},
+        json={
+            "positions": [
+                {
+                    "id": todo_id,
+                    "position_x": 5.5,
+                    "position_y": 6.5,
+                    "rotation_y": 0.0,
+                }
+            ]
+        },
     )
     assert response.status_code == 200
     row = response.json()[0]
@@ -245,7 +271,16 @@ def test_update_positions_accepts_soft_deleted(client: TestClient) -> None:
     client.delete(f"/api/todos/{todo_id}")
     response = client.patch(
         "/api/todos/positions",
-        json={"positions": [{"id": todo_id, "position_x": 1.0, "position_y": 2.0}]},
+        json={
+            "positions": [
+                {
+                    "id": todo_id,
+                    "position_x": 1.0,
+                    "position_y": 2.0,
+                    "rotation_y": 0.0,
+                }
+            ]
+        },
     )
     assert response.status_code == 200
     body = response.json()

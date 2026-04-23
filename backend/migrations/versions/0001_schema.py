@@ -30,6 +30,7 @@ def upgrade() -> None:
         sa.Column('position_x', sa.Float(), nullable=True),
         sa.Column('position_y', sa.Float(), nullable=True),
         sa.Column('rotation_y', sa.Float(), server_default=sa.text('random() * 2 * pi()'), nullable=False),
+        sa.Column('drift_seed', sa.Float(), server_default=sa.text('random() * 2 * pi()'), nullable=False),
         sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=768), nullable=True),
         sa.Column('embedding_status', sa.String(length=20), server_default=sa.text("'pending'"), nullable=False),
         sa.Column('archived', sa.Boolean(), server_default=sa.text('false'), nullable=False),

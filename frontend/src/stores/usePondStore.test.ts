@@ -11,6 +11,7 @@ function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
     positionX: 0,
     positionY: 0,
     rotationY: 0,
+    driftSeed: 0,
     embeddingStatus: 'pending',
     archived: false,
     archivedAt: null,
@@ -617,17 +618,29 @@ describe('usePondStore', () => {
     });
 
     it('sets and clears a displaced-pad entry', () => {
-      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
-      expect(usePondStore.getState().displacedPads.get('a')).toEqual({ x: 2, z: 0 });
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0, rotY: 0.5 });
+      expect(usePondStore.getState().displacedPads.get('a')).toEqual({
+        x: 2,
+        z: 0,
+        rotY: 0.5,
+      });
       usePondStore.getState().clearDisplacedPad('a');
       expect(usePondStore.getState().displacedPads.has('a')).toBe(false);
     });
 
-    it('set is a no-op when id/pos are unchanged', () => {
-      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
+    it('set is a no-op when id/pos/rotY are unchanged', () => {
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0, rotY: 0.5 });
       const ref = usePondStore.getState();
-      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0, rotY: 0.5 });
       expect(usePondStore.getState()).toBe(ref);
+    });
+
+    it('set fires when rotY changes even if x/z are identical', () => {
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0, rotY: 0.1 });
+      const ref = usePondStore.getState();
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0, rotY: 0.9 });
+      expect(usePondStore.getState()).not.toBe(ref);
+      expect(usePondStore.getState().displacedPads.get('a')?.rotY).toBe(0.9);
     });
 
     it('clear is a no-op on an absent id', () => {
@@ -637,12 +650,12 @@ describe('usePondStore', () => {
     });
 
     it('multiple entries coexist', () => {
-      usePondStore.getState().setDisplacedPad('a', { x: 1, z: 0 });
-      usePondStore.getState().setDisplacedPad('b', { x: 0, z: 1 });
+      usePondStore.getState().setDisplacedPad('a', { x: 1, z: 0, rotY: 0 });
+      usePondStore.getState().setDisplacedPad('b', { x: 0, z: 1, rotY: 1 });
       const map = usePondStore.getState().displacedPads;
       expect(map.size).toBe(2);
-      expect(map.get('a')).toEqual({ x: 1, z: 0 });
-      expect(map.get('b')).toEqual({ x: 0, z: 1 });
+      expect(map.get('a')).toEqual({ x: 1, z: 0, rotY: 0 });
+      expect(map.get('b')).toEqual({ x: 0, z: 1, rotY: 1 });
     });
   });
 

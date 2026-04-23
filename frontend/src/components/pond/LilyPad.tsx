@@ -39,6 +39,17 @@ const dragNDC = new THREE.Vector2();
 // slightly tighter click tolerance, which reads correctly for a
 // direct-manipulation target vs. a camera orbit).
 const DRAG_THRESHOLD_PX = 4;
+// Shortest-arc lerp for angles (radians). Direct linear interpolation
+// on angle values breaks at the 0 / 2π boundary — lerping from 0.1
+// to (2π − 0.1) the long way would sweep the pad around; this
+// normalises the delta into (-π, π] first so the rotation always
+// takes the nearest route.
+function lerpAngle(current: number, target: number, rate: number): number {
+  let diff = target - current;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+  return current + diff * rate;
+}
 // Arrival threshold for /spread-out — the pad fires PATCH and
 // clears its target once both axes are within this world-unit gap.
 // 0.05 matches the OrbitControls reset-arrive threshold used
@@ -412,13 +423,13 @@ export function LilyPad({
   const [isRecent] = useState(
     () => Date.now() - new Date(todo.createdAt).getTime() < RECENT_THRESHOLD_MS,
   );
-  const [driftSeed] = useState(() => Math.random() * Math.PI * 2);
-  // 2026-04-23: server-assigned rotation — persisted so refreshing
-  // doesn't re-randomise each pad's facing direction. Read directly
-  // from the todo prop; no local useState lock-in needed because
-  // `rotation_y` is write-once on the backend (not updatable via
-  // PATCH), so the prop is stable for this pad's lifetime.
-  const rotationY = todo.rotationY;
+  // 2026-04-23: both seeds now come from the server (Todo.driftSeed
+  // and Todo.rotationY). driftSeed is write-once so the prop is
+  // stable for this pad's lifetime. rotationY is the INITIAL value —
+  // the cascade-driven rotation ref below takes over once a push
+  // applies, and drag-release persists the lerped value as the new
+  // rotation_y in the batch PATCH.
+  const driftSeed = todo.driftSeed;
   const groupRef = useRef<THREE.Group>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
@@ -520,6 +531,14 @@ export function LilyPad({
   // option-2 (2026-04-23): persists across anchor-out-of-range — the pad
   // stays shoved until the next drag pushes it further or commit fires.
   const siblingNudgeRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  // 2026-04-23: live Y-rotation value for this pad. Seeded from
+  // `todo.rotationY` on mount; cascade engagement below lerps it
+  // toward the push direction (Math.atan2(pushZ, pushX)) so a pad
+  // being shoved visibly rotates to face away from its pusher. The
+  // lerped value is published in displacedPads and committed via
+  // the batch PATCH at drag release, then refetched back into
+  // `todo.rotationY` — the ref's seed next mount.
+  const siblingRotationRef = useRef(todo.rotationY);
   // Track "did activeDragAnchor exist on the previous frame" so we can
   // detect the null-transition at drag release and commit the nudge.
   const hadDragAnchorRef = useRef(false);
@@ -722,6 +741,16 @@ export function LilyPad({
   // Keeps this constant co-located with the ref declaration so the
   // relationship is obvious.
   const STICKY_MAX_MS = 5000;
+
+  // 2026-04-23: re-seed the cascade-rotation ref whenever the server-
+  // stored rotation_y changes (after a drag-release batch PATCH +
+  // refetch). Keeps the ref's in-flight lerped value aligned with
+  // the persisted truth once the new value lands; otherwise the pad
+  // would keep rendering at the just-lerped angle forever while
+  // other sources of re-render happened.
+  useEffect(() => {
+    siblingRotationRef.current = todo.rotationY;
+  }, [todo.rotationY]);
 
   // Cleanup effect — on unmount, clear this pad from both the primary
   // (activeDragAnchor) and secondary (displacedPads) anchor channels.
@@ -1004,6 +1033,11 @@ export function LilyPad({
             id: todo.id,
             positionX: dragPosRef.current.x,
             positionY: dragPosRef.current.z,
+            // Dragger doesn't rotate during drag — pass its current
+            // rotation through unchanged so the backend's row keeps
+            // it. Reads from the todo prop (server truth) rather
+            // than siblingRotationRef which the drag bypasses.
+            rotationY: todo.rotationY,
           });
           releaseStore.displacedPads.forEach((pos, displacedId) => {
             if (displacedId === todo.id) return;
@@ -1011,6 +1045,11 @@ export function LilyPad({
               id: displacedId,
               positionX: pos.x,
               positionY: pos.z,
+              // Published by each sibling's useFrame as the lerped
+              // cascade rotation at the moment the dragger read the
+              // map — this is the "face-away-from-pusher" angle the
+              // pad had visibly reached when the drag ended.
+              rotationY: pos.rotY,
             });
           });
           updatePositions.mutate(batch);
@@ -1105,7 +1144,7 @@ export function LilyPad({
   useEffect(() => {
     const group = groupRef.current;
     if (!group?.position) return;
-    group.rotation.y = rotationY;
+    group.rotation.y = todo.rotationY;
     const phase = phaseRef.current;
     if (phase === 'forming') {
       // Creation path: high in the air, invisible, about to fall.
@@ -1762,6 +1801,10 @@ export function LilyPad({
                 id: todo.id,
                 positionX: spreadTarget.x,
                 positionY: spreadTarget.z,
+                // /spread-out is a layout shuffle, not a shove — a
+                // pad reaching its spread target keeps its current
+                // rotation unchanged.
+                rotationY: todo.rotationY,
               },
             ]);
           }
@@ -1851,6 +1894,21 @@ export function LilyPad({
             const targetNudgeX = nudgedX + pushX - posX;
             const targetNudgeZ = nudgedZ + pushZ - posZ;
             lastNudgeTargetRef.current = { x: targetNudgeX, z: targetNudgeZ };
+            // 2026-04-23: cascade-driven rotation. Pad rotates to face
+            // AWAY from its pusher(s) — the direction of the summed
+            // push vector. lerpAngle handles the 0 / 2π wrap so a pad
+            // near angle 0 doesn't sweep the long way around to reach
+            // a target near 2π. Uses the same 0.7 rate as the position
+            // lerp so rotation and motion converge together.
+            const pushMagSq = pushX * pushX + pushZ * pushZ;
+            if (pushMagSq > 1e-8) {
+              const targetAngle = Math.atan2(pushZ, pushX);
+              siblingRotationRef.current = lerpAngle(
+                siblingRotationRef.current,
+                targetAngle,
+                0.7,
+              );
+            }
             // Lerp at 0.7 → ~97% convergence in 3 frames (~50ms at
             // 60fps). Fast enough that siblingNudgeRef effectively
             // tracks the target, so commit can use the current value
@@ -1942,9 +2000,23 @@ export function LilyPad({
         usePondStore.getState().setDisplacedPad(todo.id, {
           x: publishX,
           z: publishZ,
+          // Current lerped rotation so the dragger's batch PATCH at
+          // release persists the angle this pad rotated to during the
+          // push. Dragger reads displacedPads[id].rotY → batch entry.
+          rotY: siblingRotationRef.current,
         });
       } else {
         usePondStore.getState().clearDisplacedPad(todo.id);
+      }
+
+      // Drive the pad's visible rotation from the cascade ref each
+      // frame so a pushed pad's facing direction tracks its lerped
+      // angle (vs. staying at the initial todo.rotationY). Sticky
+      // pads keep their last rotation (the shove they got); once
+      // sticky clears and posX refetches, initial useEffect sets
+      // group.rotation.y back to the new todo.rotationY.
+      if (groupRef.current) {
+        groupRef.current.rotation.y = siblingRotationRef.current;
       }
 
       // Story 2.10: pad rides the water surface. Sample elevation at

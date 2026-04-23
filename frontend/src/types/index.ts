@@ -6,6 +6,7 @@ export interface Todo {
   positionX: number | null;
   positionY: number | null;
   rotationY: number;
+  driftSeed: number;
   embeddingStatus: 'pending' | 'complete' | 'failed';
   archived: boolean;
   archivedAt: string | null;

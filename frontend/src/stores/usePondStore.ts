@@ -184,7 +184,7 @@ interface PondState {
   //
   // Map values are mutated in place (new Map per write) so Zustand
   // shallow-equality spots the change.
-  displacedPads: Map<string, { x: number; z: number }>;
+  displacedPads: Map<string, { x: number; z: number; rotY: number }>;
 
   // Story 4.6 (user feedback): cursor glyph — 'firefly' default;
   // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
@@ -340,7 +340,10 @@ interface PondState {
    * No-op if the same id/pos pair is already set (saves a Map clone
    * on no-change frames).
    */
-  setDisplacedPad: (id: string, pos: { x: number; z: number }) => void;
+  setDisplacedPad: (
+    id: string,
+    pos: { x: number; z: number; rotY: number },
+  ) => void;
 
   /**
    * Story 4.2 cascade: remove this pad from the secondary-anchor map.
@@ -658,7 +661,9 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   setDisplacedPad: (id, pos) => {
     const prev = get().displacedPads.get(id);
-    if (prev && prev.x === pos.x && prev.z === pos.z) return;
+    if (prev && prev.x === pos.x && prev.z === pos.z && prev.rotY === pos.rotY) {
+      return;
+    }
     const next = new Map(get().displacedPads);
     next.set(id, pos);
     set({ displacedPads: next });

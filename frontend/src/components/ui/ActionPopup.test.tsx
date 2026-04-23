@@ -15,6 +15,7 @@ const mockTodo: Todo = {
   positionX: 2,
   positionY: 3,
   rotationY: 0,
+  driftSeed: 0,
   embeddingStatus: 'pending',
   archived: false,
   archivedAt: null,
