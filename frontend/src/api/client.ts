@@ -28,7 +28,16 @@ apiClient.interceptors.response.use(
 
 apiClient.interceptors.request.use((cfg) => ({
   ...cfg,
-  data: cfg.data ? decamelizeKeys(cfg.data as Record<string, unknown>) : cfg.data,
+  // Deep decamelize so nested camelCase keys inside arrays / nested
+  // objects also flip to snake_case. Required for story 4-8's
+  // `PATCH /api/todos/positions` whose payload nests `positionX` /
+  // `positionY` inside `positions[]` — a shallow transform left them
+  // unchanged and the backend's pydantic model rejected the body
+  // with a 422. Symmetric with the response interceptor's deep
+  // camelizeKeys.
+  data: cfg.data
+    ? decamelizeKeys(cfg.data as Record<string, unknown>, { deep: true })
+    : cfg.data,
 }));
 
 export default apiClient;
