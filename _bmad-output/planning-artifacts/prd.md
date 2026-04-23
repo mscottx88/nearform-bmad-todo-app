@@ -1,6 +1,6 @@
 ---
 stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-02b-vision', 'step-02c-executive-summary', 'step-03-success', 'step-04-journeys', 'step-05-domain-skipped', 'step-06-innovation-skipped', 'step-07-project-type', 'step-08-scoping', 'step-09-functional', 'step-10-nonfunctional', 'step-11-polish', 'step-12-complete', 'step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
-lastEdited: '2026-04-16'
+lastEdited: '2026-04-23'
 editHistory:
   - date: '2026-04-14'
     changes: 'Added search user journey (Journey 4), updated requirements table, fixed subjective FR language, removed implementation leakage from FRs/NFRs, fixed NFR metrics'
@@ -9,7 +9,9 @@ editHistory:
   - date: '2026-04-16'
     changes: 'Simplified interaction model: removed egg-hatch completion, aphid-eat deletion, chameleon color picker, and trash/archive lizard with recovery. Replaced with neon wireframe action popup rendered in-scene on pad focus. Unified dissolve-and-fade visual for both complete (green flash + creature spawn) and delete (red flash). Both are soft state transitions — records persist in DB with completed=true or deleted=true, but no longer render in the pond or appear in search. FRs 49 → 46.'
   - date: '2026-04-16'
-    changes: 'Post-validation polish: tightened FR10 ("multiple" → "two or more"), specified popup anchor position in FR3 (upper-right in camera space, viewport-bounded), dropped "fast" descriptor from Reliability NFR.'
+    changes: 'Post-validation polish: specified popup anchor position in FR3 (upper-right in camera space, viewport-bounded), dropped "fast" descriptor from Reliability NFR.'
+  - date: '2026-04-23'
+    changes: 'Removed persistent groups/clusters entirely (FR10, FR11, FR12, FR20) per sprint-change-proposal-2026-04-23. Revised FR13 (drag works with selection as a temporary group). Added FR40 (shift/ctrl-click selection). FR39 updated to drop "group membership" from persisted state. Story 4.6 superseded, Story 5.6 retired, Story 4.7 added to backlog.'
 inputDocuments: []
 workflowType: 'prd'
 documentCounts:
@@ -297,10 +299,8 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 ### Task Organization
 
 - FR9: User can assign a neon color to a todo via the popup Set Color action, which presents a neon color swatch selector inline in the wireframe popup
-- FR10: User can group two or more lily pads into a cluster that floats as a unit with a shared glow aura, initiated via the popup Group action
-- FR11: User can ungroup a cluster via the popup Ungroup action, releasing pads to float independently with outward ripple effects
-- FR12: User can assign an optional label to a cluster that floats above it
-- FR13: User can drag individual lily pads to reposition them or drag them into/out of clusters
+- FR13: User can drag any lily pad to reposition it. If one or more pads are currently selected (see FR40), dragging any selected pad translates every selected pad together and non-selected pads nearby slide out of the way.
+- FR40: User can Shift-click or Ctrl/Cmd-click a lily pad to toggle its inclusion in a session-only selection set; selected pads display a white pulsing outer rim. Pressing Escape (with no popup or search active) clears the selection. Selection is never persisted.
 
 ### Task Discovery
 
@@ -310,7 +310,6 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 - FR17: System ranks filtered results by combined full-text and vector relevance
 - FR18: System updates filtered results in real-time as the user types with 300ms debounce
 - FR19: Matching lily pads surface and glow while non-matching pads submerge and fade during search
-- FR20: Matching clusters surface as units with matching members highlighted and non-matching siblings faded
 - FR21: Camera auto-frames to center on search results
 - FR22: User can clear search by pressing Escape, restoring all pads and resetting camera
 
@@ -341,7 +340,7 @@ Single Page Application built with React, Three.js, and Vite. The frontend deliv
 ### Data Persistence
 
 - FR38: System persists all todos in a relational database across browser sessions, including records marked completed=true or deleted=true
-- FR39: System preserves todo state (text, completion flag, deletion flag, color, group membership, timestamps) across page refreshes
+- FR39: System preserves todo state (text, completion flag, deletion flag, color, position, timestamps) across page refreshes
 - FR40: System stores vector embeddings alongside todo records in a vector-capable database
 
 ### Sound Design

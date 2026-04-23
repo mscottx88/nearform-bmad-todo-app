@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-22 # 4.6 all tasks complete; 328/328 frontend + 141/141 backend; status → review
+last_updated: 2026-04-23 # groups feature removed per sprint-change-proposal-2026-04-23; 4.6 superseded, 5.6 retired, 4.7 added to backlog; 299/299 frontend + 114/114 backend tests green
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,8 @@ development_status:
   4-3-position-persistence: backlog
   4-4-frontend-a11y-sweep: backlog  # promoted from 2-3/2-7 CR defers — prefers-reduced-motion honoured across LilyPad animations; popup ARIA/dialog semantics + focus trap + Escape-to-close + keyboard-navigable action buttons; SVG callout pointer-events fix
   4-5-react-strict-compliance-sweep: backlog  # promoted from 2-7 CR defer — fix ref mutations/reads during render in PondScene (hasSeenInitialLoadRef) and similar patterns; verify by running the app under <StrictMode> and checking the console is clean
-  4-6-lily-pad-clustering-and-groups: review  # ActionPopup group section (Ungroup/Disband/Spread Out/Label); cluster halo ring; cluster drag rigid unit; member drag with sibling repel + pop-out; solo-pad pop-in; camera follow during pop + grip drag; wake primitive + pop animation; /spread-out group aware; no new migration
+  4-6-lily-pad-clustering-and-groups: superseded  # 2026-04-23: groups feature removed per sprint-change-proposal-2026-04-23.md; archived as *.superseded.md. Selection-drag-and-repel replacement in story 4.7.
+  4-7-selection-drag-and-repel: backlog  # NEW 2026-04-23 — FR13 revision + FR40. Shift/Ctrl-click selection drags together as a temporary unit; non-selected pads slide out of the way.
   epic-4-retrospective: pending
 
   # Epic 5: Intelligent Search
@@ -102,7 +103,7 @@ development_status:
   5-3-type-anywhere-search-with-surface-submerge: done  # CR applied 8 patches (stale search state, backspace derived reset, whitespace-only skip, substring safeguard tightening, explicit ftsSupported check, sqrt NaN guard, 500-char cap, spec-text drift); 141/141 frontend + 96/96 backend
   5-4-re-embed-on-text-update: backlog  # promoted from 5-1 CR defer — PATCH /api/todos with new text must reset embedding_status to pending and re-enqueue
   5-5-embedding-reaper-for-pending-rows: backlog  # promoted from 5-1 CR defer — startup or scheduled scan that re-enqueues stuck embedding_status='pending' rows older than a threshold
-  5-6-cluster-aware-search: ready-for-dev  # FR20: matched clusters surface as units; non-matching siblings at 0.35 saturation; matchingGroupIds store slice; depends on story 4.6
+  5-6-cluster-aware-search: retired  # 2026-04-23: FR20 removed per sprint-change-proposal-2026-04-23.md (no clusters). Archived as *.retired.md.
   epic-5-retrospective: pending
 
   # Epic 6: REMOVED (2026-04-16) — trash lizard, auto-archive, and first-run tutorial dropped from scope per PRD simplification

@@ -23,17 +23,14 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 - FR6: User can abort a deletion by clicking the lily pad before the aphid finishes eating
 - FR7: User can distinguish completed todos from active todos by egg state (whole vs. hatched shell), pad color desaturation, and water-level position
 - FR8: User can assign a neon color to a todo by clicking its chameleon and selecting from a color picker
-- FR9: User can group multiple lily pads into a cluster that floats as a unit with a shared glow aura
-- FR10: User can ungroup a cluster, releasing pads to float independently with outward ripple effects
-- FR11: User can assign an optional label to a cluster that floats above it
-- FR12: User can drag individual lily pads to reposition them or drag them into/out of clusters
+- FR12: User can drag any lily pad to reposition it. Selected pads (see FR40-new) drag together as a temporary unit; non-selected pads nearby slide out of the way.
+- FR40 (new 2026-04-23): User can Shift-click or Ctrl/Cmd-click a lily pad to toggle a session-only selection. Escape clears. Persistent groups/clusters were removed per sprint-change-proposal-2026-04-23.md.
 - FR13: User can search todos by typing anywhere outside a focused element — no visible search bar
 - FR14: System matches search input against todos using full-text search
 - FR15: System matches search input against todos using vector similarity search
 - FR16: System ranks filtered results by combined full-text and vector relevance
 - FR17: System updates filtered results in real-time as the user types with 300ms debounce
 - FR18: Matching lily pads surface and glow while non-matching pads submerge and fade during search
-- FR19: Matching clusters surface as units with matching members highlighted and non-matching siblings faded
 - FR20: Camera auto-frames to center on search results
 - FR21: User can clear search by pressing Escape, restoring all pads and resetting camera
 - FR22: System generates a vector embedding for each todo's text content upon creation
@@ -56,7 +53,7 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 - FR39: User sees error states through biological decay on affected pads (bite marks, wilt, texture degradation) and ecosystem creature reactions (scatter, flee)
 - FR40: System returns to a functional state without page refresh after an error occurs — decay marks heal on recovery
 - FR41: System persists all todos in a relational database across browser sessions
-- FR42: System preserves todo state (text, completion status, color, group membership, timestamps) across page refreshes
+- FR42: System preserves todo state (text, completion status, color, position, timestamps) across page refreshes
 - FR43: System stores vector embeddings alongside todo records in a vector-capable database
 - FR44: System provides ambient audio (water, crickets, frog croaks) scaling with ecosystem density — implemented as the last feature
 - FR45: System provides interaction audio (splash on add, chime on complete, crunch on delete) — implemented as the last feature
@@ -91,7 +88,7 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 - AR3: Three.js + React Three Fiber + @react-three/postprocessing + @react-three/drei
 - AR4: TanStack React Query for server state, Zustand for client state
 - AR5: docker-compose with pgvector/pgvector:pg17 image for local PostgreSQL
-- AR6: Normalized database schema: todos, groups, group_memberships, creatures tables
+- AR6: Normalized database schema: todos, creatures tables (groups/group_memberships removed 2026-04-23)
 - AR7: Alembic for database migrations with auto-generation from SQLAlchemy models
 - AR8: Axios client with snake_case ↔ camelCase interceptor for API boundary
 - AR9: Makefile with `make dev` command starting docker-compose + uvicorn + vite dev
@@ -110,7 +107,7 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 - UX-DR6: Color chameleon — click to open neon color picker ring, chameleon previews hovered color in real-time, click to select, Escape to cancel
 - UX-DR7: Trash lizard — wandering resident creature at pond edge, belly size scales with consumed todo count, click to open neon-styled recovery list with NeonScrollbar, comedic regurgitate animation on restore
 - UX-DR8: Ecosystem manager — spawns ambient creatures (scaling with todo count) + tracks hatched creatures (1:1 with completed todos), randomized autonomous movement, emergent micro-events (frog catches firefly, fish leap), LOD scaling with zoom
-- UX-DR9: Lily pad cluster — magnetic drift formation animation, shared glow aura (LightningBorder adapted), optional floating label, drag cluster as unit, search surfaces whole cluster with match/fade differentiation
+- UX-DR9 — RETIRED (2026-04-23). Persistent cluster visuals (halo, label, drag handle) removed per sprint-change-proposal-2026-04-23.md. Selection-based temporary grouping in Story 4.7 uses only the white selection rim.
 - UX-DR10: Interactive camera — OrbitControls with zoom/pan/orbit, angle constraints (no underwater), auto-frame on search results, double-click to reset, smooth damping, zen mode idle drift
 - UX-DR11: Type-anywhere search — global keyboard capture outside focused elements, search text on water surface in monospace retro, debounced 300ms, Escape clears and resets camera
 - UX-DR12: Atmosphere controller — zen mode (glow 0.6, slow, muted, gentle) vs cyberpunk mode (glow 1.4, fast, saturated, active), keyboard shortcut or in-pond toggle
@@ -304,7 +301,7 @@ So that every pad interaction (complete, delete, set color, group) flows through
 **When** I click the pad
 **Then** the camera smoothly glides to frame the pad (300-500ms eased)
 **And** a neon wireframe popup materializes in the 3D scene anchored to the pad's upper-right in camera space, auto-repositioned to stay within the viewport
-**And** the popup renders action buttons as neon wireframe elements: Complete, Delete, Set Color, Group/Ungroup (Ungroup shown only when pad is part of a cluster)
+**And** the popup renders action buttons as neon wireframe elements: Complete, Delete, Set Color
 **And** the popup is rendered with the neon aesthetic (wireframe geometry, glow via Bloom, monospace retro labels)
 
 **Given** the popup is open
@@ -465,34 +462,16 @@ So that I can visually organize my todos without a separate creature interaction
 - New component: `PopupColorSwatch.tsx` — sub-component of `ActionPopup.tsx`
 - Swatches render as neon wireframe elements consistent with the popup aesthetic
 
-### Story 4.2: Lily Pad Clustering & Groups
+### Story 4.2 — SUPERSEDED (2026-04-23)
 
-As a user,
-I want to select multiple lily pads and group them into a cluster that floats as a unit,
-So that I can organize related todos spatially on my pond.
-
-**Acceptance Criteria:**
-
-**Given** the pond has multiple lily pads
-**When** I hold Shift/Ctrl and click pads to select them
-**Then** selected pads pulse with a shared glow
-
-**When** I trigger the group action (press G)
-**Then** selected pads drift magnetically toward each other (500ms animation)
-**And** pads overlap into a tight cluster formation
-**And** a shared glow aura forms around the cluster
-**And** a group is created via `POST /api/groups` with member todo IDs
-
-**When** I type a label while a cluster is focused
-**Then** the label text floats above the cluster in monospace retro neon
-
-**When** I trigger ungroup (press U) on a focused cluster
-**Then** pads release and drift apart with outward ripples (500ms)
-**And** the aura dissolves
-**And** the group is deleted via `DELETE /api/groups/{id}`
-
-**And** I can drag the cluster as a unit to reposition all member pads
-**And** I can drag individual pads in/out of existing clusters
+The original "Lily Pad Clustering & Groups" story (persistent groups,
+halos, labels, drag handles, pop-in/pop-out) was removed per
+`sprint-change-proposal-2026-04-23.md`. The replacement is Story 4.7
+(Selection-Drag & Repel) — shift/ctrl-click produces a session-only
+temporary group that drags together; non-selected pads slide out of
+the way. See the superseded story file at
+`implementation-artifacts/4-6-lily-pad-clustering-and-groups.superseded.md`
+for the archived original scope.
 
 ### Story 4.3: Position Persistence
 
@@ -573,8 +552,7 @@ So that finding todos feels like speaking to the pond and watching it respond.
 **When** results return
 **Then** matching lily pads rise and glow at full intensity
 **And** non-matching pads sink below the surface and fade to translucent
-**And** matching clusters surface as units with matching members highlighted and non-matching siblings faded
-**And** the camera smoothly auto-frames to center on the result cluster
+**And** the camera smoothly auto-frames to center on the matching pads
 
 **When** I press Escape
 **Then** search text dissolves from the water surface

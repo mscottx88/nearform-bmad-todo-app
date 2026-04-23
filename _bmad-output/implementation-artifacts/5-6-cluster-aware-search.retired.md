@@ -1,8 +1,14 @@
-# Story 5.6: Cluster-Aware Search
+# Story 5.6: Cluster-Aware Search — RETIRED
 
-Status: ready-for-dev
+Status: retired
 
-> **Captures PRD FR20**: "Matching clusters surface as units with matching members highlighted and non-matching siblings faded."
+> **⚠️ RETIRED (2026-04-23).** FR20 was removed from the PRD per
+> `planning-artifacts/sprint-change-proposal-2026-04-23.md`. This
+> story depended on `todo.groupId` which no longer exists in the
+> schema. No code was ever merged for this story; this file is
+> retained as historical reference only.
+
+> **Captures PRD FR20** (retired): "Matching clusters surface as units with matching members highlighted and non-matching siblings faded."
 >
 > This story depends on Story 4.6 (lily pad clustering) landing first — specifically `todo.groupId` existing on the `Todo` type and in the search response, and the `matchingGroupIds` concept described below.
 >

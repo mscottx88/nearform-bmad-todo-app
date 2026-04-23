@@ -1,6 +1,14 @@
-# Story 4.6: Lily Pad Clustering & Groups
+# Story 4.6: Lily Pad Clustering & Groups — SUPERSEDED
 
-Status: review
+Status: superseded
+
+> **⚠️ SUPERSEDED (2026-04-23).** Persistent groups were removed from
+> the project per `planning-artifacts/sprint-change-proposal-2026-04-23.md`.
+> The code that implemented this story has been deleted (see commits
+> in that date range). Selection-based temporary grouping replaces
+> the user-visible half — see `4-7-selection-drag-and-repel.md`.
+>
+> This file is retained as historical reference only.
 
 > **Scope note — the deferred grouping system from original Epic 4.2.** PRD FR10–FR12 (group pads, ungroup, cluster label) plus the cluster-drag and drag-in/out-of-clusters portion of FR13. The basic single-pad drag landed in Story 4.2.
 >

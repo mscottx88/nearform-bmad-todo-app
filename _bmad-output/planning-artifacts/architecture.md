@@ -39,7 +39,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - Primary domain: Full-stack with GPU-intensive frontend
 - Complexity level: Medium
-- Estimated architectural components: ~15 (PondScene, LilyPad, CreatureManager, EcosystemManager, SearchEngine, EmbeddingPipeline, TodoAPI, Database, CursorSnake, AtmosphereController, SoundManager, CameraController, TrashLizard, ClusterManager, ColorPicker)
+- Estimated architectural components: ~12 (PondScene, LilyPad, CreatureManager, EcosystemManager, SearchEngine, EmbeddingPipeline, TodoAPI, Database, CursorSnake, AtmosphereController, SoundManager, CameraController, ColorPicker). ClusterManager removed 2026-04-23 per sprint-change-proposal-2026-04-23.md.
 
 ### Technical Constraints & Dependencies
 
@@ -238,21 +238,9 @@ todos (
   updated_at    TIMESTAMP DEFAULT NOW()
 )
 
--- Group/cluster definitions
-groups (
-  id            UUID PRIMARY KEY,
-  label         TEXT,
-  position_x    FLOAT,
-  position_y    FLOAT,
-  created_at    TIMESTAMP DEFAULT NOW()
-)
-
--- Many-to-many: todos belong to groups
-group_memberships (
-  todo_id       UUID REFERENCES todos(id),
-  group_id      UUID REFERENCES groups(id),
-  PRIMARY KEY (todo_id, group_id)
-)
+-- Groups / group_memberships tables REMOVED 2026-04-23 per
+-- sprint-change-proposal-2026-04-23.md. Selection-based temporary
+-- grouping (Story 4.7) is session-only, no persisted schema.
 
 -- Creature registry (tracks hatched creatures for despawn on uncomplete)
 creatures (
@@ -289,15 +277,13 @@ creatures (
 
 ```
 POST   /api/todos              # Create todo → returns todo, triggers async embedding
-GET    /api/todos              # List all active todos (with positions, colors, groups, creatures)
+GET    /api/todos              # List all active todos (with positions, colors, creatures)
 PATCH  /api/todos/:id          # Update (completion, color, position)
 DELETE /api/todos/:id          # Soft-delete (sets deleted=true, deleted_at=NOW())
 
 PATCH  /api/todos/positions    # Batch position update [{id, x, y}, ...]
 
-POST   /api/groups             # Create group (member IDs, optional label)
-PATCH  /api/groups/:id         # Update group (label, members)
-DELETE /api/groups/:id         # Ungroup (todos stay, group dissolves)
+# /api/groups endpoints REMOVED 2026-04-23 per sprint-change-proposal-2026-04-23.md.
 
 GET    /api/search?q=...       # Hybrid search (full-text + vector, ranked results)
 ```
