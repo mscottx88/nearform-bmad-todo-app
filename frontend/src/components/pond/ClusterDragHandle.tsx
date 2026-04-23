@@ -95,10 +95,12 @@ export function ClusterDragHandle({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    e.preventDefault();
-    // setPointerCapture routes subsequent move/up/cancel events back to
-    // the capturing element regardless of where the cursor actually is,
-    // so the drag keeps working when the mouse leaves the handle bounds.
+    // NOTE: do NOT call e.preventDefault() here. preventDefault on
+    // pointerdown suppresses the compatibility mouse events that
+    // CursorFirefly's window.mousemove listener relies on — the firefly
+    // would freeze in place while the handle is being dragged.
+    // setPointerCapture (below) gives us reliable pointer-event routing
+    // without needing preventDefault to block defaults.
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
