@@ -20,7 +20,6 @@ function makeTodo(id: string, x: number | null, y: number | null): Todo {
     deletedAt: null,
     createdAt: '2026-04-22T00:00:00Z',
     updatedAt: '2026-04-22T00:00:00Z',
-    groupId: null,
   };
 }
 

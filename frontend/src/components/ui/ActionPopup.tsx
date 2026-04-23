@@ -27,7 +27,6 @@ function makeRainbowLetters(text: string): ReadonlyArray<{ ch: string; hue: stri
   });
 }
 const SET_COLOR_LETTERS = makeRainbowLetters('Set Color');
-const SET_GROUP_COLOR_LETTERS = makeRainbowLetters('Group Color');
 
 interface ActionPopupProps {
   todo: Todo;
@@ -48,26 +47,6 @@ interface ActionPopupProps {
    * a pick.
    */
   onPreviewColor?: (color: string | null) => void;
-  onGroup: () => void;
-  // Story 4.6: group extension props.
-  isGrouped?: boolean;
-  groupLabel?: string | null;
-  groupColor?: string | null;
-  /** Number of currently-selected pads (excluding the popup pad). */
-  selectedCount?: number;
-  onUngroup?: () => void;
-  onDisband?: () => void;
-  onSpreadGroup?: () => void;
-  onSetLabel?: (label: string | null) => void;
-  onCommitGroupColor?: (color: string) => void;
-  /**
-   * Story 4.6: called on hover/unhover of a Group Color swatch with
-   * the hex (or null). PondScene wires this to
-   * `usePondStore.setGroupColorPreview(groupId, color)` so ClusterHalo
-   * can lerp the ring color in real time while the user considers a
-   * pick — mirrors the per-pad color-preview contract.
-   */
-  onPreviewGroupColor?: (color: string | null) => void;
 }
 
 // Horizontal/vertical offset from the pad's projected screen position to the
@@ -81,28 +60,10 @@ export function ActionPopup({
   onDelete,
   onCommitColor,
   onPreviewColor,
-  onGroup,
-  isGrouped = false,
-  groupLabel,
-  groupColor,
-  selectedCount = 0,
-  onUngroup,
-  onDisband,
-  onSpreadGroup,
-  onSetLabel,
-  onCommitGroupColor,
-  onPreviewGroupColor,
 }: ActionPopupProps) {
   // Story 4.1: Set Color toggles an inline swatch sub-panel.
-  // Only one swatch (pad or group) is open at a time.
   const [swatchOpen, setSwatchOpen] = useState(false);
-  const [groupSwatchOpen, setGroupSwatchOpen] = useState(false);
   const [previewColor, setPreviewColor] = useState<string | null>(null);
-  // Story 4.6: transient preview for the Group Color swatch — parallel
-  // to previewColor for pads.
-  const [previewGroupColor, setPreviewGroupColor] = useState<string | null>(null);
-  // Story 4.6: Label inline input toggle.
-  const [labelOpen, setLabelOpen] = useState(false);
 
   // Notify the parent whenever the hover preview changes. PondScene
   // uses this to push the preview into usePondStore so LilyPad can
@@ -111,12 +72,6 @@ export function ActionPopup({
   useEffect(() => {
     onPreviewColor?.(previewColor);
   }, [previewColor, onPreviewColor]);
-
-  // Story 4.6: mirror onPreviewColor's effect for the group-color
-  // preview so ClusterHalo can lerp its ring color in real time.
-  useEffect(() => {
-    onPreviewGroupColor?.(previewGroupColor);
-  }, [previewGroupColor, onPreviewGroupColor]);
 
   // Story 4.1 CR-patch: whenever the sub-panel closes (via toggle,
   // Escape, or commit), clear any lingering hover preview in local
@@ -131,26 +86,11 @@ export function ActionPopup({
     }
   }, [swatchOpen, previewColor]);
 
-  // Story 4.6: same CR-patch pattern for the group-color preview —
-  // closing the group swatch (via toggle / Escape / commit) clears any
-  // lingering hover preview so the halo reverts cleanly.
-  useEffect(() => {
-    if (!groupSwatchOpen && previewGroupColor !== null) {
-      setPreviewGroupColor(null);
-    }
-  }, [groupSwatchOpen, previewGroupColor]);
-
   // Collapse pad-color swatch (Escape, commit, or second click).
   // Also clears the hover preview so LilyPad reverts immediately.
   const collapse = () => {
     setSwatchOpen(false);
     setPreviewColor(null);
-  };
-  // Collapse group-color swatch — mirrors collapse() for pads. The
-  // preview-clearing effect above reverts the halo via the store.
-  const collapseGroup = () => {
-    setGroupSwatchOpen(false);
-    setPreviewGroupColor(null);
   };
   // Drei <Html> with no `transform` renders a DOM overlay, positioning its
   // top-left at the projection of the given 3D point. The panel and callout
@@ -243,7 +183,7 @@ export function ActionPopup({
           <button
             type="button"
             className="action-popup__button action-popup__button--set-color"
-            onClick={() => { setSwatchOpen((open) => !open); collapseGroup(); }}
+            onClick={() => setSwatchOpen((open) => !open)}
             aria-label="Set Color"
             aria-expanded={swatchOpen}
           >
@@ -252,7 +192,7 @@ export function ActionPopup({
             {SET_COLOR_LETTERS.map(({ ch, hue }, i) =>
               hue === null ? (
                 <span key={i} aria-hidden>
-                  {'\u00a0'}
+                  {' '}
                 </span>
               ) : (
                 <span
@@ -276,109 +216,6 @@ export function ActionPopup({
               }}
               onCollapse={collapse}
             />
-          )}
-          {/* Story 4.6: Group button only shows for non-grouped pads.
-              Disabled (aria-disabled + pointer-events:none) when no
-              other pads are selected — the user must Shift/Ctrl-click
-              peers first before the Group action becomes available. */}
-          {!isGrouped && (
-            <button
-              type="button"
-              className="action-popup__button action-popup__button--group"
-              onClick={selectedCount > 0 ? onGroup : undefined}
-              aria-disabled={selectedCount === 0 ? 'true' : undefined}
-              style={selectedCount === 0 ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
-            >
-              Group
-            </button>
-          )}
-          {/* Story 4.6: group action section — Ungroup / Disband /
-              Spread Out / Label. Only rendered when this pad is a
-              member of a group (isGrouped=true). */}
-          {isGrouped && (
-            <>
-              <hr className="action-popup__group-separator" />
-              <div className="action-popup__group-section">
-                <button
-                  type="button"
-                  className="action-popup__button action-popup__button--group-action"
-                  onClick={onUngroup}
-                >
-                  Ungroup
-                </button>
-                <button
-                  type="button"
-                  className="action-popup__button action-popup__button--group-action"
-                  onClick={onDisband}
-                >
-                  Disband
-                </button>
-                <button
-                  type="button"
-                  className="action-popup__button action-popup__button--group-action"
-                  onClick={onSpreadGroup}
-                >
-                  Spread Out
-                </button>
-                <button
-                  type="button"
-                  className="action-popup__button action-popup__button--group-action"
-                  onClick={() => setLabelOpen(true)}
-                >
-                  Label
-                </button>
-                {labelOpen && (
-                  <input
-                    className="action-popup__label-input"
-                    autoFocus
-                    defaultValue={groupLabel ?? ''}
-                    // Preselect any existing label text (user feedback
-                    // 2026-04-23) — typing immediately replaces the old
-                    // label without needing a manual select-all, while
-                    // still keeping the current value visible for users
-                    // who only want to tweak a character or two (they
-                    // can press End or Arrow to deselect).
-                    onFocus={(e) => e.currentTarget.select()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        onSetLabel?.(e.currentTarget.value.trim() || null);
-                        setLabelOpen(false);
-                      }
-                      if (e.key === 'Escape') setLabelOpen(false);
-                    }}
-                  />
-                )}
-                {/* Group Color — only one of the two swatches can be open at once */}
-                <button
-                  type="button"
-                  className="action-popup__button action-popup__button--set-color"
-                  onClick={() => { setGroupSwatchOpen((open) => !open); collapse(); }}
-                  aria-label="Group Color"
-                  aria-expanded={groupSwatchOpen}
-                >
-                  {SET_GROUP_COLOR_LETTERS.map(({ ch, hue }, i) =>
-                    hue === null ? (
-                      <span key={i} aria-hidden>{' '}</span>
-                    ) : (
-                      <span key={i} style={{ color: hue, textShadow: `0 0 4px ${hue}` }} aria-hidden>
-                        {ch}
-                      </span>
-                    ),
-                  )}
-                </button>
-                {groupSwatchOpen && (
-                  <PopupColorSwatch
-                    committedColor={groupColor || '#00eeff'}
-                    onHover={setPreviewGroupColor}
-                    onCommit={(color) => {
-                      onCommitGroupColor?.(color);
-                      collapseGroup();
-                    }}
-                    onCollapse={collapseGroup}
-                  />
-                )}
-              </div>
-            </>
           )}
         </div>
       </div>

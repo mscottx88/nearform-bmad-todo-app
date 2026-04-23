@@ -51,26 +51,6 @@ vi.mock('../../hooks/usePopupDelete', () => ({
   useDeleteTodoAction: () => vi.fn(),
 }));
 
-vi.mock('../../api/groupApi', () => ({
-  useCreateGroup: () => ({ mutate: vi.fn() }),
-  useUpdateGroup: () => ({ mutate: vi.fn() }),
-  useDeleteGroup: () => ({ mutate: vi.fn() }),
-}));
-
-vi.mock('./ClusterLabel', () => ({
-  ClusterLabel: ({ label }: { label: string }) => (
-    <div data-testid="cluster-label" data-label={label} />
-  ),
-}));
-
-vi.mock('./ClusterHalo', () => ({
-  ClusterHalo: () => null,
-}));
-
-vi.mock('./ClusterDragHandle', () => ({
-  ClusterDragHandle: () => null,
-}));
-
 // Expose dropDelayMs via a data attribute so the staggered-index test can
 // assert what PondScene passes to each LilyPad on initial load.
 vi.mock('./LilyPad', () => ({
@@ -97,7 +77,6 @@ function makeTodo(id: string): Todo {
     deletedAt: null,
     createdAt: '2026-04-16T00:00:00Z',
     updatedAt: '2026-04-16T00:00:00Z',
-    groupId: null,
   };
 }
 
@@ -277,29 +256,4 @@ describe('PondScene', () => {
     expect(usePondStore.getState().colorPreviews.has('a')).toBe(false);
   });
 
-  // ─── Story 4.6: cluster label (AC #12) ───
-  it('renders a ClusterLabel for each group with a non-null label (AC #12)', async () => {
-    // Two todos in the same group, with the group label in the store's
-    // groupLabelCacheRef (normally populated by mutation onSuccess).
-    // We use the real `usePondStore` — set up a cached label by
-    // bypassing the mutation and updating the todos query directly.
-    // Since PondScene derives labels from groupLabelCacheRef (a ref),
-    // and useMemo re-runs when renderTodos changes, we need todos that
-    // share a groupId. The label in the cache starts null, so a label-
-    // bearing ClusterLabel will NOT appear unless the cache is pre-seeded.
-    // Instead, we verify the opposite (no label = no ClusterLabel).
-    mockUseTodosData = [
-      { ...makeTodo('g1'), groupId: 'grp-1' },
-      { ...makeTodo('g2'), groupId: 'grp-1' },
-    ];
-
-    const queryClient = makeTestClient();
-    const { queryAllByTestId } = render(
-      <QueryClientProvider client={queryClient}>
-        <PondScene />
-      </QueryClientProvider>,
-    );
-    // No ClusterLabel when the group's label is null (cache empty at mount).
-    expect(queryAllByTestId('cluster-label')).toHaveLength(0);
-  });
 });

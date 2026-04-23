@@ -585,188 +585,46 @@ describe('usePondStore', () => {
     });
   });
 
-  describe('setHoveredGroupId (story 4.6 AC #13)', () => {
+  describe('setActiveDragAnchor (retained after group removal)', () => {
     beforeEach(() => {
-      usePondStore.setState({ hoveredGroupId: null });
+      usePondStore.setState({ activeDragAnchor: null });
     });
 
-    it('sets a group id', () => {
-      usePondStore.getState().setHoveredGroupId('g-1');
-      expect(usePondStore.getState().hoveredGroupId).toBe('g-1');
-    });
-
-    it('clears on null', () => {
-      usePondStore.getState().setHoveredGroupId('g-1');
-      usePondStore.getState().setHoveredGroupId(null);
-      expect(usePondStore.getState().hoveredGroupId).toBeNull();
-    });
-
-    it('identical re-set is a no-op (no state churn)', () => {
-      usePondStore.getState().setHoveredGroupId('g-1');
-      const refBefore = usePondStore.getState();
-      usePondStore.getState().setHoveredGroupId('g-1');
-      // Zustand preserves object identity when `set` isn't called.
-      expect(usePondStore.getState()).toBe(refBefore);
-    });
-  });
-
-  describe('setGroupDragTarget (story 4.6 AC #14–#17)', () => {
-    beforeEach(() => {
-      usePondStore.setState({ groupDragTarget: null });
-    });
-
-    it('round-trip set and clear', () => {
-      const target = { groupId: 'g', anchorId: 'a', x: 1, z: 2 };
-      usePondStore.getState().setGroupDragTarget(target);
-      expect(usePondStore.getState().groupDragTarget).toEqual(target);
-      usePondStore.getState().setGroupDragTarget(null);
-      expect(usePondStore.getState().groupDragTarget).toBeNull();
-    });
-  });
-
-  describe('setClusterTranslation (story 4.6 AC #23)', () => {
-    beforeEach(() => {
-      usePondStore.setState({ clusterTranslation: null });
-    });
-
-    it('stores the translation delta + baselines', () => {
-      const baselines = new Map([['pad-1', { x: 1, z: 2 }]]);
+    it('stores the anchor and clears on null', () => {
       usePondStore
         .getState()
-        .setClusterTranslation({ groupId: 'g', dx: 0.5, dz: -1.2, baselines });
-      const trans = usePondStore.getState().clusterTranslation;
-      expect(trans?.dx).toBe(0.5);
-      expect(trans?.dz).toBe(-1.2);
-      expect(trans?.baselines.get('pad-1')).toEqual({ x: 1, z: 2 });
+        .setActiveDragAnchor({ padId: 'p1', x: 1, z: 2 });
+      expect(usePondStore.getState().activeDragAnchor).toEqual({ padId: 'p1', x: 1, z: 2 });
+      usePondStore.getState().setActiveDragAnchor(null);
+      expect(usePondStore.getState().activeDragAnchor).toBeNull();
     });
 
-    it('accepts successive updates (offset accumulates)', () => {
-      const baselines = new Map([['pad-1', { x: 0, z: 0 }]]);
+    it('is a no-op when the value is unchanged', () => {
       usePondStore
         .getState()
-        .setClusterTranslation({ groupId: 'g', dx: 0.5, dz: 0, baselines });
+        .setActiveDragAnchor({ padId: 'p1', x: 1, z: 2 });
+      const ref = usePondStore.getState();
       usePondStore
         .getState()
-        .setClusterTranslation({ groupId: 'g', dx: 1.0, dz: 0, baselines });
-      expect(usePondStore.getState().clusterTranslation?.dx).toBe(1.0);
+        .setActiveDragAnchor({ padId: 'p1', x: 1, z: 2 });
+      expect(usePondStore.getState()).toBe(ref);
     });
   });
 
-  describe('firePop / clearPendingPop (story 4.6 AC #7, #18.ii, #20.ii)', () => {
+  describe('setCursorMode (retained after group removal)', () => {
     beforeEach(() => {
-      usePondStore.setState({ pendingPops: new Map() });
+      usePondStore.setState({ cursorMode: 'firefly' });
     });
 
-    it('firePop stamps the todoId with the given time', () => {
-      usePondStore.getState().firePop('pad-1', 123.45);
-      expect(usePondStore.getState().pendingPops.get('pad-1')).toBe(123.45);
+    it('updates the mode', () => {
+      usePondStore.getState().setCursorMode('grab');
+      expect(usePondStore.getState().cursorMode).toBe('grab');
     });
 
-    it('clearPendingPop removes the entry', () => {
-      usePondStore.getState().firePop('pad-1', 10);
-      usePondStore.getState().clearPendingPop('pad-1');
-      expect(usePondStore.getState().pendingPops.has('pad-1')).toBe(false);
-    });
-
-    it('clearPendingPop on missing id is a no-op (same Map ref)', () => {
-      const before = usePondStore.getState().pendingPops;
-      usePondStore.getState().clearPendingPop('nope');
-      expect(usePondStore.getState().pendingPops).toBe(before);
-    });
-  });
-
-  describe('addWake / drainWakes (story 4.6 AC #16)', () => {
-    beforeEach(() => {
-      usePondStore.setState({ wakes: [] });
-    });
-
-    it('addWake appends to the queue', () => {
-      const now = 1000;
-      usePondStore.getState().addWake({ id: 'w1', x: 0, z: 0, angle: 0, bornAt: now });
-      expect(usePondStore.getState().wakes).toHaveLength(1);
-    });
-
-    it('drainWakes empties the queue after shader stamp', () => {
-      usePondStore.getState().addWake({ id: 'a', x: 0, z: 0, angle: 0, bornAt: 0 });
-      usePondStore.getState().addWake({ id: 'b', x: 1, z: 2, angle: 1.5, bornAt: 100 });
-      usePondStore.getState().drainWakes();
-      expect(usePondStore.getState().wakes).toHaveLength(0);
-    });
-
-    it('drainWakes on empty queue keeps identity (no extra re-render)', () => {
-      const before = usePondStore.getState().wakes;
-      usePondStore.getState().drainWakes();
-      expect(usePondStore.getState().wakes).toBe(before);
-    });
-  });
-
-  describe('setGroupMeta (story 4.6 — pop-out/pop-in snapshot source)', () => {
-    beforeEach(() => {
-      usePondStore.setState({ groupMeta: new Map() });
-    });
-
-    it('stores a new meta map', () => {
-      const meta = new Map([
-        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
-      ]);
-      usePondStore.getState().setGroupMeta(meta);
-      expect(usePondStore.getState().groupMeta.get('g1')?.R).toBe(3);
-    });
-
-    it('skips the set when the shape is unchanged (identity preserved)', () => {
-      const meta1 = new Map([
-        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
-      ]);
-      usePondStore.getState().setGroupMeta(meta1);
-      const ref = usePondStore.getState().groupMeta;
-      // Identical content in a fresh Map — should not replace the ref.
-      const meta2 = new Map([
-        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
-      ]);
-      usePondStore.getState().setGroupMeta(meta2);
-      expect(usePondStore.getState().groupMeta).toBe(ref);
-    });
-
-    it('updates when R changes', () => {
-      const meta1 = new Map([
-        ['g1', { centroid: { x: 0, z: 0 }, R: 1, memberIds: ['a'] }],
-      ]);
-      usePondStore.getState().setGroupMeta(meta1);
-      const meta2 = new Map([
-        ['g1', { centroid: { x: 0, z: 0 }, R: 2, memberIds: ['a'] }],
-      ]);
-      usePondStore.getState().setGroupMeta(meta2);
-      expect(usePondStore.getState().groupMeta.get('g1')?.R).toBe(2);
-    });
-  });
-
-  describe('setFollowTarget (story 4.6 AC #18, #20, #24)', () => {
-    beforeEach(() => {
-      usePondStore.setState({ followTarget: null });
-    });
-
-    it('sets a new target', () => {
-      usePondStore.getState().setFollowTarget({ worldX: 5, worldZ: 7 });
-      expect(usePondStore.getState().followTarget).toEqual({ worldX: 5, worldZ: 7 });
-    });
-
-    it('clearing when already null is a no-op', () => {
-      const before = usePondStore.getState();
-      usePondStore.getState().setFollowTarget(null);
-      expect(usePondStore.getState()).toBe(before);
-    });
-
-    it('setting an identical target is a no-op', () => {
-      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
-      const ref = usePondStore.getState().followTarget;
-      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
-      expect(usePondStore.getState().followTarget).toBe(ref);
-    });
-
-    it('clears to null', () => {
-      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
-      usePondStore.getState().setFollowTarget(null);
-      expect(usePondStore.getState().followTarget).toBeNull();
+    it('identical re-set is a no-op', () => {
+      const ref = usePondStore.getState();
+      usePondStore.getState().setCursorMode('firefly');
+      expect(usePondStore.getState()).toBe(ref);
     });
   });
 });

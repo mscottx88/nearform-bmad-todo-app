@@ -12,7 +12,6 @@ import {
   selectColorPreview,
   selectSearchHit,
   selectIsSelected,
-  selectPendingPop,
 } from '../../stores/usePondStore';
 import { useUpdateTodo } from '../../api/todoApi';
 import { EmergingCreature } from '../creatures/EmergingCreature';
@@ -140,34 +139,13 @@ const SELECTION_FADE_DURATION = 0.35;
 // surface geometry (local +0.12 → world ~0.17 when at DROP_Y_REST).
 const SELECTION_RING_Y = 0.12;
 
-// Story 4.6 AC #6, #7, #18.ii, #20.ii: pop animation — a quick scale
-// pulse (1.0 → 1.25 → 1.0) on the pad that has just transitioned
-// group membership (pop-in, pop-out, Ungroup, Disband). POP_DURATION_MS
-// = 150 per spec; the pulse uses a half-sine so it peaks cleanly at
-// t=75ms and returns to 1.0 at t=150ms. POP_SCALE_AMPLITUDE = 0.25
-// adds on top of the resting scale of 1.0, giving the 1.25 peak.
-const POP_DURATION_MS = 150;
-const POP_SCALE_AMPLITUDE = 0.25;
-
-// Story 4.6 (user feedback 2026-04-22): any pad being dragged pushes
-// nearby pads out of the way — not just cluster siblings. The impact
+// Story 4.6 (retained after group removal — sprint-change-proposal-2026-04-23):
+// any pad being dragged pushes nearby pads out of the way. Impact
 // radius is 2× SELECTION_RING_OUTER so two pads "touch" right at the
-// visible halo-ring edge.
-//
-// Nudge formula pushes the sibling to EXACTLY NUDGE_RADIUS from the
-// drag anchor along the radial — this guarantees the two pads end up
-// non-overlapping regardless of how deep the approach went. A simpler
-// "linear overlap × max" push (2026-04-22 feedback iteration) capped
-// the nudge at NUDGE_MAX ≈ 0.8, which wasn't enough to clear an
-// approach that stopped at the anchor (dist ≈ 0 → required push ≈
-// NUDGE_RADIUS), so pads stayed visibly overlapped.
+// visible halo-ring edge. The nudge formula pushes the sibling to
+// EXACTLY NUDGE_RADIUS from the drag anchor along the radial so they
+// end up non-overlapping regardless of how deep the approach went.
 const NUDGE_RADIUS = 2 * SELECTION_RING_OUTER;
-
-// Story 4.6 AC #16: minimum cadence between wake emissions during a
-// grouped-pad drag, and the velocity threshold below which no wakes
-// emit (pad essentially stationary). Units: ms and world-units / ms.
-const WAKE_EMIT_INTERVAL_MS = 80;
-const WAKE_VELOCITY_THRESHOLD = 0.002;
 
 // Story 2.8: pad-action glow on water. Each pad mounts a GlowSource
 // disc just above the water plane; its shader uniforms are driven from
@@ -420,15 +398,6 @@ interface LilyPadProps {
   // passes index * STAGGER_STEP_MS on initial load so pads cascade in.
   // 0 (or omitted) = no stagger.
   dropDelayMs?: number;
-  // Story 4.6 AC #18: fired the moment a grouped pad's drag position
-  // crosses its own halo perimeter. PondScene reacts by PATCHing the
-  // group (or deleting it if only one member would remain) and playing
-  // the pop animation on the escaping pad.
-  onMemberPopOut?: (groupId: string, draggedTodoId: string, dragX: number, dragZ: number) => void;
-  // Story 4.6 AC #20: fired the moment a solo pad's drag position enters
-  // another group's halo. PondScene PATCHes the target group's member
-  // list and plays the pop animation.
-  onSoloPopIn?: (targetGroupId: string, draggedTodoId: string, dragX: number, dragZ: number) => void;
 }
 
 export function LilyPad({
@@ -437,8 +406,6 @@ export function LilyPad({
   onDragEnd,
   focused = false,
   dropDelayMs = 0,
-  onMemberPopOut,
-  onSoloPopIn,
 }: LilyPadProps) {
   // Lazy `useState` initializers so impure calls (`Date.now`, `Math.random`)
   // run exactly once at mount, satisfying `react-hooks/purity`.
@@ -529,35 +496,14 @@ export function LilyPad({
   // catch up to the committed drag target (within the same
   // arrival threshold used by the /spread-out lerp).
   const stickyDragRef = useRef(false);
-  // Story 4.6 AC #18–#20: pop transitions fire at most once per drag.
-  // The snapshots capture the drag-start view of the world — own-group
-  // meta for pop-out, all groups meta for pop-in detection. Cleared on
-  // pointerup alongside the other drag refs.
-  const hasPoppedOutRef = useRef(false);
-  const hasPoppedInRef = useRef(false);
-  const ownGroupSnapshotRef = useRef<{
-    groupId: string;
-    centroid: { x: number; z: number };
-    R: number;
-  } | null>(null);
-  const allGroupsSnapshotRef = useRef<
-    Map<string, { centroid: { x: number; z: number }; R: number }>
-  >(new Map());
-  // Story 4.6 AC #16: wake emission cadence. Each grouped pointermove
-  // checks elapsed time + velocity against thresholds and pushes a wake
-  // entry to the store when both gate. `lastWakeWorldRef` tracks the
-  // previous pointermove's world position so we can compute velocity.
-  const lastWakeAtRef = useRef(0);
-  const lastWakeWorldRef = useRef<{ x: number; z: number; t: number } | null>(null);
-  // Story 4.6 AC #15: accumulated sibling-repulsion offset applied on
-  // top of rest position during an in-progress intra-group drag. Reset
-  // to zero when the anchor releases.
+  // Story 4.6 (retained): accumulated repulsion offset applied on top of
+  // rest position while ANOTHER pad is being dragged nearby. Lerps toward
+  // 0 when no anchor is active. On drag-release, if this pad built up a
+  // significant nudge, commit the new position so it stays out of the
+  // dragged pad's way.
   const siblingNudgeRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  // Story 4.6 (user feedback 2026-04-23): track "did activeDragAnchor
-  // exist on the previous frame" so we can detect the null-transition
-  // at drag release. When it happens, we commit any significant nudge
-  // THIS pad has accumulated so it stays out of the dragged pad's way
-  // (rather than snapping back to its rest position and overlapping).
+  // Track "did activeDragAnchor exist on the previous frame" so we can
+  // detect the null-transition at drag release and commit the nudge.
   const hadDragAnchorRef = useRef(false);
   // Story 4.2: useUpdateTodo — fires PATCH {position_x, position_y}
   // on drag-release AND on spread-out arrival. Already wires
@@ -618,15 +564,6 @@ export function LilyPad({
   // Narrow subscription so only pads whose selection state flips
   // re-render on a toggle. Drives the white-rim oscillation below.
   const isSelected = usePondStore(selectIsSelected(todo.id));
-
-  // Story 4.6: pop-animation trigger. Set to performance.now() by
-  // firePop (Ungroup / Disband / pop-in / pop-out). When present and
-  // within POP_DURATION_MS, a scale pulse + ripple burst fires; then
-  // the entry self-expires via clearPendingPop.
-  const pendingPopAt = usePondStore(selectPendingPop(todo.id));
-  // Fire-once guard for the ripple burst — a new firedAt value
-  // triggers exactly one ripple, not one per frame.
-  const popRippleFiredForRef = useRef<number | null>(null);
 
   // Story 3.3: historical-pad visual treatment discriminator. Computed
   // once per render from `todo.deleted` / `todo.completed`. All 3.3
@@ -834,32 +771,6 @@ export function LilyPad({
       dragPosRef.current = { x: posX, z: posZ };
       activePointerIdRef.current = e.nativeEvent.pointerId;
 
-      // Story 4.6: snapshot the drag-start view of the world for pop
-      // detection. Grouped pad → own-group centroid + R for pop-out;
-      // solo pad → every group's meta for pop-in. Snapshotting (not
-      // reading live) keeps the perimeter stable during the drag so the
-      // pop fires on the original geometry, not on a centroid that
-      // would otherwise track the pad itself via PondScene's memo.
-      hasPoppedOutRef.current = false;
-      hasPoppedInRef.current = false;
-      lastWakeAtRef.current = 0;
-      lastWakeWorldRef.current = null;
-      const storeNow = usePondStore.getState();
-      if (todo.groupId) {
-        const own = storeNow.groupMeta.get(todo.groupId);
-        ownGroupSnapshotRef.current = own
-          ? { groupId: todo.groupId, centroid: { ...own.centroid }, R: own.R }
-          : null;
-        allGroupsSnapshotRef.current = new Map();
-      } else {
-        ownGroupSnapshotRef.current = null;
-        const snap = new Map<string, { centroid: { x: number; z: number }; R: number }>();
-        for (const [gid, meta] of storeNow.groupMeta) {
-          snap.set(gid, { centroid: { ...meta.centroid }, R: meta.R });
-        }
-        allGroupsSnapshotRef.current = snap;
-      }
-
       const onWindowMove = (ev: PointerEvent) => {
         if (activePointerIdRef.current !== ev.pointerId) return;
         const start = dragStartScreenRef.current;
@@ -897,89 +808,12 @@ export function LilyPad({
           const newZ = worldDragPoint.z;
           dragPosRef.current = { x: newX, z: newZ };
 
-          // Story 4.6 (user feedback): publish the drag anchor for
-          // every other pad's nudge logic. Applies to both grouped
-          // and solo drags — any nearby pad slides out of the way.
+          // Publish the drag anchor so every other pad's useFrame
+          // slide-out-of-the-way nudge (NUDGE_RADIUS) tracks the
+          // cursor live. Cleared on release below.
           usePondStore
             .getState()
             .setActiveDragAnchor({ padId: todo.id, x: newX, z: newZ });
-
-          // Story 4.6: grouped-pad branch — publish drag target (for
-          // pop-out detection), emit wakes at cadence + velocity gate,
-          // detect pop-out once per drag.
-          if (todo.groupId) {
-            const store = usePondStore.getState();
-            store.setGroupDragTarget({
-              groupId: todo.groupId,
-              anchorId: todo.id,
-              x: newX,
-              z: newZ,
-            });
-
-            const nowMs = performance.now();
-            const lastWake = lastWakeWorldRef.current;
-            // Velocity in world-units / ms, measured since last wake.
-            // The FIRST move sets the baseline — no wake until we have
-            // two samples to derive a velocity.
-            if (lastWake && nowMs - lastWakeAtRef.current >= WAKE_EMIT_INTERVAL_MS) {
-              const vdx = newX - lastWake.x;
-              const vdz = newZ - lastWake.z;
-              const dt = Math.max(1, nowMs - lastWake.t);
-              const vLen = Math.sqrt(vdx * vdx + vdz * vdz) / dt;
-              if (vLen > WAKE_VELOCITY_THRESHOLD) {
-                const angle = Math.atan2(vdz, vdx);
-                store.addWake({
-                  id: `${todo.id}-${nowMs}`,
-                  x: newX,
-                  z: newZ,
-                  angle,
-                  bornAt: nowMs,
-                });
-                lastWakeAtRef.current = nowMs;
-                lastWakeWorldRef.current = { x: newX, z: newZ, t: nowMs };
-              }
-            } else if (!lastWake) {
-              lastWakeWorldRef.current = { x: newX, z: newZ, t: nowMs };
-            }
-
-            // Pop-out check — AC #18. Camera-follow engagement (AC #18.iii)
-            // deferred after 2026-04-22 user feedback: the 0.12 lerp toward
-            // a moving drag-pos read as a dramatic camera jerk at the
-            // pop-out instant. The pop still fires (mutation + pop
-            // animation); the camera simply stays put so the user keeps
-            // context. Cluster-handle grip-phase follow (Task 10 / AC #24)
-            // remains — that's a handle-driven gesture and the follow
-            // feels correct there.
-            const own = ownGroupSnapshotRef.current;
-            if (!hasPoppedOutRef.current && own) {
-              const dx = newX - own.centroid.x;
-              const dz = newZ - own.centroid.z;
-              const dist = Math.sqrt(dx * dx + dz * dz);
-              if (dist > own.R) {
-                hasPoppedOutRef.current = true;
-                onMemberPopOut?.(own.groupId, todo.id, newX, newZ);
-              }
-            }
-          } else {
-            // Story 4.6 AC #20: solo pad — pop-in detection iterates
-            // the captured all-groups snapshot once, fires the first
-            // hit's callback, then suppresses further checks for this
-            // drag. Camera-follow engagement deferred per user feedback
-            // (see pop-out branch above) — the mutation + pop fire, but
-            // the camera holds position so the drag context isn't lost.
-            if (!hasPoppedInRef.current) {
-              for (const [gid, meta] of allGroupsSnapshotRef.current) {
-                const dx = newX - meta.centroid.x;
-                const dz = newZ - meta.centroid.z;
-                const dist = Math.sqrt(dx * dx + dz * dz);
-                if (dist < meta.R) {
-                  hasPoppedInRef.current = true;
-                  onSoloPopIn?.(gid, todo.id, newX, newZ);
-                  break;
-                }
-              }
-            }
-          }
         }
       };
 
@@ -1014,29 +848,15 @@ export function LilyPad({
         });
         onDragEnd?.(dragPosRef.current.x, dragPosRef.current.z);
 
-        // Story 4.6: tear down drag-time store slices + snapshots. Camera
-        // follow releases (no snap-back per AC #19). groupDragTarget
-        // clears so siblings stop repelling. Snapshots reset for the
-        // next drag cycle.
+        // Tear down drag-time store slices. activeDragAnchor clears so
+        // other pads stop repelling; cursor reverts from 'grabbing' to
+        // 'grab' (pointer almost always still over the pad since the
+        // pad followed the cursor).
         const releaseStore = usePondStore.getState();
-        releaseStore.setGroupDragTarget(null);
         releaseStore.setActiveDragAnchor(null);
-        releaseStore.setFollowTarget(null);
-        // Cursor returns to the hover state ('grab') since the pointer
-        // is almost always still over the pad at release — the pad
-        // follows the cursor. If the cursor has already left the pad
-        // (drag off the canvas), onPointerLeave won't fire because
-        // isDraggingRef was still true; we fall back to 'firefly' on
-        // the next pointermove off-pad.
         if (releaseStore.cursorMode === 'grabbing') {
           releaseStore.setCursorMode('grab');
         }
-        ownGroupSnapshotRef.current = null;
-        allGroupsSnapshotRef.current = new Map();
-        hasPoppedOutRef.current = false;
-        hasPoppedInRef.current = false;
-        lastWakeAtRef.current = 0;
-        lastWakeWorldRef.current = null;
       };
 
       windowMoveRef.current = onWindowMove;
@@ -1609,39 +1429,9 @@ export function LilyPad({
       const selectionOscillation = isSelected
         ? 0.05 * Math.abs(Math.sin(state.clock.elapsedTime * Math.PI * 4))
         : 0;
-      // Story 4.6 AC #6, #7, #18.ii, #20.ii: pop animation pulse. Half-sine
-      // peaks at t=0.5 (75ms elapsed) and returns to 0 at t=1.0 (150ms).
-      // On the first frame we see a new firedAt value, fire a cyan ripple
-      // burst at the pad position; subsequent frames within the window
-      // only drive the scale. When the pulse completes, call
-      // clearPendingPop so the entry doesn't persist in the store.
-      let popScale = 0;
-      if (pendingPopAt !== undefined) {
-        const popElapsedMs = performance.now() - pendingPopAt;
-        if (
-          popElapsedMs >= 0 &&
-          popRippleFiredForRef.current !== pendingPopAt
-        ) {
-          popRippleFiredForRef.current = pendingPopAt;
-          usePondStore.getState().triggerRipple(posX, posZ);
-        }
-        if (popElapsedMs >= 0 && popElapsedMs < POP_DURATION_MS) {
-          const tPop = popElapsedMs / POP_DURATION_MS;
-          popScale = POP_SCALE_AMPLITUDE * Math.sin(Math.PI * tPop);
-        } else if (popElapsedMs >= POP_DURATION_MS) {
-          usePondStore.getState().clearPendingPop(todo.id);
-        }
-      }
-      const targetScale = baseTargetScale + decayFlicker + selectionOscillation + popScale;
+      const targetScale = baseTargetScale + decayFlicker + selectionOscillation;
       const currentScale = group.scale.x;
-      // Pop pulse is a short 150ms burst; the usual COMPLETION_LERP=0.05
-      // would damp it into near-invisibility. When popScale is active,
-      // snap to the target so the pulse actually reaches its 1.25 peak.
-      if (popScale > 0) {
-        group.scale.setScalar(targetScale);
-      } else {
-        group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
-      }
+      group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
 
       // Story 4.6 (user feedback 2026-04-23): on drag-release (anchor
       // transitions non-null → null), if this pad built up a significant
@@ -1777,38 +1567,14 @@ export function LilyPad({
             nudgeZ,
             0.35,
           );
-          // Story 4.6 AC #21–#25: cluster-handle translation. When a
-          // cluster-drag handle is active (or held sticky during the
-          // post-release refetch window), the store carries the drag's
-          // (dx, dz) offset AND a Map of pre-drag baselines per member.
-          // We read the BASELINE for this pad and add the offset,
-          // rather than reading the (possibly-refetched) todo.positionX
-          // and adding the offset — the latter double-applies the
-          // translation for the one tick between React Query's cache
-          // update and the effect that clears clusterTranslation,
-          // producing a visible flash at 2×dx.
-          const clusterTrans = usePondStore.getState().clusterTranslation;
-          const clusterBase =
-            clusterTrans &&
-            todo.groupId &&
-            clusterTrans.groupId === todo.groupId
-              ? clusterTrans.baselines.get(todo.id)
-              : undefined;
-          const baseX = clusterBase?.x ?? posX;
-          const baseZ = clusterBase?.z ?? posZ;
-          const clusterDx = clusterBase && clusterTrans ? clusterTrans.dx : 0;
-          const clusterDz = clusterBase && clusterTrans ? clusterTrans.dz : 0;
-
           group.position.x =
-            baseX +
+            posX +
             Math.sin(t * 0.3 + seed) * 0.08 * ramp +
-            siblingNudgeRef.current.x +
-            clusterDx;
+            siblingNudgeRef.current.x;
           group.position.z =
-            baseZ +
+            posZ +
             Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp +
-            siblingNudgeRef.current.z +
-            clusterDz;
+            siblingNudgeRef.current.z;
         }
       }
 

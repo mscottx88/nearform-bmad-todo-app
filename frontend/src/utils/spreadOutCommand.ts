@@ -25,12 +25,6 @@ import type { Todo } from '../types';
  * command registry. `getTodos` is invoked inside `execute()` at
  * dispatch time, so every invocation pulls the latest pad list
  * rather than closing over a stale snapshot.
- *
- * Story 4.6 (future): the second arg of `computeSpreadPositions`
- * is a `Map<todoId, groupId>` that makes the algorithm group-aware.
- * For story 4.2 we always pass `new Map()` — no groups exist yet.
- * Story 4.6's Task 15 extends this function to build the map from
- * `todo.groupId`.
  */
 export function registerSpreadOutCommand(
   getTodos: () => readonly Todo[],
@@ -48,15 +42,10 @@ export function registerSpreadOutCommand(
     project: (world) => world,
     execute: () => {
       const todos = getTodos();
-      // Story 4.6 (user feedback 2026-04-23): treat every pad as its
-      // own singleton so /spread-out actually spreads. The earlier
-      // "groups move as rigid units" behavior (AC #30) meant that a
-      // pond where all pads lived inside one cluster produced an
-      // empty target map (every pair skipped same-group repulsion)
-      // and the command silently did nothing. Users expect /spread-
-      // out to resolve overlaps — preserving an exact cluster layout
-      // is subordinate to that goal. The group's own Spread Out
-      // button still exists for layout-within-a-cluster only.
+      // Every pad is its own singleton — groups were removed per
+      // sprint-change-proposal-2026-04-23; spreadOut's `groupings`
+      // arg stays in its signature for forward-compatibility but
+      // we always hand it an empty map now.
       const targets = computeSpreadPositions(todos, new Map());
       if (targets.size > 0) {
         usePondStore.getState().setTargetPositions(targets);

@@ -117,17 +117,8 @@ vi.mock('../../stores/usePondStore', () => ({
       // Story 4.6: Shift/Ctrl/Meta-click on a pad routes into the
       // selection slice instead of the drag / popup pipeline.
       togglePadSelection: togglePadSelectionMock,
-      // Story 4.6: drag pipeline + pop/wake/camera-follow wiring. All
-      // defaulted to jest mocks so the click + drag tests run without
-      // exercising those branches (no groupId on the stock mockTodo).
-      setGroupDragTarget: vi.fn(),
+      // Retained drag-pipeline + cursor wiring (post group removal).
       setActiveDragAnchor: vi.fn(),
-      setFollowTarget: vi.fn(),
-      firePop: vi.fn(),
-      clearPendingPop: vi.fn(),
-      addWake: vi.fn(),
-      groupMeta: new Map(),
-      groupDragTarget: null,
       activeDragAnchor: null,
       cursorMode: 'firefly',
       setCursorMode: vi.fn(),
@@ -166,7 +157,6 @@ const mockTodo: Todo = {
   deletedAt: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
-  groupId: null,
 };
 
 // Story 4.2: the pad's click path is a mesh pointerDown followed
@@ -415,22 +405,4 @@ describe('LilyPad', () => {
     });
   });
 
-  // ─── Story 4.6: cluster ring (AC #11) ───
-  // The ring around a group is rendered by ClusterHalo (scene-level), not
-  // by a second per-pad GlowSource. LilyPad renders one GlowSource always.
-  describe('cluster ring (AC #11)', () => {
-    it('renders exactly one GlowSource regardless of groupId', () => {
-      const { container: c1 } = render(
-        <LilyPad todo={{ ...mockTodo, groupId: null }} />,
-      );
-      expect(c1.querySelectorAll('circlegeometry')).toHaveLength(1);
-    });
-
-    it('renders exactly one GlowSource when groupId is set (ring is ClusterHalo)', () => {
-      const { container: c2 } = render(
-        <LilyPad todo={{ ...mockTodo, groupId: 'group-abc' }} />,
-      );
-      expect(c2.querySelectorAll('circlegeometry')).toHaveLength(1);
-    });
-  });
 });

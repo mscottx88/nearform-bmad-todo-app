@@ -108,14 +108,6 @@ interface PondState {
    * Session-only; not persisted.
    */
   colorPreviews: Map<string, string>;
-  /**
-   * Story 4.6: transient per-group color preview, mirroring the per-pad
-   * colorPreviews slice. Populated by ActionPopup's Group Color swatch
-   * hover; cleared on unhover / commit / popup close. ClusterHalo reads
-   * the previewed color in preference to the committed group color so
-   * the ring lerps toward the new hue live.
-   */
-  groupColorPreviews: Map<string, string>;
 
   // Story 3.1: camera-reset slices. `cameraResetRequestId` is a
   // monotonically-increasing counter — only a *change* is the signal.
@@ -169,86 +161,20 @@ interface PondState {
   // `/spread-out` slash command and is empty at rest.
   padTargetPositions: Map<string, { x: number; z: number }>;
 
-  // Story 4.6: multi-selection set for group creation. Shift/Ctrl-click
-  // on a pad toggles its id in this set; the ActionPopup's Group button
-  // reads `.size` to decide enabled/disabled; PondScene reads the full
-  // set when the user clicks Group to POST /api/groups. Session-only.
+  // Story 4.6 (retained after group removal — sprint-change-proposal-2026-04-23):
+  // session-only multi-selection set. Shift/Ctrl-click on a pad toggles
+  // its id. The new Story 4.7 uses this as the TEMPORARY GROUP — dragging
+  // any selected pad translates the whole selection; non-selected pads
+  // slide out of the way. Escape clears.
   selectedPadIds: Set<string>;
 
-  // Story 4.6: the group whose halo the cursor is currently inside
-  // (via pointerenter on a member or hit-test against the halo circle).
-  // Drives `<ClusterDragHandle>` visibility — only the hovered group's
-  // handle renders. Null when the cursor is not over any group halo.
-  hoveredGroupId: string | null;
-
-  // Story 4.6: live snapshot of the pad being dragged within a group.
-  // Siblings read this imperatively in useFrame to compute their
-  // push-off; PondScene reads it to detect pop-out threshold crossings.
-  // Null at rest and outside of grouped-member drags.
-  groupDragTarget: { groupId: string; anchorId: string; x: number; z: number } | null;
-
-  // Story 4.6 (user feedback 2026-04-22): live snapshot of ANY pad
-  // currently being dragged — grouped or solo. Every OTHER pad reads
-  // this in useFrame and slides out of the way when the drag is within
-  // the "impact radius" (2 × SELECTION_RING_OUTER, so pads visually
-  // touch right at the edge of the halo rings instead of overlapping).
-  // Null at rest. Written by LilyPad on every pointermove during its
-  // own drag; cleared on pointerup.
+  // Story 4.6 (retained): live snapshot of the pad currently being
+  // dragged. Read imperatively by every OTHER pad's useFrame to compute
+  // a slide-out-of-the-way nudge (2 × SELECTION_RING_OUTER radius).
   activeDragAnchor: { padId: string; x: number; z: number } | null;
 
-  // Story 4.6: accumulated translation delta from a cluster-drag grip
-  // phase. Siblings (non-handle-holder members) read this in useFrame
-  // and apply the delta to their rest position. Null at rest.
-  //
-  // `baselines` is the pre-drag snapshot of each member's world position,
-  // captured on pointerdown and frozen for the duration of the drag AND
-  // the post-release refetch window. LilyPad / ClusterHalo use
-  // `baseline + (dx, dz)` rather than `todo.positionX + (dx, dz)` so the
-  // refetch delivering new positionX/Y mid-transition doesn't double-
-  // apply the offset (the pre-4.6-fix flash was at 2×dx for one tick
-  // between React Query's cache update and the effect that clears
-  // clusterTranslation).
-  clusterTranslation: {
-    groupId: string;
-    dx: number;
-    dz: number;
-    baselines: Map<string, { x: number; z: number }>;
-  } | null;
-
-  // Story 4.6: transient pop-animation triggers keyed by todo id.
-  // Value is the R3F-clock time at which the pop was fired. LilyPad
-  // reads its own entry in useFrame, applies the 150ms scale pulse,
-  // and self-expires (calls `clearPendingPop`) after the animation
-  // completes.
-  pendingPops: Map<string, number>;
-
-  // Story 4.6: directional wake emission queue. LilyPad enqueues during
-  // grouped-pad drag; WaterSurface drains each frame and stamps the
-  // entry into a shader wake slot (motion-aligned displacement in the
-  // water vertex shader — no separate mesh). Shader gates lifetime via
-  // elapsed-time check, so the queue is write-only from the store's
-  // perspective; drainWakes empties it after a single tick.
-  wakes: Array<{ id: string; x: number; z: number; angle: number; bornAt: number }>;
-
-  // Story 4.6: per-group metadata cache — centroid + halo radius + member
-  // ids — maintained by PondScene from `renderTodos`. LilyPad snapshots
-  // this at drag start so pop-out (grouped-pad drag exiting its own halo)
-  // and pop-in (solo-pad drag entering another group's halo) can be
-  // detected without threading a members-prop through the component tree.
-  groupMeta: Map<string, { centroid: { x: number; z: number }; R: number; memberIds: string[] }>;
-
-  // Story 4.6 AC #18, #20, #24: camera-follow target during pop-out /
-  // pop-in / grip-phase cluster drag. When set, PondCamera pans toward
-  // the (x, z) world point each frame so the dragged pad / mouse stays
-  // roughly under the cursor. Null at rest. No snap-back on clear —
-  // the camera simply holds its last position per the spec.
-  followTarget: { worldX: number; worldZ: number } | null;
-
-  // Story 4.6 (user feedback 2026-04-23): swap the custom firefly
-  // cursor for a neon grip / fist when hovering or actively dragging
-  // the cluster drag handle. 'firefly' is the default pond cursor;
-  // 'grab' signals "draggable here"; 'grabbing' signals "drag in
-  // progress". Consumed by CursorFirefly.
+  // Story 4.6 (user feedback): cursor glyph — 'firefly' default;
+  // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
   cursorMode: 'firefly' | 'grab' | 'grabbing';
 
   toggleAtmosphere: () => void;
@@ -322,14 +248,6 @@ interface PondState {
    */
   setColorPreview: (todoId: string, color: string | null) => void;
 
-  /**
-   * Story 4.6: set or clear the group-color preview for a group.
-   * Pass a hex string on swatch-hover, null on unhover / commit /
-   * popup close. Mirrors setColorPreview's semantics (no-op when
-   * already in target state) so rapid hover events don't churn.
-   */
-  setGroupColorPreview: (groupId: string, color: string | null) => void;
-
   // Story 5.3: search actions.
   /** Append a printable character to `searchQuery`. Sets `searchActive=true`. */
   appendSearchChar: (ch: string) => void;
@@ -385,96 +303,26 @@ interface PondState {
    */
   clearTargetPosition: (todoId: string) => void;
 
-  // Story 4.6: selection actions.
+  // Story 4.6 (retained): selection actions.
   /** Add id if absent, remove if present. Shift/Ctrl-click entry point. */
   togglePadSelection: (todoId: string) => void;
   /** Empty the selection. Called on Escape (no popup, no search active). */
   clearSelection: () => void;
 
-  // Story 4.6: cluster-hover action.
-  /** Set or clear the currently-hovered group id. Null clears. */
-  setHoveredGroupId: (groupId: string | null) => void;
-
-  // Story 4.6: member-drag target setter/clearer.
   /**
-   * Update the live position of a grouped pad being dragged. Null
-   * clears. Called by LilyPad on every `pointermove` during drag and
-   * again on release.
-   */
-  setGroupDragTarget: (
-    target: { groupId: string; anchorId: string; x: number; z: number } | null,
-  ) => void;
-
-  /**
-   * Story 4.6 (user feedback): set or clear the global active-drag
-   * anchor. Written by LilyPad on every pointermove during any pad
-   * drag; read by EVERY other pad in its useFrame to compute a slide-
-   * out-of-the-way nudge. No-op when the incoming value is identical
-   * to the current one (per-pad useFrame reads would otherwise churn).
+   * Story 4.6 (retained): set or clear the global active-drag anchor.
+   * Written by LilyPad on every pointermove during any pad drag; read
+   * by EVERY other pad in its useFrame to compute a slide-out-of-the-
+   * way nudge. No-op on identical values.
    */
   setActiveDragAnchor: (
     anchor: { padId: string; x: number; z: number } | null,
   ) => void;
 
-  // Story 4.6: cluster-translation setter/clearer.
   /**
-   * Set the cumulative (dx, dz) offset for a cluster-handle drag along
-   * with the pre-drag baseline positions of each member. Null clears.
-   * Consumers (LilyPad, ClusterHalo) compute `baseline + (dx, dz)` so
-   * refetched todo.positionX values mid-transition don't double-apply
-   * the offset.
-   */
-  setClusterTranslation: (
-    translation:
-      | {
-          groupId: string;
-          dx: number;
-          dz: number;
-          baselines: Map<string, { x: number; z: number }>;
-        }
-      | null,
-  ) => void;
-
-  // Story 4.6: pop animation triggers.
-  /**
-   * Stamp `todoId` with the current time so LilyPad's `useFrame` picks
-   * it up and runs the 150ms scale pulse. `firedAt` is supplied by the
-   * caller (caller owns the clock — either performance.now() or the R3F
-   * elapsed time, whichever the consumer uses).
-   */
-  firePop: (todoId: string, firedAt: number) => void;
-  /** Remove the pop entry for `todoId`. Called by LilyPad when the pulse completes. */
-  clearPendingPop: (todoId: string) => void;
-
-  // Story 4.6: wake primitive.
-  /** Append a wake emission. Caller stamps `bornAt` via performance.now(). */
-  addWake: (wake: {
-    id: string;
-    x: number;
-    z: number;
-    angle: number;
-    bornAt: number;
-  }) => void;
-  /** Clear the wake queue — called by WaterSurface after stamping shader slots. */
-  drainWakes: () => void;
-
-  /**
-   * Story 4.6: replace the per-group metadata cache. Called by PondScene
-   * whenever `renderTodos` changes so LilyPad can read current centroid +
-   * radius without threading a members prop through. Identity-preserving
-   * no-op when the content is unchanged by shallow key comparison.
-   */
-  setGroupMeta: (
-    meta: Map<string, { centroid: { x: number; z: number }; R: number; memberIds: string[] }>,
-  ) => void;
-
-  /** Story 4.6 AC #18, #20, #24: set (non-null) or clear (null) the camera follow target. */
-  setFollowTarget: (target: { worldX: number; worldZ: number } | null) => void;
-
-  /**
-   * Story 4.6 (user feedback 2026-04-23): select which glyph the
-   * custom cursor renders. Identity-preserving — writes are skipped
-   * when the mode is unchanged.
+   * Story 4.6 (user feedback): select which glyph the custom cursor
+   * renders. Identity-preserving — writes are skipped when the mode
+   * is unchanged.
    */
   setCursorMode: (mode: 'firefly' | 'grab' | 'grabbing') => void;
 }
@@ -490,7 +338,6 @@ export const usePondStore = create<PondState>((set, get) => ({
   deletingTodos: new Map(),
   errorTodos: new Map(),
   colorPreviews: new Map(),
-  groupColorPreviews: new Map(),
   cameraResetRequestId: 0,
   pendingCameraFit: null,
   searchQuery: '',
@@ -506,14 +353,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   padTargetPositions: new Map(),
 
   selectedPadIds: new Set(),
-  hoveredGroupId: null,
-  groupDragTarget: null,
   activeDragAnchor: null,
-  clusterTranslation: null,
-  pendingPops: new Map(),
-  wakes: [],
-  groupMeta: new Map(),
-  followTarget: null,
   cursorMode: 'firefly',
 
   toggleAtmosphere: () =>
@@ -784,14 +624,6 @@ export const usePondStore = create<PondState>((set, get) => ({
     set({ selectedPadIds: new Set() });
   },
 
-  setHoveredGroupId: (groupId: string | null) => {
-    if (get().hoveredGroupId === groupId) return;
-    set({ hoveredGroupId: groupId });
-  },
-
-  // Story 4.6: live drag-target for intra-group member drag.
-  setGroupDragTarget: (target) => set({ groupDragTarget: target }),
-
   setActiveDragAnchor: (anchor) => {
     const prev = get().activeDragAnchor;
     if (anchor === null) {
@@ -808,64 +640,6 @@ export const usePondStore = create<PondState>((set, get) => ({
       return;
     }
     set({ activeDragAnchor: anchor });
-  },
-
-  setClusterTranslation: (translation) => set({ clusterTranslation: translation }),
-
-  firePop: (todoId: string, firedAt: number) =>
-    set((state) => {
-      const next = new Map(state.pendingPops);
-      next.set(todoId, firedAt);
-      return { pendingPops: next };
-    }),
-
-  clearPendingPop: (todoId: string) => {
-    const current = get().pendingPops;
-    if (!current.has(todoId)) return;
-    const next = new Map(current);
-    next.delete(todoId);
-    set({ pendingPops: next });
-  },
-
-  addWake: (wake) => set((state) => ({ wakes: [...state.wakes, wake] })),
-
-  drainWakes: () =>
-    set((state) => (state.wakes.length === 0 ? state : { wakes: [] })),
-
-  setGroupMeta: (meta) =>
-    set((state) => {
-      // Cheap shallow equality check: same key-set and same memberIds
-      // signature skips the write so PondScene re-running its useEffect
-      // without real change (React Query identity flips) doesn't churn.
-      if (meta.size === state.groupMeta.size) {
-        let changed = false;
-        for (const [id, value] of meta) {
-          const prev = state.groupMeta.get(id);
-          if (
-            !prev ||
-            prev.R !== value.R ||
-            prev.centroid.x !== value.centroid.x ||
-            prev.centroid.z !== value.centroid.z ||
-            prev.memberIds.length !== value.memberIds.length
-          ) {
-            changed = true;
-            break;
-          }
-        }
-        if (!changed) return state;
-      }
-      return { groupMeta: meta };
-    }),
-
-  setFollowTarget: (target) => {
-    if (target === null) {
-      if (get().followTarget === null) return;
-      set({ followTarget: null });
-      return;
-    }
-    const prev = get().followTarget;
-    if (prev && prev.worldX === target.worldX && prev.worldZ === target.worldZ) return;
-    set({ followTarget: target });
   },
 
   setCursorMode: (mode) => {
@@ -916,15 +690,6 @@ export const selectTargetPosition =
   (todoId: string) =>
   (s: PondState): { x: number; z: number } | undefined =>
     s.padTargetPositions.get(todoId);
-
-// Story 4.6: per-pad pop trigger selector. Returns the `firedAt`
-// timestamp when the pad should play its scale-pulse animation, or
-// undefined when there's no pending pop. LilyPad subscribes via this
-// so only the pad about to pop re-renders on firePop.
-export const selectPendingPop =
-  (todoId: string) =>
-  (s: PondState): number | undefined =>
-    s.pendingPops.get(todoId);
 
 // Story 4.6: per-pad selection selector. Narrowly scoped so only the
 // pads whose selection state changed re-render on togglePadSelection.

@@ -21,24 +21,21 @@ const mockTodo: Todo = {
   deletedAt: null,
   createdAt: '2026-04-16T00:00:00Z',
   updatedAt: '2026-04-16T00:00:00Z',
-  groupId: null,
 };
 
 describe('ActionPopup', () => {
-  it('renders four action buttons', () => {
+  it('renders three action buttons', () => {
     render(
       <ActionPopup
         todo={mockTodo}
         onComplete={() => {}}
         onDelete={() => {}}
         onCommitColor={() => {}}
-        onGroup={() => {}}
       />,
     );
     expect(screen.getByRole('button', { name: /complete/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /set color/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /group/i })).toBeInTheDocument();
   });
 
   // Story 3.3: label swap for historical pads.
@@ -49,7 +46,6 @@ describe('ActionPopup', () => {
         onComplete={() => {}}
         onDelete={() => {}}
         onCommitColor={() => {}}
-        onGroup={() => {}}
       />,
     );
     expect(screen.getByRole('button', { name: /uncomplete/i })).toBeInTheDocument();
@@ -64,35 +60,29 @@ describe('ActionPopup', () => {
         onComplete={() => {}}
         onDelete={() => {}}
         onCommitColor={() => {}}
-        onGroup={() => {}}
       />,
     );
     expect(screen.getByRole('button', { name: /undelete/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^complete$/i })).toBeInTheDocument();
   });
 
-  it('wires complete / delete / group to their handlers', () => {
+  it('wires complete / delete to their handlers', () => {
     const onComplete = vi.fn();
     const onDelete = vi.fn();
-    const onGroup = vi.fn();
     render(
       <ActionPopup
         todo={mockTodo}
         onComplete={onComplete}
         onDelete={onDelete}
         onCommitColor={() => {}}
-        onGroup={onGroup}
-        selectedCount={1}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /complete/i }));
     fireEvent.click(screen.getByRole('button', { name: /delete/i }));
-    fireEvent.click(screen.getByRole('button', { name: /group/i }));
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledTimes(1);
-    expect(onGroup).toHaveBeenCalledTimes(1);
   });
 
   // ─── Story 4.1: swatch sub-panel toggle + commit + Escape ───
@@ -104,7 +94,6 @@ describe('ActionPopup', () => {
           onComplete={() => {}}
           onDelete={() => {}}
           onCommitColor={() => {}}
-          onGroup={() => {}}
         />,
       );
       // Panel is closed on mount — no swatches rendered.
@@ -125,7 +114,6 @@ describe('ActionPopup', () => {
           onComplete={() => {}}
           onDelete={() => {}}
           onCommitColor={() => {}}
-          onGroup={() => {}}
         />,
       );
       const setColorBtn = screen.getByRole('button', { name: /set color/i });
@@ -147,7 +135,6 @@ describe('ActionPopup', () => {
           onComplete={() => {}}
           onDelete={() => {}}
           onCommitColor={onCommitColor}
-          onGroup={() => {}}
         />,
       );
       fireEvent.click(screen.getByRole('button', { name: /set color/i }));
@@ -168,7 +155,6 @@ describe('ActionPopup', () => {
           onComplete={() => {}}
           onDelete={() => {}}
           onCommitColor={onCommitColor}
-          onGroup={() => {}}
         />,
       );
       fireEvent.click(screen.getByRole('button', { name: /set color/i }));
@@ -188,7 +174,6 @@ describe('ActionPopup', () => {
           onDelete={() => {}}
           onCommitColor={() => {}}
           onPreviewColor={onPreviewColor}
-          onGroup={() => {}}
         />,
       );
       fireEvent.click(screen.getByRole('button', { name: /set color/i }));
@@ -200,229 +185,6 @@ describe('ActionPopup', () => {
       expect(onPreviewColor).toHaveBeenLastCalledWith('#ff00ff');
       fireEvent.mouseLeave(swatch);
       expect(onPreviewColor).toHaveBeenLastCalledWith(null);
-    });
-  });
-
-  // ─── Story 4.6: group section extension ───
-  describe('Group section (story 4.6)', () => {
-    it('Group button is disabled when selectedCount=0 and not grouped (AC #4)', () => {
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          selectedCount={0}
-        />,
-      );
-      const groupBtn = screen.getByRole('button', { name: /^group$/i });
-      expect(groupBtn).toHaveAttribute('aria-disabled', 'true');
-    });
-
-    it('Group button is enabled when selectedCount >= 1 and not grouped (AC #4)', () => {
-      const onGroup = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={onGroup}
-          selectedCount={2}
-        />,
-      );
-      const groupBtn = screen.getByRole('button', { name: /^group$/i });
-      expect(groupBtn).not.toHaveAttribute('aria-disabled', 'true');
-      fireEvent.click(groupBtn);
-      expect(onGroup).toHaveBeenCalledTimes(1);
-    });
-
-    it('group section absent when isGrouped=false (AC #3)', () => {
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped={false}
-        />,
-      );
-      expect(screen.queryByRole('button', { name: /ungroup/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /disband/i })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^group$/i })).toBeInTheDocument();
-    });
-
-    it('group section renders when isGrouped=true, Group button absent (AC #5)', () => {
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={() => {}}
-        />,
-      );
-      expect(screen.queryByRole('button', { name: /^group$/i })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /ungroup/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /disband/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /spread out/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /label/i })).toBeInTheDocument();
-    });
-
-    it('Ungroup calls onUngroup (AC #6)', () => {
-      const onUngroup = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={onUngroup}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={() => {}}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /ungroup/i }));
-      expect(onUngroup).toHaveBeenCalledTimes(1);
-    });
-
-    it('Disband calls onDisband (AC #7)', () => {
-      const onDisband = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={onDisband}
-          onSpreadGroup={() => {}}
-          onSetLabel={() => {}}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /disband/i }));
-      expect(onDisband).toHaveBeenCalledTimes(1);
-    });
-
-    it('Spread Out calls onSpreadGroup (AC #8)', () => {
-      const onSpreadGroup = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={onSpreadGroup}
-          onSetLabel={() => {}}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /spread out/i }));
-      expect(onSpreadGroup).toHaveBeenCalledTimes(1);
-    });
-
-    it('Label input commits text on Enter (AC #9)', () => {
-      const onSetLabel = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={onSetLabel}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /label/i }));
-      const input = screen.getByRole('textbox');
-      fireEvent.change(input, { target: { value: 'My Cluster' } });
-      fireEvent.keyDown(input, { key: 'Enter' });
-      expect(onSetLabel).toHaveBeenCalledWith('My Cluster');
-      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    });
-
-    it('Label input sends null on Enter with empty text (AC #9)', () => {
-      const onSetLabel = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={onSetLabel}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /label/i }));
-      const input = screen.getByRole('textbox');
-      fireEvent.keyDown(input, { key: 'Enter' });
-      expect(onSetLabel).toHaveBeenCalledWith(null);
-    });
-
-    it('Label input cancels on Escape without calling onSetLabel (AC #9)', () => {
-      const onSetLabel = vi.fn();
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={onSetLabel}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /label/i }));
-      expect(screen.getByRole('textbox')).toBeInTheDocument();
-      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
-      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-      expect(onSetLabel).not.toHaveBeenCalled();
-    });
-
-    it('Label input pre-fills with groupLabel when provided (AC #9)', () => {
-      render(
-        <ActionPopup
-          todo={mockTodo}
-          onComplete={() => {}}
-          onDelete={() => {}}
-          onCommitColor={() => {}}
-          onGroup={() => {}}
-          isGrouped
-          groupLabel="Cluster A"
-          onUngroup={() => {}}
-          onDisband={() => {}}
-          onSpreadGroup={() => {}}
-          onSetLabel={() => {}}
-        />,
-      );
-      fireEvent.click(screen.getByRole('button', { name: /label/i }));
-      expect(screen.getByRole('textbox')).toHaveValue('Cluster A');
     });
   });
 });
