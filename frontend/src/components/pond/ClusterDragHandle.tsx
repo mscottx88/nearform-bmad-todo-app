@@ -70,17 +70,11 @@ export function ClusterDragHandle({
   // so each move's translation is computed relative to start.
   const dragStartWorldRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
   // Snapshot of each member's pre-drag position, frozen at pointerdown
-  // and written into clusterTranslation so consumers can compute
-  // baseline + offset without reading potentially-updated todo.positionX.
+  // and written into clusterTranslation so consumers (handle useFrame,
+  // LilyPad, ClusterHalo) can all compute baseline + offset without
+  // reading potentially-updated todo.positionX during the post-release
+  // refetch window.
   const baselinesRef = useRef<Map<string, { x: number; z: number }>>(new Map());
-  // Baseline centroid + halo radius + bbox, captured once so the handle
-  // (which stays fixed at bbox-lower-right of the baseline) doesn't
-  // recompute from the moved positions each frame during a drag.
-  const baselineCentroidRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  const baselineRadiusRef = useRef(0);
-  const baselineBboxRef = useRef<{ minX: number; maxX: number; minZ: number; maxZ: number }>(
-    { minX: 0, maxX: 0, minZ: 0, maxZ: 0 },
-  );
   // True while the cursor is over the handle div itself — maintains visibility
   // during the brief window between pad pointerLeave and handle pointerEnter.
   const isHandleHoveredRef = useRef(false);
@@ -116,24 +110,14 @@ export function ClusterDragHandle({
     }
     pointerIdRef.current = e.pointerId;
 
-    const memberPositions = members.map((t) => ({
-      x: t.positionX ?? 0,
-      z: t.positionY ?? 0,
-    }));
-    const centroid = computeCentroid(memberPositions);
-    const R = computeHaloRadius(memberPositions, centroid);
-    const bbox = computeBbox(memberPositions);
-
-    baselineCentroidRef.current = { ...centroid };
-    baselineRadiusRef.current = R;
-    baselineBboxRef.current = { ...bbox };
-
     const baselines = new Map<string, { x: number; z: number }>();
     for (const m of members) {
       baselines.set(m.id, { x: m.positionX ?? 0, z: m.positionY ?? 0 });
     }
     baselinesRef.current = baselines;
 
+    const baselineArr = Array.from(baselines.values());
+    const centroid = computeCentroid(baselineArr);
     const startWorld = getMouseWorld(e.clientX, e.clientY);
     dragStartWorldRef.current = startWorld ?? { ...centroid };
 
@@ -187,36 +171,49 @@ export function ClusterDragHandle({
     if (!groupRef.current || members.length === 0) return;
 
     const store = usePondStore.getState();
+    // Story 4.6: handle stays visible through the drag AND the
+    // post-release refetch window (clusterTranslation retained by
+    // PondScene until positions arrive). Using clusterTranslation as
+    // the visibility/position source avoids a one-tick flash to the
+    // pre-drag centroid on mouseup — the `isDraggingRef` flag drops
+    // before the backend catches up, so relying on it alone made the
+    // handle snap back to its original bbox-lower-right anchor.
+    const trans = store.clusterTranslation;
+    const transActive =
+      trans?.groupId === groupId && trans.baselines.size > 0;
     const isVisible =
       store.hoveredGroupId === groupId ||
       isHandleHoveredRef.current ||
-      isDraggingRef.current;
+      isDraggingRef.current ||
+      transActive;
 
     if (contentRef.current) {
       contentRef.current.style.display = isVisible ? 'block' : 'none';
     }
 
-    // Compute handle + centroid world positions. During a drag, use the
-    // baselines + live translation so the handle rides with the cluster.
-    // At rest, recompute from the current memberPositions.
+    // Position sourcing:
+    //   - clusterTranslation set → use baselines + (dx, dz). Holds
+    //     through drag and post-release sticky window, so the handle
+    //     doesn't jump until the refetched todo positions catch up.
+    //   - otherwise → use current memberPositions from props.
     let centroid: { x: number; z: number };
     let R: number;
     let bbox: { minX: number; maxX: number; minZ: number; maxZ: number };
 
-    if (isDraggingRef.current) {
-      const trans = store.clusterTranslation;
-      const dx = trans?.groupId === groupId ? trans.dx : 0;
-      const dz = trans?.groupId === groupId ? trans.dz : 0;
+    if (transActive && trans) {
+      const baselineArr = Array.from(trans.baselines.values());
+      const baseCentroid = computeCentroid(baselineArr);
+      const baseBbox = computeBbox(baselineArr);
       centroid = {
-        x: baselineCentroidRef.current.x + dx,
-        z: baselineCentroidRef.current.z + dz,
+        x: baseCentroid.x + trans.dx,
+        z: baseCentroid.z + trans.dz,
       };
-      R = baselineRadiusRef.current;
+      R = computeHaloRadius(baselineArr, baseCentroid);
       bbox = {
-        minX: baselineBboxRef.current.minX + dx,
-        maxX: baselineBboxRef.current.maxX + dx,
-        minZ: baselineBboxRef.current.minZ + dz,
-        maxZ: baselineBboxRef.current.maxZ + dz,
+        minX: baseBbox.minX + trans.dx,
+        maxX: baseBbox.maxX + trans.dx,
+        minZ: baseBbox.minZ + trans.dz,
+        maxZ: baseBbox.maxZ + trans.dz,
       };
     } else {
       const memberPositions = members.map((t) => ({
