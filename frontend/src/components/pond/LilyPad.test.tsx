@@ -122,6 +122,13 @@ vi.mock('../../stores/usePondStore', () => ({
       activeDragAnchor: null,
       cursorMode: 'firefly',
       setCursorMode: vi.fn(),
+      // Story 4.2 cascade (2026-04-23): secondary-anchor map. Empty
+      // Map plus no-op setters keeps unit-test runs deterministic —
+      // the cascade branch in useFrame iterates an empty Map and
+      // falls through without engaging.
+      displacedPads: new Map(),
+      setDisplacedPad: vi.fn(),
+      clearDisplacedPad: vi.fn(),
     }),
   }),
   selectCompleting: () => () => undefined,

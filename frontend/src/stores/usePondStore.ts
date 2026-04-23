@@ -173,6 +173,19 @@ interface PondState {
   // a slide-out-of-the-way nudge (2 × SELECTION_RING_OUTER radius).
   activeDragAnchor: { padId: string; x: number; z: number } | null;
 
+  // Story 4.2 follow-up (2026-04-23): secondary anchors for cascade
+  // nudges. A pad whose accumulated sibling-nudge magnitude crosses
+  // DISPLACED_PUBLISH_THRESHOLD publishes its CURRENT displaced world
+  // position (posX + nudge.x, posZ + nudge.z) here. Every other pad's
+  // useFrame reads the primary `activeDragAnchor` PLUS all entries in
+  // this map (excluding self) and sums their pairwise pushes — that
+  // turns the single-anchor "shove" into a recursive chain where
+  // pushed pads push their neighbours without a velocity model.
+  //
+  // Map values are mutated in place (new Map per write) so Zustand
+  // shallow-equality spots the change.
+  displacedPads: Map<string, { x: number; z: number }>;
+
   // Story 4.6 (user feedback): cursor glyph — 'firefly' default;
   // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
   cursorMode: 'firefly' | 'grab' | 'grabbing';
@@ -320,6 +333,23 @@ interface PondState {
   ) => void;
 
   /**
+   * Story 4.2 cascade: publish or update this pad's current displaced
+   * position. Called from LilyPad.useFrame when nudge magnitude crosses
+   * DISPLACED_PUBLISH_THRESHOLD, and again each frame the displacement
+   * continues (so other pads chase the moving secondary anchor).
+   * No-op if the same id/pos pair is already set (saves a Map clone
+   * on no-change frames).
+   */
+  setDisplacedPad: (id: string, pos: { x: number; z: number }) => void;
+
+  /**
+   * Story 4.2 cascade: remove this pad from the secondary-anchor map.
+   * Called when nudge falls back below threshold, at commit time, or
+   * on unmount. No-op if the id is already absent.
+   */
+  clearDisplacedPad: (id: string) => void;
+
+  /**
    * Story 4.6 (user feedback): select which glyph the custom cursor
    * renders. Identity-preserving — writes are skipped when the mode
    * is unchanged.
@@ -354,6 +384,7 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   selectedPadIds: new Set(),
   activeDragAnchor: null,
+  displacedPads: new Map(),
   cursorMode: 'firefly',
 
   toggleAtmosphere: () =>
@@ -623,6 +654,22 @@ export const usePondStore = create<PondState>((set, get) => ({
       return;
     }
     set({ activeDragAnchor: anchor });
+  },
+
+  setDisplacedPad: (id, pos) => {
+    const prev = get().displacedPads.get(id);
+    if (prev && prev.x === pos.x && prev.z === pos.z) return;
+    const next = new Map(get().displacedPads);
+    next.set(id, pos);
+    set({ displacedPads: next });
+  },
+
+  clearDisplacedPad: (id) => {
+    const prev = get().displacedPads;
+    if (!prev.has(id)) return;
+    const next = new Map(prev);
+    next.delete(id);
+    set({ displacedPads: next });
   },
 
   setCursorMode: (mode) => {

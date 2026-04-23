@@ -610,6 +610,41 @@ describe('usePondStore', () => {
     });
   });
 
+  describe('displacedPads (story 4.2 cascade)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ displacedPads: new Map() });
+    });
+
+    it('sets and clears a displaced-pad entry', () => {
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
+      expect(usePondStore.getState().displacedPads.get('a')).toEqual({ x: 2, z: 0 });
+      usePondStore.getState().clearDisplacedPad('a');
+      expect(usePondStore.getState().displacedPads.has('a')).toBe(false);
+    });
+
+    it('set is a no-op when id/pos are unchanged', () => {
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
+      const ref = usePondStore.getState();
+      usePondStore.getState().setDisplacedPad('a', { x: 2, z: 0 });
+      expect(usePondStore.getState()).toBe(ref);
+    });
+
+    it('clear is a no-op on an absent id', () => {
+      const ref = usePondStore.getState();
+      usePondStore.getState().clearDisplacedPad('missing');
+      expect(usePondStore.getState()).toBe(ref);
+    });
+
+    it('multiple entries coexist', () => {
+      usePondStore.getState().setDisplacedPad('a', { x: 1, z: 0 });
+      usePondStore.getState().setDisplacedPad('b', { x: 0, z: 1 });
+      const map = usePondStore.getState().displacedPads;
+      expect(map.size).toBe(2);
+      expect(map.get('a')).toEqual({ x: 1, z: 0 });
+      expect(map.get('b')).toEqual({ x: 0, z: 1 });
+    });
+  });
+
   describe('setCursorMode (retained after group removal)', () => {
     beforeEach(() => {
       usePondStore.setState({ cursorMode: 'firefly' });

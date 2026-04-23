@@ -499,14 +499,20 @@ export function LilyPad({
   // arrival threshold used by the /spread-out lerp).
   const stickyDragRef = useRef(false);
   // Story 4.6 (retained): accumulated repulsion offset applied on top of
-  // rest position while ANOTHER pad is being dragged nearby. Lerps toward
-  // 0 when no anchor is active. On drag-release, if this pad built up a
-  // significant nudge, commit the new position so it stays out of the
-  // dragged pad's way.
+  // rest position while ANOTHER pad is being dragged nearby. Story 4.2
+  // option-2 (2026-04-23): persists across anchor-out-of-range — the pad
+  // stays shoved until the next drag pushes it further or commit fires.
   const siblingNudgeRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
   // Track "did activeDragAnchor exist on the previous frame" so we can
   // detect the null-transition at drag release and commit the nudge.
   const hadDragAnchorRef = useRef(false);
+  // Story 4.2 cascade (2026-04-23): tracks whether this pad is
+  // currently published to the store's `displacedPads` secondary-anchor
+  // map. Avoids calling setDisplacedPad every frame once we're steady
+  // above threshold — only publish on transition in/out or when the
+  // position has shifted noticeably. Separate from siblingNudgeRef so
+  // the publish/clear decision is cheap (ref read, no Map clone).
+  const isPublishedRef = useRef(false);
   // Story 4.2: useUpdateTodo — fires PATCH {position_x, position_y}
   // on drag-release AND on spread-out arrival. Already wires
   // clearTodoError/setTodoError into the 2.6 decay system, so a
@@ -666,17 +672,21 @@ export function LilyPad({
     }
   }, [todo.positionX, todo.positionY, errorEntry]);
 
-  // Cleanup effect — on unmount, if this pad currently owns the
-  // activeDragAnchor, clear it. Without this, a pad deleted mid-drag
-  // would leave a frozen anchor pointing at a dead id; every other
-  // pad's useFrame nudge logic would keep repelling from the ghost
-  // position indefinitely.
+  // Cleanup effect — on unmount, clear this pad from both the primary
+  // (activeDragAnchor) and secondary (displacedPads) anchor channels.
+  // Without this, a pad deleted mid-drag (or a displaced pad unmounted
+  // by a refetch dropping the todo) would leave a frozen anchor
+  // pointing at a dead id; every other pad's useFrame would keep
+  // repelling against the ghost.
   useEffect(() => {
     const id = todo.id;
     return () => {
       const store = usePondStore.getState();
       if (store.activeDragAnchor?.padId === id) {
         store.setActiveDragAnchor(null);
+      }
+      if (store.displacedPads.has(id)) {
+        store.clearDisplacedPad(id);
       }
     };
   }, [todo.id]);
@@ -861,6 +871,15 @@ export function LilyPad({
           dragStartStore.clearTargetPosition(todo.id);
           // Swap to the closed-fist cursor for the duration of the drag.
           dragStartStore.setCursorMode('grabbing');
+          // Cascade: this pad is now the PRIMARY anchor (via
+          // activeDragAnchor below). Drop it from the secondary map
+          // to avoid double-publishing, and reset its nudge — the
+          // user is placing this pad deliberately.
+          if (isPublishedRef.current) {
+            dragStartStore.clearDisplacedPad(todo.id);
+            isPublishedRef.current = false;
+          }
+          siblingNudgeRef.current = { x: 0, z: 0 };
         }
         // Convert client coords → canvas NDC → water-plane hit. If the
         // canvas rect has no area yet (mid-resize, offscreen, detached)
@@ -1551,6 +1570,13 @@ export function LilyPad({
           positionY: commitZ,
         });
         siblingNudgeRef.current = { x: 0, z: 0 };
+        // Cascade: pad just committed — unpublish from secondary
+        // anchors so downstream pads don't keep chasing this id's
+        // (now-cleared) displacement.
+        if (isPublishedRef.current) {
+          usePondStore.getState().clearDisplacedPad(todo.id);
+          isPublishedRef.current = false;
+        }
       }
 
       // Story 4.2: drag + /spread-out overrides. Applied before the
@@ -1616,73 +1642,116 @@ export function LilyPad({
           // visible halo-ring edge — no more overlap between a dragged
           // pad and its neighbours.
           //
-          // Sibling-nudge model 2026-04-23 (option 2, accumulate-and-keep):
-          // The nudge is a PERSISTENT positional offset — once a pad has
-          // been shoved aside it stays there until either (a) the next
-          // drag pushes it further, or (b) drag-release commits a nudge
-          // above the commit threshold via PATCH (see the block above
-          // the drag/sticky IF). The nudge is NOT lerped back toward 0
-          // when the anchor leaves range; that spring-back was the
-          // previous model (option 1), and it felt like rubber bands
-          // rather than marbles on water.
+          // Sibling-nudge model 2026-04-23 (option 2 + cascade):
+          // The nudge is a PERSISTENT positional offset — once a pad
+          // has been shoved aside it stays there until either (a) the
+          // next push shoves it further, or (b) drag-release commits
+          // a nudge above threshold via PATCH (see the block above the
+          // drag/sticky IF). When no anchor is in range, siblingNudgeRef
+          // holds its last value (no spring-back).
           //
-          // Engagement distance uses the pad's CURRENT displaced position
-          // (rest + existing nudge) rather than the rest slot, so a
-          // previously-pushed pad is still pushable when the dragged pad
-          // approaches its new location. When the anchor is out of range
-          // we simply don't touch siblingNudgeRef — it holds the last
-          // accumulated value.
-          const anchor = usePondStore.getState().activeDragAnchor;
-          if (anchor && anchor.padId !== todo.id) {
-            const nudgedX = posX + siblingNudgeRef.current.x;
-            const nudgedZ = posZ + siblingNudgeRef.current.z;
-            const adx = nudgedX - anchor.x;
-            const adz = nudgedZ - anchor.z;
+          // CASCADE (2026-04-23): anchors come from TWO sources:
+          //   1. `activeDragAnchor` — the pad currently being dragged
+          //      (primary, always-published).
+          //   2. `displacedPads` — other pads whose own nudge has
+          //      crossed DISPLACED_PUBLISH_THRESHOLD (secondary). This
+          //      is how shoves chain: A pushed by X publishes its
+          //      displaced position, B reads A as an anchor, B gets
+          //      pushed, B publishes, and so on.
+          //
+          // Total push is a SUM OF PENETRATIONS: for each anchor
+          // overlapping our displaced position, add a vector of
+          // magnitude (NUDGE_RADIUS − adist) pointing anchor → us. A
+          // pad sandwiched between two anchors has its pushes cancel
+          // to the balance point (physically correct); a pad with a
+          // single anchor gets the same target as the pre-cascade
+          // formula (anchor + dir × NUDGE_RADIUS − rest).
+          const primary = usePondStore.getState().activeDragAnchor;
+          const secondaries = usePondStore.getState().displacedPads;
+          const nudgedX = posX + siblingNudgeRef.current.x;
+          const nudgedZ = posZ + siblingNudgeRef.current.z;
+          let pushX = 0;
+          let pushZ = 0;
+          let engaged = false;
+          const applyAnchor = (ax: number, az: number): void => {
+            const adx = nudgedX - ax;
+            const adz = nudgedZ - az;
             const adist = Math.sqrt(adx * adx + adz * adz);
-            if (adist < NUDGE_RADIUS) {
-              // Direction: anchor → displaced position (keeps the nudge
-              // monotonic across an anchor crossing — a dragged pad
-              // passing through the midpoint does NOT flip the sibling
-              // to the opposite side).
-              let dirX: number;
-              let dirZ: number;
-              if (adist > 1e-4) {
-                dirX = adx / adist;
-                dirZ = adz / adist;
+            if (adist >= NUDGE_RADIUS) return;
+            engaged = true;
+            let dirX: number;
+            let dirZ: number;
+            if (adist > 1e-4) {
+              dirX = adx / adist;
+              dirZ = adz / adist;
+            } else {
+              // Coincident with this anchor — prefer existing nudge
+              // direction (monotonic across the crossing), else
+              // driftSeed so two coincident pads still separate.
+              const prevMag = Math.sqrt(
+                siblingNudgeRef.current.x * siblingNudgeRef.current.x +
+                  siblingNudgeRef.current.z * siblingNudgeRef.current.z,
+              );
+              if (prevMag > 1e-4) {
+                dirX = siblingNudgeRef.current.x / prevMag;
+                dirZ = siblingNudgeRef.current.z / prevMag;
               } else {
-                // Exactly coincident: prefer existing nudge direction
-                // (monotonic through the crossing), else driftSeed.
-                const prevMag = Math.sqrt(
-                  siblingNudgeRef.current.x * siblingNudgeRef.current.x +
-                    siblingNudgeRef.current.z * siblingNudgeRef.current.z,
-                );
-                if (prevMag > 1e-4) {
-                  dirX = siblingNudgeRef.current.x / prevMag;
-                  dirZ = siblingNudgeRef.current.z / prevMag;
-                } else {
-                  dirX = Math.cos(driftSeed);
-                  dirZ = Math.sin(driftSeed);
-                }
+                dirX = Math.cos(driftSeed);
+                dirZ = Math.sin(driftSeed);
               }
-              // Target absolute position: anchor + dir × NUDGE_RADIUS.
-              // Target nudge = target_abs − rest.
-              const targetNudgeX = anchor.x + dirX * NUDGE_RADIUS - posX;
-              const targetNudgeZ = anchor.z + dirZ * NUDGE_RADIUS - posZ;
-              // Lerp toward the target. 0.35 reaches 90% of the target
-              // in ~6 frames (~100ms at 60fps) — a firm slide, not a
-              // lazy drift. Only runs while actively engaged; when the
-              // anchor leaves range, the ref keeps its current value.
-              siblingNudgeRef.current.x = THREE.MathUtils.lerp(
-                siblingNudgeRef.current.x,
-                targetNudgeX,
-                0.35,
-              );
-              siblingNudgeRef.current.z = THREE.MathUtils.lerp(
-                siblingNudgeRef.current.z,
-                targetNudgeZ,
-                0.35,
-              );
             }
+            const overlap = NUDGE_RADIUS - adist;
+            pushX += dirX * overlap;
+            pushZ += dirZ * overlap;
+          };
+          if (primary && primary.padId !== todo.id) {
+            applyAnchor(primary.x, primary.z);
+          }
+          secondaries.forEach((pos, id) => {
+            if (id === todo.id) return;
+            applyAnchor(pos.x, pos.z);
+          });
+          if (engaged) {
+            // Target nudge = (current displaced + summed push) − rest.
+            const targetNudgeX = nudgedX + pushX - posX;
+            const targetNudgeZ = nudgedZ + pushZ - posZ;
+            // Lerp at 0.35 → ~90% convergence in 6 frames (~100ms at
+            // 60fps). Only runs while engaged; when no anchor is in
+            // range, siblingNudgeRef holds its last value.
+            siblingNudgeRef.current.x = THREE.MathUtils.lerp(
+              siblingNudgeRef.current.x,
+              targetNudgeX,
+              0.35,
+            );
+            siblingNudgeRef.current.z = THREE.MathUtils.lerp(
+              siblingNudgeRef.current.z,
+              targetNudgeZ,
+              0.35,
+            );
+          }
+
+          // Cascade publish/unpublish — only pads shoved beyond this
+          // threshold act as secondary anchors. Keeps small transient
+          // displacements from triggering runaway chain reactions, and
+          // keeps `displacedPads` sparse (only shoved pads, not
+          // every pad that drifted 0.01 units).
+          const DISPLACED_PUBLISH_THRESHOLD = 0.5;
+          const nudgeMag = Math.sqrt(
+            siblingNudgeRef.current.x * siblingNudgeRef.current.x +
+              siblingNudgeRef.current.z * siblingNudgeRef.current.z,
+          );
+          if (nudgeMag > DISPLACED_PUBLISH_THRESHOLD) {
+            // Publish every engaged frame so secondaries chase the
+            // moving pad. setDisplacedPad short-circuits on identical
+            // inputs, so idle frames are cheap.
+            usePondStore.getState().setDisplacedPad(todo.id, {
+              x: posX + siblingNudgeRef.current.x,
+              z: posZ + siblingNudgeRef.current.z,
+            });
+            isPublishedRef.current = true;
+          } else if (isPublishedRef.current) {
+            usePondStore.getState().clearDisplacedPad(todo.id);
+            isPublishedRef.current = false;
           }
           group.position.x =
             posX +
