@@ -147,7 +147,6 @@ const PAD_TINT_MAX = 0.6;
 // transition into the cluster ring reads as a clean pop.
 const SELECTION_RING_INNER = 1.12;
 const SELECTION_RING_OUTER = 1.22;
-const SELECTION_RING_SEGMENTS = 48;
 const SELECTION_FADE_DURATION = 0.35;
 // Y slightly above the pad body so it clears z-fighting with the flat
 // surface geometry (local +0.12 → world ~0.17 when at DROP_Y_REST).
@@ -1087,6 +1086,19 @@ export function LilyPad({
     () => buildPadShape(PAD_RADIUS, SEGMENTS, driftSeed),
     [driftSeed],
   );
+
+  // 2026-04-23: pad-shaped selection ring. Outer contour is the pad
+  // outline scaled to SELECTION_RING_OUTER, inner is SELECTION_RING_INNER.
+  // Both share the pad's per-pad wobble + notch shape so the ring
+  // hugs the lily pad's actual silhouette rather than a plain circle.
+  // THREE.Shape supports holes — a Shape pushed into `.holes` is
+  // subtracted by ShapeGeometry's earcut triangulation.
+  const selectionRingGeometry = useMemo(() => {
+    const outer = buildPadShape(SELECTION_RING_OUTER, SEGMENTS, driftSeed);
+    const inner = buildPadShape(SELECTION_RING_INNER, SEGMENTS, driftSeed);
+    outer.holes.push(inner);
+    return new THREE.ShapeGeometry(outer, SEGMENTS);
+  }, [driftSeed]);
 
   // Smooth solid rim — extruded wall with enough verts for a clean surface
   const rimGeometry = useMemo(() => {
@@ -2571,8 +2583,8 @@ export function LilyPad({
         visible={false}
         userData={{ skipDissolve: true }}
         renderOrder={13}
+        geometry={selectionRingGeometry}
       >
-        <ringGeometry args={[SELECTION_RING_INNER, SELECTION_RING_OUTER, SELECTION_RING_SEGMENTS]} />
         <meshBasicMaterial color="#ffffff" transparent opacity={0.85} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
       {/* Story 2.8: additive HDR halo on the water below the pad. Always
