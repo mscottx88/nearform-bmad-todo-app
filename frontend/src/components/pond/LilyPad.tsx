@@ -880,7 +880,10 @@ export function LilyPad({
         }
         if (!isDraggingRef.current) {
           isDraggingRef.current = true;
-          usePondStore.getState().clearTargetPosition(todo.id);
+          const dragStartStore = usePondStore.getState();
+          dragStartStore.clearTargetPosition(todo.id);
+          // Swap to the closed-fist cursor for the duration of the drag.
+          dragStartStore.setCursorMode('grabbing');
         }
         // Convert client coords → canvas NDC → water-plane hit.
         const rect = gl.domElement.getBoundingClientRect();
@@ -1019,6 +1022,15 @@ export function LilyPad({
         releaseStore.setGroupDragTarget(null);
         releaseStore.setActiveDragAnchor(null);
         releaseStore.setFollowTarget(null);
+        // Cursor returns to the hover state ('grab') since the pointer
+        // is almost always still over the pad at release — the pad
+        // follows the cursor. If the cursor has already left the pad
+        // (drag off the canvas), onPointerLeave won't fire because
+        // isDraggingRef was still true; we fall back to 'firefly' on
+        // the next pointermove off-pad.
+        if (releaseStore.cursorMode === 'grabbing') {
+          releaseStore.setCursorMode('grab');
+        }
         ownGroupSnapshotRef.current = null;
         allGroupsSnapshotRef.current = new Map();
         hasPoppedOutRef.current = false;
@@ -2240,6 +2252,26 @@ export function LilyPad({
         position={[0, 0.1, 0]}
         renderOrder={10}
         onPointerDown={handlePadPointerDown}
+        // Story 4.6 (user feedback 2026-04-23): hovering any lily pad
+        // swaps the firefly for the neon frog-hand cursor so the pad
+        // reads as "draggable". Only swap from the idle 'firefly'
+        // state — a mid-drag 'grabbing' (handle or this pad) must not
+        // be stomped by a hover event, and the cluster handle's own
+        // 'grab' state stays owned by the handle.
+        onPointerEnter={() => {
+          const state = usePondStore.getState();
+          if (state.cursorMode === 'firefly') {
+            state.setCursorMode('grab');
+          }
+        }}
+        onPointerLeave={() => {
+          const state = usePondStore.getState();
+          // Revert only from 'grab' — drag-in-progress ('grabbing')
+          // is preserved; the drag's own onWindowUp will reset.
+          if (state.cursorMode === 'grab' && !isDraggingRef.current) {
+            state.setCursorMode('firefly');
+          }
+        }}
       >
         <shaderMaterial
           uniforms={padUniforms}
