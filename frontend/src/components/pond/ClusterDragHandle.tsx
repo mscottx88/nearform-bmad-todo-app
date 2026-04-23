@@ -6,7 +6,14 @@
 // Two-phase drag:
 //   slide — mouse inside halo: handle tracks halo boundary, cluster still.
 //   grip  — mouse outside halo: cluster translates rigidly via onTranslate.
-import { useRef, useEffect } from 'react';
+//
+// Event routing note (2026-04-22 fix): uses setPointerCapture on the
+// handle div so drag events (move/up/cancel) fire reliably on the div's
+// own React handlers throughout the drag — even when the mouse leaves
+// the div bounds. The earlier window-listener pattern silently dropped
+// moves in some browser/R3F event-routing combinations, leaving the
+// handle stuck in 'slide' phase forever.
+import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -64,26 +71,11 @@ export function ClusterDragHandle({
   // True while the cursor is over the handle div itself — maintains visibility
   // during the brief window between pad pointerLeave and handle pointerEnter.
   const isHandleHoveredRef = useRef(false);
-  // Pointer tracking — mirrors LilyPad's window-listener approach.
+  // Pointer tracking — setPointerCapture routes all move/up/cancel events
+  // back to the capturing div, so we bind React handlers on the element
+  // itself rather than chasing window listeners (which silently dropped
+  // events in some R3F event-routing scenarios).
   const pointerIdRef = useRef<number | null>(null);
-  const windowMoveRef = useRef<((e: PointerEvent) => void) | null>(null);
-  const windowUpRef = useRef<((e: PointerEvent) => void) | null>(null);
-
-  const detachListeners = () => {
-    if (windowMoveRef.current) {
-      window.removeEventListener('pointermove', windowMoveRef.current);
-      windowMoveRef.current = null;
-    }
-    if (windowUpRef.current) {
-      window.removeEventListener('pointerup', windowUpRef.current);
-      window.removeEventListener('pointercancel', windowUpRef.current);
-      windowUpRef.current = null;
-    }
-    pointerIdRef.current = null;
-  };
-
-  // Drop any in-flight listeners when the component unmounts.
-  useEffect(() => detachListeners, []);
 
   const getMouseWorld = (
     clientX: number,
@@ -103,8 +95,19 @@ export function ClusterDragHandle({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    pointerIdRef.current = e.nativeEvent.pointerId;
-    detachListeners();
+    e.preventDefault();
+    // setPointerCapture routes subsequent move/up/cancel events back to
+    // the capturing element regardless of where the cursor actually is,
+    // so the drag keeps working when the mouse leaves the handle bounds.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Some browsers throw if the element is no longer connected; the
+      // fallback is simply no capture, which is still functional because
+      // React bubbles pointermove/up to the div as long as the pointer
+      // stays over it.
+    }
+    pointerIdRef.current = e.pointerId;
 
     const memberPositions = members.map((t) => ({
       x: t.positionX ?? 0,
@@ -122,61 +125,66 @@ export function ClusterDragHandle({
     cumulativeDxRef.current = 0;
     cumulativeDzRef.current = 0;
     phaseRef.current = 'slide';
+  };
 
-    const onMove = (ev: PointerEvent) => {
-      if (pointerIdRef.current !== ev.pointerId) return;
-      if (ev.buttons === 0) { onUp(ev); return; }
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== e.pointerId) return;
+    if (e.buttons === 0) {
+      // Missed pointerup — treat as release so we don't leave the handle
+      // stuck in slide/grip phase.
+      endDrag(e);
+      return;
+    }
 
-      const M = getMouseWorld(ev.clientX, ev.clientY);
-      if (!M) return;
+    const M = getMouseWorld(e.clientX, e.clientY);
+    if (!M) return;
 
-      const C = capturedCentroidRef.current;
-      const R = capturedRadiusRef.current;
-      const mdx = M.x - C.x;
-      const mdz = M.z - C.z;
-      const dist = Math.sqrt(mdx * mdx + mdz * mdz);
-      const safeDist = dist < 1e-6 ? 1e-6 : dist;
+    const C = capturedCentroidRef.current;
+    const R = capturedRadiusRef.current;
+    const mdx = M.x - C.x;
+    const mdz = M.z - C.z;
+    const dist = Math.sqrt(mdx * mdx + mdz * mdz);
+    const safeDist = dist < 1e-6 ? 1e-6 : dist;
 
-      if (phaseRef.current === 'slide') {
-        // Handle tracks halo boundary: H = C + normalize(M − C) * R
-        const newH = { x: C.x + (mdx / safeDist) * R, z: C.z + (mdz / safeDist) * R };
-        handleWorldPosRef.current = newH;
-        if (dist > R) {
-          // Grip transition: freeze gripOffset = H − C
-          gripOffsetRef.current = { x: newH.x - C.x, z: newH.z - C.z };
-          phaseRef.current = 'grip';
-        }
-      } else if (phaseRef.current === 'grip') {
-        // C_new = M − gripOffset; delta = C_new − C_current; handle = M
-        const newCx = M.x - gripOffsetRef.current.x;
-        const newCz = M.z - gripOffsetRef.current.z;
-        const ddx = newCx - currentCentroidRef.current.x;
-        const ddz = newCz - currentCentroidRef.current.z;
-        currentCentroidRef.current = { x: newCx, z: newCz };
-        cumulativeDxRef.current += ddx;
-        cumulativeDzRef.current += ddz;
-        handleWorldPosRef.current = { ...M };
-        onTranslate(cumulativeDxRef.current, cumulativeDzRef.current);
-        // Story 4.6 AC #24: camera follows the mouse during grip phase.
-        // The new centroid world-pos is the right follow target — it's
-        // where the cluster is being moved TO each frame. On pointerup
-        // the parent's onDragEnd clears followTarget.
-        usePondStore.getState().setFollowTarget({ worldX: newCx, worldZ: newCz });
+    if (phaseRef.current === 'slide') {
+      // Handle tracks halo boundary: H = C + normalize(M − C) * R
+      const newH = { x: C.x + (mdx / safeDist) * R, z: C.z + (mdz / safeDist) * R };
+      handleWorldPosRef.current = newH;
+      if (dist > R) {
+        // Grip transition: freeze gripOffset = H − C
+        gripOffsetRef.current = { x: newH.x - C.x, z: newH.z - C.z };
+        phaseRef.current = 'grip';
       }
-    };
+    } else if (phaseRef.current === 'grip') {
+      // C_new = M − gripOffset; delta = C_new − C_current; handle = M
+      const newCx = M.x - gripOffsetRef.current.x;
+      const newCz = M.z - gripOffsetRef.current.z;
+      const ddx = newCx - currentCentroidRef.current.x;
+      const ddz = newCz - currentCentroidRef.current.z;
+      currentCentroidRef.current = { x: newCx, z: newCz };
+      cumulativeDxRef.current += ddx;
+      cumulativeDzRef.current += ddz;
+      handleWorldPosRef.current = { ...M };
+      onTranslate(cumulativeDxRef.current, cumulativeDzRef.current);
+      // Story 4.6 AC #24: camera follows the mouse during grip phase.
+      // The new centroid world-pos is the right follow target — it's
+      // where the cluster is being moved TO each frame. On pointerup
+      // the parent's onDragEnd clears followTarget.
+      usePondStore.getState().setFollowTarget({ worldX: newCx, worldZ: newCz });
+    }
+  };
 
-    const onUp = (ev: PointerEvent) => {
-      if (pointerIdRef.current !== ev.pointerId) return;
-      phaseRef.current = 'idle';
-      detachListeners();
-      onDragEnd();
-    };
-
-    windowMoveRef.current = onMove;
-    windowUpRef.current = onUp;
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== e.pointerId) return;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Capture may already be released by the browser (e.g., on
+      // element removal during the drag). Swallow.
+    }
+    pointerIdRef.current = null;
+    phaseRef.current = 'idle';
+    onDragEnd();
   };
 
   useFrame(() => {
@@ -260,6 +268,9 @@ export function ClusterDragHandle({
             opacity: 1,
           }}
           onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
           onPointerEnter={() => {
             isHandleHoveredRef.current = true;
           }}
