@@ -191,10 +191,12 @@ interface PondState {
   // completes.
   pendingPops: Map<string, number>;
 
-  // Story 4.6: directional wake decals emitted during member drag
-  // within a group. PondScene renders one `<Wake>` per entry; each
-  // LilyPad self-expires its own wakes after the 400ms lifetime.
-  // `bornAt` is performance.now() (UI clock) so expiration is simple.
+  // Story 4.6: directional wake emission queue. LilyPad enqueues during
+  // grouped-pad drag; WaterSurface drains each frame and stamps the
+  // entry into a shader wake slot (motion-aligned displacement in the
+  // water vertex shader — no separate mesh). Shader gates lifetime via
+  // elapsed-time check, so the queue is write-only from the store's
+  // perspective; drainWakes empties it after a single tick.
   wakes: Array<{ id: string; x: number; z: number; angle: number; bornAt: number }>;
 
   // Story 4.6: per-group metadata cache — centroid + halo radius + member
@@ -375,7 +377,7 @@ interface PondState {
   clearPendingPop: (todoId: string) => void;
 
   // Story 4.6: wake primitive.
-  /** Append a wake decal entry. Caller stamps `bornAt` via performance.now(). */
+  /** Append a wake emission. Caller stamps `bornAt` via performance.now(). */
   addWake: (wake: {
     id: string;
     x: number;
@@ -383,8 +385,8 @@ interface PondState {
     angle: number;
     bornAt: number;
   }) => void;
-  /** Remove all wake entries older than `maxAge` ms at `now`. Called by PondScene each frame. */
-  expireWakes: (now: number, maxAge: number) => void;
+  /** Clear the wake queue — called by WaterSurface after stamping shader slots. */
+  drainWakes: () => void;
 
   /**
    * Story 4.6: replace the per-group metadata cache. Called by PondScene
@@ -712,12 +714,8 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   addWake: (wake) => set((state) => ({ wakes: [...state.wakes, wake] })),
 
-  expireWakes: (now: number, maxAge: number) =>
-    set((state) => {
-      const kept = state.wakes.filter((w) => now - w.bornAt < maxAge);
-      if (kept.length === state.wakes.length) return state;
-      return { wakes: kept };
-    }),
+  drainWakes: () =>
+    set((state) => (state.wakes.length === 0 ? state : { wakes: [] })),
 
   setGroupMeta: (meta) =>
     set((state) => {

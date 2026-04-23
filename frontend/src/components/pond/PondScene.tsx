@@ -23,7 +23,6 @@ import { ActionPopup } from '../ui/ActionPopup';
 import { ClusterLabel } from './ClusterLabel';
 import { ClusterHalo } from './ClusterHalo';
 import { ClusterDragHandle } from './ClusterDragHandle';
-import { WakeLayer } from './Wake';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
   if (members.length === 0) return { x: 0, z: 0 };
@@ -537,10 +536,6 @@ export function PondScene() {
           }}
         />
       )}
-      {/* Story 4.6 AC #16: crescent wakes emitted during grouped member
-          drag. Mounted once; reads the `wakes` store slice and expires
-          entries after WAKE_LIFETIME_MS each frame. */}
-      <WakeLayer />
       <PondCamera />
 
       <EffectComposer>

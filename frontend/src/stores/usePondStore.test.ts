@@ -668,30 +668,27 @@ describe('usePondStore', () => {
     });
   });
 
-  describe('addWake / expireWakes (story 4.6 AC #16)', () => {
+  describe('addWake / drainWakes (story 4.6 AC #16)', () => {
     beforeEach(() => {
       usePondStore.setState({ wakes: [] });
     });
 
-    it('addWake appends to the list', () => {
+    it('addWake appends to the queue', () => {
       const now = 1000;
       usePondStore.getState().addWake({ id: 'w1', x: 0, z: 0, angle: 0, bornAt: now });
       expect(usePondStore.getState().wakes).toHaveLength(1);
     });
 
-    it('expireWakes drops entries older than maxAge', () => {
-      usePondStore.getState().addWake({ id: 'old', x: 0, z: 0, angle: 0, bornAt: 0 });
-      usePondStore.getState().addWake({ id: 'new', x: 0, z: 0, angle: 0, bornAt: 500 });
-      usePondStore.getState().expireWakes(600, 400);
-      const wakes = usePondStore.getState().wakes;
-      expect(wakes).toHaveLength(1);
-      expect(wakes[0].id).toBe('new');
+    it('drainWakes empties the queue after shader stamp', () => {
+      usePondStore.getState().addWake({ id: 'a', x: 0, z: 0, angle: 0, bornAt: 0 });
+      usePondStore.getState().addWake({ id: 'b', x: 1, z: 2, angle: 1.5, bornAt: 100 });
+      usePondStore.getState().drainWakes();
+      expect(usePondStore.getState().wakes).toHaveLength(0);
     });
 
-    it('expireWakes with nothing to expire keeps identity', () => {
-      usePondStore.getState().addWake({ id: 'w', x: 0, z: 0, angle: 0, bornAt: 1000 });
+    it('drainWakes on empty queue keeps identity (no extra re-render)', () => {
       const before = usePondStore.getState().wakes;
-      usePondStore.getState().expireWakes(1100, 400);
+      usePondStore.getState().drainWakes();
       expect(usePondStore.getState().wakes).toBe(before);
     });
   });

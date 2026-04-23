@@ -51,6 +51,17 @@ const CLICK_AMPLITUDE_MAX = 0.7;
 // second) never evict an in-flight ripple during its ~4s lifetime.
 const CLICK_SLOTS = 8;
 
+// Story 4.6 AC #16: directional wakes emitted during grouped member drag.
+// Distinct from circular ripples — wakes are a stretched, motion-aligned
+// displacement trailing behind the dragged pad. 12 slots comfortably
+// cover a fast drag (~80ms emission cadence × ~450ms lifetime → ~6
+// active wakes at steady-state, with overhead for bursts).
+const WAKE_SLOTS = 12;
+// Full wake lifetime in seconds. Slightly longer than the JS-side
+// WAKE_EMIT_INTERVAL_MS × ~5 cycles so simultaneous active wakes form
+// a visible trail. Past this elapsed time the shader no-ops the slot.
+const WAKE_LIFETIME_S = 0.45;
+
 // Phase velocity of the expanding wavefront in world units/sec. Passed
 // to the shader as `uAmbientWavefrontSpeed` (story 2.9 AC #6 — was a
 // template-literal injection pre-2.9, fragile across precision changes
@@ -93,6 +104,21 @@ const vertexShader = /* glsl */ `
   uniform float uAmbientDecayRate[AMBIENT_SLOTS];
   uniform float uAmbientAmplitude[AMBIENT_SLOTS];
 
+  // Story 4.6 AC #16: wake slot uniforms. Each slot is a single
+  // directional displacement trailing behind the emission point at the
+  // given local-plane angle. uWakeAngle is in LOCAL-plane radians
+  // (the caller negates the world-space angle before writing, because
+  // world-Z to local-Y is a sign flip). uWakeLifetime is a single
+  // scalar uniform per the 2.9 AC #6 rationale — avoids template-literal
+  // injection of JS-side float constants into GLSL source, preserving
+  // precision and leaving the knob tunable at runtime.
+  #define WAKE_SLOTS ${WAKE_SLOTS}
+  uniform vec2 uWakeCenter[WAKE_SLOTS];
+  uniform float uWakeTime[WAKE_SLOTS];
+  uniform float uWakeAngle[WAKE_SLOTS];
+  uniform float uWakeAmplitude[WAKE_SLOTS];
+  uniform float uWakeLifetime;
+
   varying float vElevation;
   varying vec2 vUv;
 
@@ -109,6 +135,57 @@ const vertexShader = /* glsl */ `
   // the ambient ripple's slow, languid front while the wave oscillates
   // faster beneath it) pass a non-zero wavefrontOverride; otherwise the
   // override is 0.0 and the function derives the rate internally.
+  // Story 4.6 AC #16: directional wake displacement. Unlike ripple()'s
+  // circular wavefront, a wake is a motion-aligned bulge that trails
+  // BEHIND the emission point. Implemented as a stretched gaussian in
+  // the frame rotated to the motion direction: narrow along the motion
+  // axis, broad (and expanding over time) perpendicular to it, peak
+  // offset backwards so the emission point sits at the leading edge of
+  // the crescent rather than its peak.
+  float wake(
+    vec2 pos,
+    vec2 center,
+    float angle,
+    float amplitude,
+    float elapsed,
+    float lifetime
+  ) {
+    if (elapsed <= 0.0 || elapsed >= lifetime) return 0.0;
+
+    vec2 rel = pos - center;
+    float c = cos(angle);
+    float s = sin(angle);
+    // Motion-aligned local coords: longitudinal+ is forward along the
+    // motion vector, lateral is the perpendicular (across) axis.
+    float longitudinal = rel.x * c + rel.y * s;
+    float lateral = -rel.x * s + rel.y * c;
+
+    // Offset the gaussian peak BACKWARD along motion so the wake trails
+    // behind the pad. longitudinalFromPeak = 0 sits at trailOffset units
+    // behind the emission point.
+    float trailOffset = 0.45;
+    float longitudinalFromPeak = longitudinal + trailOffset;
+
+    // Lateral spread grows with age — a wake is a narrow crest at first,
+    // broadening into a crescent as it ages. Longitudinal width stays
+    // tight so the wake reads as a line, not a blob.
+    float sigmaPerp = 0.9 + elapsed * 3.5;
+    float sigmaAlong = 0.32;
+
+    float g = exp(
+      -(longitudinalFromPeak * longitudinalFromPeak)
+        / (2.0 * sigmaAlong * sigmaAlong)
+      - (lateral * lateral) / (2.0 * sigmaPerp * sigmaPerp)
+    );
+
+    // Lifetime fade: quadratic out so the wake appears abruptly then
+    // trails off (matches the emission → dissipate feel of real water).
+    float normT = elapsed / lifetime;
+    float fade = (1.0 - normT) * (1.0 - normT);
+
+    return amplitude * g * fade;
+  }
+
   float ripple(
     vec2 pos,
     vec2 center,
@@ -207,6 +284,23 @@ const vertexShader = /* glsl */ `
       elevation += splash * amp * 1.2;
     }
 
+    // Story 4.6 AC #16: wake slots. Each slot is a short-lived directional
+    // bulge trailing a grouped-pad drag. Lifetime is gated inside wake()
+    // so expired slots cost one conditional per vertex — cheap.
+    for (int i = 0; i < WAKE_SLOTS; i++) {
+      float wT0 = uWakeTime[i];
+      if (wT0 <= 0.0) continue;
+      float wElapsed = uTime - wT0;
+      elevation += wake(
+        pos.xy,
+        uWakeCenter[i],
+        uWakeAngle[i],
+        uWakeAmplitude[i],
+        wElapsed,
+        uWakeLifetime
+      );
+    }
+
     pos.z += elevation;
     vElevation = elevation;
 
@@ -279,6 +373,22 @@ function createUniforms() {
     uAmbientAmplitude: {
       value: new Array<number>(AMBIENT_SLOTS).fill(0.16),
     },
+    // Story 4.6 AC #16: wake slots. Like click slots, round-robin over
+    // WAKE_SLOTS so fast sequences emit distinct wakes instead of
+    // overwriting each other.
+    uWakeCenter: {
+      value: Array.from({ length: WAKE_SLOTS }, () => new THREE.Vector2(0, 0)),
+    },
+    uWakeTime: {
+      value: new Array<number>(WAKE_SLOTS).fill(0),
+    },
+    uWakeAngle: {
+      value: new Array<number>(WAKE_SLOTS).fill(0),
+    },
+    uWakeAmplitude: {
+      value: new Array<number>(WAKE_SLOTS).fill(0),
+    },
+    uWakeLifetime: { value: WAKE_LIFETIME_S },
   };
 }
 
@@ -298,6 +408,7 @@ export function WaterSurface() {
   } | null>(null);
   const nextAmbientSlotRef = useRef<number>(0);
   const nextClickSlotRef = useRef<number>(0);
+  const nextWakeSlotRef = useRef<number>(0);
 
   // Story 2.10: elevation-sampler input buffer. Pre-allocated once and
   // mutated in place each useFrame tick so `sampleElevation()` reads
@@ -364,6 +475,32 @@ export function WaterSurface() {
         nextClickSlotRef.current = (clickSlot + 1) % CLICK_SLOTS;
       }
       storeState.drainRipples();
+    }
+
+    // Story 4.6 AC #16: drain the wake queue. Same pattern as the click-
+    // ripple drain above — LilyPad writes world-space (x, z, angle) into
+    // the store; here we flip world-Z → local-Y for the center and negate
+    // the angle (motion direction's Y-component flips under the same
+    // rotation). Shader gates lifetime via elapsed-time check in wake().
+    const queuedWakes = storeState.wakes;
+    if (queuedWakes.length > 0) {
+      const wakeCenters = material.uniforms.uWakeCenter.value as THREE.Vector2[];
+      const wakeTimes = material.uniforms.uWakeTime.value as number[];
+      const wakeAngles = material.uniforms.uWakeAngle.value as number[];
+      const wakeAmps = material.uniforms.uWakeAmplitude.value as number[];
+      for (const w of queuedWakes) {
+        const slot = nextWakeSlotRef.current;
+        wakeCenters[slot].set(w.x, -w.z);
+        wakeTimes[slot] = state.clock.elapsedTime;
+        wakeAngles[slot] = -w.angle;
+        // Per-wake amplitude: small enough that the wake reads as
+        // "disturbance" rather than a splash. Tuned so multiple
+        // overlapping wakes stack to a visible trail without
+        // overwhelming the ambient wave pattern.
+        wakeAmps[slot] = 0.18;
+        nextWakeSlotRef.current = (slot + 1) % WAKE_SLOTS;
+      }
+      storeState.drainWakes();
     }
 
     if (pendingAmbientRef.current) {
