@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
 import { NeonScrollbar } from './NeonScrollbar';
@@ -140,6 +140,23 @@ export function InfoPopup({
     typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 160) : 800;
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // A <textarea> doesn't auto-grow with content — its height defaults
+  // to `rows` (2) regardless of CSS `height: auto`. Without this sync,
+  // the textarea stays at its min-height and NeonScrollbar never sees
+  // overflow, so no scroll chrome appears even when text spills far
+  // past the visible region. On every editText (and initial open) we
+  // reset height to 'auto' (clears any prior explicit height) then set
+  // it to scrollHeight — the intrinsic layout height of the content.
+  // useLayoutEffect so the measurement happens before paint and
+  // NeonScrollbar's ResizeObserver fires on the same frame.
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [editText, editing]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
   useEffect(() => {
@@ -326,6 +343,7 @@ export function InfoPopup({
                 onThumbDrag={onDragAffordanceDrag}
               >
                 <textarea
+                  ref={textareaRef}
                   className="info-popup__editor-textarea"
                   value={editText}
                   autoFocus
