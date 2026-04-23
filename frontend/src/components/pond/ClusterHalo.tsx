@@ -6,8 +6,11 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { computeCentroid, computeHaloRadius } from '../../lib/clusterGeometry';
+import { usePondStore } from '../../stores/usePondStore';
 
 interface ClusterHaloProps {
+  /** The group this halo belongs to — used to match clusterTranslation during grip drag. */
+  groupId: string;
   memberPositions: { x: number; z: number }[];
   /** Hex color for the ring. Defaults to neon cyan #00eeff. */
   color?: string;
@@ -21,7 +24,7 @@ const RING_SEGMENTS = 96;
 // Slightly above water so it doesn't z-fight with the water mesh.
 const RING_Y = 0.03;
 
-export function ClusterHalo({ memberPositions, color = '#00eeff' }: ClusterHaloProps) {
+export function ClusterHalo({ groupId, memberPositions, color = '#00eeff' }: ClusterHaloProps) {
   const meshRef = useRef<THREE.Mesh>(null);
 
   useFrame(() => {
@@ -30,7 +33,16 @@ export function ClusterHalo({ memberPositions, color = '#00eeff' }: ClusterHaloP
     const centroid = computeCentroid(memberPositions);
     const R = computeHaloRadius(memberPositions, centroid);
 
-    meshRef.current.position.set(centroid.x, RING_Y, centroid.z);
+    // Story 4.6: during a handle grip-phase drag, the whole group
+    // translates rigidly. LilyPad already applies this offset to each
+    // pad; the halo must ride with them or it lags behind at the
+    // pre-drag centroid. Read imperatively via getState() — no
+    // re-render on every drag move.
+    const clusterTrans = usePondStore.getState().clusterTranslation;
+    const offsetX = clusterTrans?.groupId === groupId ? clusterTrans.dx : 0;
+    const offsetZ = clusterTrans?.groupId === groupId ? clusterTrans.dz : 0;
+
+    meshRef.current.position.set(centroid.x + offsetX, RING_Y, centroid.z + offsetZ);
     // Scale x and z uniformly by R; y scale is irrelevant for a flat ring.
     meshRef.current.scale.set(R, R, 1);
   });

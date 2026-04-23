@@ -105,6 +105,46 @@ export function PondScene() {
     if (todos.length > 0) hasSeenInitialLoadRef.current = true;
   }, [todos.length]);
 
+  // Story 4.6: "sticky cluster translation" for the handle grip-phase
+  // drag release. Mirrors the pad-drag stickyDragRef pattern from 4.2:
+  // keep applying the translation offset until the backend refetch
+  // delivers the new positions, otherwise the cluster flashes back to
+  // its pre-drag coords for the handful of frames between PATCH
+  // success and React Query cache invalidation completing. Cleared by
+  // the useEffect below when every expected position has arrived
+  // (within SPREAD_ARRIVE_THRESHOLD), or by the safety timeout if a
+  // mutation errors out and no position ever matches.
+  const pendingClusterPatchRef = useRef<{
+    groupId: string;
+    expected: Map<string, { x: number; z: number }>;
+    timer: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const pending = pendingClusterPatchRef.current;
+    if (!pending) return;
+    const THRESHOLD = 0.05;
+    let allArrived = true;
+    for (const [id, { x, z }] of pending.expected) {
+      const todo = todos.find((t) => t.id === id);
+      if (!todo) {
+        allArrived = false;
+        break;
+      }
+      const dx = Math.abs((todo.positionX ?? 0) - x);
+      const dz = Math.abs((todo.positionY ?? 0) - z);
+      if (dx > THRESHOLD || dz > THRESHOLD) {
+        allArrived = false;
+        break;
+      }
+    }
+    if (allArrived) {
+      window.clearTimeout(pending.timer);
+      pendingClusterPatchRef.current = null;
+      usePondStore.getState().setClusterTranslation(null);
+    }
+  }, [todos]);
+
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
     canvas.addEventListener('webglcontextlost', (e) => {
@@ -370,7 +410,14 @@ export function PondScene() {
         // the halo lerps live while the user hovers a swatch.
         const haloColor =
           groupColorPreviews.get(gid) ?? groups.get(gid)?.color ?? undefined;
-        return <ClusterHalo key={gid} memberPositions={memberPositions} color={haloColor} />;
+        return (
+          <ClusterHalo
+            key={gid}
+            groupId={gid}
+            memberPositions={memberPositions}
+            color={haloColor}
+          />
+        );
       })}
       {/* Story 4.6 AC #12: floating cluster labels. One per group with a
           non-null label; each projects its centroid to screen each frame. */}
@@ -411,13 +458,31 @@ export function PondScene() {
               const translation = store.clusterTranslation;
               if (translation?.groupId === gid) {
                 const finalMembers = renderTodos.filter((t) => t.groupId === gid);
+                const expected = new Map<string, { x: number; z: number }>();
                 for (const m of finalMembers) {
+                  const newX = (m.positionX ?? 0) + translation.dx;
+                  const newZ = (m.positionY ?? 0) + translation.dz;
+                  expected.set(m.id, { x: newX, z: newZ });
                   updateTodo.mutate({
                     id: m.id,
-                    positionX: (m.positionX ?? 0) + translation.dx,
-                    positionY: (m.positionY ?? 0) + translation.dz,
+                    positionX: newX,
+                    positionY: newZ,
                   });
                 }
+                // Story 4.6: retain clusterTranslation until the refetch
+                // delivers the new positions. The useEffect watching
+                // todos clears it on arrival; the safety timeout is a
+                // fallback so a failed PATCH can't leave the group
+                // visually pinned forever.
+                const prior = pendingClusterPatchRef.current;
+                if (prior) window.clearTimeout(prior.timer);
+                const timer = window.setTimeout(() => {
+                  if (pendingClusterPatchRef.current?.timer === timer) {
+                    pendingClusterPatchRef.current = null;
+                    usePondStore.getState().setClusterTranslation(null);
+                  }
+                }, 3000);
+                pendingClusterPatchRef.current = { groupId: gid, expected, timer };
                 // Re-fit camera with updated member positions.
                 const updated = renderTodos.map((t) =>
                   t.groupId === gid
@@ -425,8 +490,10 @@ export function PondScene() {
                     : t,
                 );
                 store.requestCameraReset(fitCameraToPads(updated));
+              } else {
+                // No translation to commit — clear immediately.
+                store.setClusterTranslation(null);
               }
-              store.setClusterTranslation(null);
               // Story 4.6 AC #25: release the camera-follow engagement
               // that grip phase set. No snap-back — the camera simply
               // stops tracking and holds its current position.
