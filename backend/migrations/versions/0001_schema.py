@@ -22,17 +22,6 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     op.create_table(
-        'groups',
-        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
-        sa.Column('label', sa.Text(), nullable=True),
-        sa.Column('color', sa.Text(), nullable=True),
-        sa.Column('position_x', sa.Float(), nullable=True),
-        sa.Column('position_y', sa.Float(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-    )
-
-    op.create_table(
         'todos',
         sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('text', sa.Text(), nullable=False),
@@ -69,21 +58,10 @@ def upgrade() -> None:
         sa.UniqueConstraint('todo_id', name='uq_creatures_todo_id'),
     )
 
-    op.create_table(
-        'group_memberships',
-        sa.Column('todo_id', sa.UUID(), nullable=False),
-        sa.Column('group_id', sa.UUID(), nullable=False),
-        sa.ForeignKeyConstraint(['group_id'], ['groups.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['todo_id'], ['todos.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('todo_id', 'group_id'),
-    )
-
 
 def downgrade() -> None:
-    op.drop_table('group_memberships')
     op.drop_table('creatures')
     op.execute("DROP INDEX IF EXISTS ix_todos_embedding")
     op.drop_index('ix_todos_text_search', table_name='todos', postgresql_using='gin')
     op.drop_index('ix_todos_active', table_name='todos', postgresql_where=sa.text('deleted = false'))
     op.drop_table('todos')
-    op.drop_table('groups')

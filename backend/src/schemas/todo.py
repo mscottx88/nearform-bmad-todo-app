@@ -57,19 +57,3 @@ class TodoResponse(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
-    # Story 4.6: optional group membership. Populated via the
-    # list_todos outer-join against group_memberships; null for
-    # solo pads. The Todo ORM model itself has no group_id column
-    # (membership lives in the separate join table) so this field
-    # is ALWAYS set explicitly by the service — pydantic's
-    # from_attributes mode does NOT auto-populate it.
-    group_id: uuid.UUID | None = None
-    # Story 4.6 (user feedback 2026-04-23): piggyback the group's
-    # label and color onto each member so the frontend can rebuild
-    # `groupLabels` / `groupColors` on refresh without needing a
-    # separate GET /api/groups. Null for solo pads (no group row
-    # joined) or when the group's label/color is itself null. The
-    # service's outerjoin on Group populates these; solo pads leave
-    # them null.
-    group_label: str | None = None
-    group_color: str | None = None
