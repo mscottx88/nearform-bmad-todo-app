@@ -800,6 +800,11 @@ export function LilyPad({
 
   const handlePadPointerDown = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
+      // User feedback 2026-04-23: only LMB drags pads. RMB/MMB stay
+      // reserved for the OrbitControls pan / MMB ascend rigs — without
+      // this gate a right-click on a pad would stopPropagation() and
+      // swallow the native right-button that PondCamera needs for pan.
+      if (e.nativeEvent.button !== 0) return;
       e.stopPropagation();
       const state = usePondStore.getState();
       if (state.completingTodos.has(todo.id) || state.deletingTodos.has(todo.id)) return;

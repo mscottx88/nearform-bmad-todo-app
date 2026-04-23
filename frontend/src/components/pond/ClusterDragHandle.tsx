@@ -104,6 +104,9 @@ export function ClusterDragHandle({
     // group, not right or middle".
     if (e.button !== 0) return;
     e.stopPropagation();
+    // Story 4.6 (user feedback 2026-04-23): swap the firefly for a
+    // closed-fist neon cursor while dragging. Cleared in endDrag.
+    usePondStore.getState().setCursorMode('grabbing');
     // NOTE: do NOT call e.preventDefault(). preventDefault on pointerdown
     // suppresses the compatibility mouse events that CursorFirefly's
     // window.mousemove listener relies on — the firefly would freeze in
@@ -170,6 +173,13 @@ export function ClusterDragHandle({
     }
     pointerIdRef.current = null;
     isDraggingRef.current = false;
+    // Cursor returns to grab if the pointer is still over the handle,
+    // otherwise back to the default firefly. onPointerLeave on the
+    // handle div fires immediately after if the cursor left during
+    // the drag, so 'grab' here is a safe hovered-default.
+    usePondStore.getState().setCursorMode(
+      isHandleHoveredRef.current ? 'grab' : 'firefly',
+    );
     onDragEnd();
   };
 
@@ -279,12 +289,30 @@ export function ClusterDragHandle({
           onPointerCancel={endDrag}
           onPointerEnter={() => {
             isHandleHoveredRef.current = true;
+            // Only swap to the grab hand when no drag is in progress —
+            // otherwise re-entering the handle mid-drag would overwrite
+            // the 'grabbing' fist with the 'grab' open-hand.
+            if (!isDraggingRef.current) {
+              usePondStore.getState().setCursorMode('grab');
+            }
           }}
           onPointerLeave={() => {
             isHandleHoveredRef.current = false;
+            // Keep 'grabbing' while a drag is active even if the cursor
+            // strays off the handle (setPointerCapture lets the drag
+            // continue). Only revert to firefly when truly idle.
+            if (!isDraggingRef.current) {
+              usePondStore.getState().setCursorMode('firefly');
+            }
           }}
         >
-          ›
+          {/* Four-way move glyph — unambiguously reads as "drag me".
+              User feedback 2026-04-23: the chevron wasn't obvious as a
+              drag handle. ✥ (U+2725) is the Unicode "eight-spoked
+              asterisk" which renders as a clean move/relocate icon in
+              most fonts; combined with the neon ring it communicates
+              drag-affordance at a glance. */}
+          ✥
         </div>
       </Html>
     </group>

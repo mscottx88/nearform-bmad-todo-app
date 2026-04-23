@@ -7,11 +7,137 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { usePondStore } from '../../stores/usePondStore';
 import './CursorFirefly.css';
 
 interface Point {
   x: number;
   y: number;
+}
+
+// Story 4.6 (user feedback 2026-04-23): frog-hand glyphs drawn in
+// place of the firefly when the cursor is over a draggable affordance.
+// Webbed digits + bulbous fingertips match the pond theme; neon-cyan
+// so the mode switch reads as "this is a cluster affordance".
+const GRAB_COLOR = '#00eeff';
+const GRAB_WEB_COLOR = 'rgba(0, 238, 255, 0.28)';
+const GRAB_SHADOW = 14;
+
+function drawGrabHand(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = GRAB_COLOR;
+  ctx.fillStyle = GRAB_WEB_COLOR;
+  ctx.lineWidth = 1.3;
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = GRAB_SHADOW;
+  ctx.shadowColor = GRAB_COLOR;
+
+  // Four finger tip positions — splayed fan above the palm. Each
+  // finger is a short stem ending in a round toe-pad (frog digits
+  // have bulbous tips for sticking). Thumb is absent on a frog's
+  // front hand; four digits is correct anatomy.
+  const tips: Array<{ x: number; y: number }> = [
+    { x: -8, y: -5 },
+    { x: -3, y: -10 },
+    { x: 3, y: -10 },
+    { x: 8, y: -5 },
+  ];
+  const palmTop = -1;
+
+  // Webbing: one filled blob spanning all four digit roots and
+  // rising toward the tips. Drawn FIRST so the digit strokes sit on
+  // top. Quadratic curves through tip positions give the webbing its
+  // characteristic scalloped edge.
+  ctx.beginPath();
+  ctx.moveTo(-7, palmTop);
+  for (let i = 0; i < tips.length; i++) {
+    const tip = tips[i]!;
+    ctx.lineTo(tip.x, tip.y);
+    if (i < tips.length - 1) {
+      const next = tips[i + 1]!;
+      // Dip between fingers — web scallop
+      const midX = (tip.x + next.x) / 2;
+      const midY = Math.max(tip.y, next.y) + 2.5;
+      ctx.quadraticCurveTo(midX, midY, next.x, next.y);
+    }
+  }
+  ctx.lineTo(7, palmTop);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Palm: rounded base below the digit roots.
+  ctx.beginPath();
+  ctx.moveTo(-7, palmTop);
+  ctx.quadraticCurveTo(-8, palmTop + 6, -4, palmTop + 8);
+  ctx.lineTo(4, palmTop + 8);
+  ctx.quadraticCurveTo(8, palmTop + 6, 7, palmTop);
+  ctx.stroke();
+
+  // Toe pads — bulbous tips. Filled with solid cyan (vs the faint
+  // webbing fill) so they pop as sticky fingertips.
+  ctx.fillStyle = GRAB_COLOR;
+  for (const tip of tips) {
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawGrabbingFist(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = GRAB_COLOR;
+  ctx.fillStyle = GRAB_WEB_COLOR;
+  ctx.lineWidth = 1.4;
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = GRAB_SHADOW;
+  ctx.shadowColor = GRAB_COLOR;
+
+  // Curled frog hand — a leaf-shaped blob with the fingers tucked
+  // under. Wider at the base (palm), tapered at the top (curled
+  // fingers).
+  ctx.beginPath();
+  ctx.moveTo(-7, 4);
+  ctx.quadraticCurveTo(-9, -2, -4, -6);
+  ctx.quadraticCurveTo(0, -8, 4, -6);
+  ctx.quadraticCurveTo(9, -2, 7, 4);
+  ctx.quadraticCurveTo(3, 7, 0, 7);
+  ctx.quadraticCurveTo(-3, 7, -7, 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Curled-finger ridges — three arcs along the top of the fist.
+  for (let i = 0; i < 3; i++) {
+    const y = -2 + i * 2;
+    ctx.beginPath();
+    ctx.moveTo(-3.5, y);
+    ctx.quadraticCurveTo(0, y - 1.5, 3.5, y);
+    ctx.stroke();
+  }
+
+  // Toe pads peeking out at the curl front — two small dots.
+  ctx.fillStyle = GRAB_COLOR;
+  ctx.beginPath();
+  ctx.arc(-2, -4.5, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(2, -4.5, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 const TRAIL_LENGTH: number = 12;
@@ -178,6 +304,21 @@ export function CursorFirefly() {
 
       const mouse: Point = mousePosRef.current;
       const nodes: Point[] = nodesRef.current;
+
+      // Story 4.6 (user feedback 2026-04-23): when over the cluster
+      // drag handle, swap the firefly for a neon grip / fist glyph.
+      // Read imperatively (not as a subscription) so the RAF loop
+      // doesn't restart on every mode change.
+      const mode = usePondStore.getState().cursorMode;
+      if (mode !== 'firefly') {
+        if (mode === 'grab') {
+          drawGrabHand(ctx, mouse.x, mouse.y);
+        } else {
+          drawGrabbingFist(ctx, mouse.x, mouse.y);
+        }
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
 
       // 1. Update positions via lerp
       nodes[0]!.x += (mouse.x - nodes[0]!.x) * HEAD_LERP;

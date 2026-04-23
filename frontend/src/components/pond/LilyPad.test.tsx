@@ -129,6 +129,8 @@ vi.mock('../../stores/usePondStore', () => ({
       groupMeta: new Map(),
       groupDragTarget: null,
       activeDragAnchor: null,
+      cursorMode: 'firefly',
+      setCursorMode: vi.fn(),
     }),
   }),
   selectCompleting: () => () => undefined,

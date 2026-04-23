@@ -244,6 +244,13 @@ interface PondState {
   // the camera simply holds its last position per the spec.
   followTarget: { worldX: number; worldZ: number } | null;
 
+  // Story 4.6 (user feedback 2026-04-23): swap the custom firefly
+  // cursor for a neon grip / fist when hovering or actively dragging
+  // the cluster drag handle. 'firefly' is the default pond cursor;
+  // 'grab' signals "draggable here"; 'grabbing' signals "drag in
+  // progress". Consumed by CursorFirefly.
+  cursorMode: 'firefly' | 'grab' | 'grabbing';
+
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -463,6 +470,13 @@ interface PondState {
 
   /** Story 4.6 AC #18, #20, #24: set (non-null) or clear (null) the camera follow target. */
   setFollowTarget: (target: { worldX: number; worldZ: number } | null) => void;
+
+  /**
+   * Story 4.6 (user feedback 2026-04-23): select which glyph the
+   * custom cursor renders. Identity-preserving — writes are skipped
+   * when the mode is unchanged.
+   */
+  setCursorMode: (mode: 'firefly' | 'grab' | 'grabbing') => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -500,6 +514,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   wakes: [],
   groupMeta: new Map(),
   followTarget: null,
+  cursorMode: 'firefly',
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -851,6 +866,11 @@ export const usePondStore = create<PondState>((set, get) => ({
     const prev = get().followTarget;
     if (prev && prev.worldX === target.worldX && prev.worldZ === target.worldZ) return;
     set({ followTarget: target });
+  },
+
+  setCursorMode: (mode) => {
+    if (get().cursorMode === mode) return;
+    set({ cursorMode: mode });
   },
 }));
 
