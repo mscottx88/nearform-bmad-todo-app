@@ -69,6 +69,13 @@ vi.mock('@react-three/drei', () => ({
 const completingTodosMock = new Map<string, unknown>();
 const deletingTodosMock = new Map<string, unknown>();
 const triggerRippleMock = vi.fn();
+const setHoveredTodoIdMock = vi.fn();
+// Story 3.4: mutable hoveredTodoId so tests can emulate the "hover is
+// the current one" state when firing pointerLeave.
+const hoverStateMock = { current: null as string | null };
+// Story 3.4: mutable activeDragAnchor so tests can emulate "another pad
+// is being dragged" to assert hover is blocked.
+const activeDragAnchorMock = { current: null as { padId: string; x: number; z: number } | null };
 const startCompletionMock = vi.fn();
 const stampCompletionStartMock = vi.fn();
 const finishCompletionMock = vi.fn();
@@ -124,9 +131,16 @@ vi.mock('../../stores/usePondStore', () => ({
       togglePadSelection: togglePadSelectionMock,
       // Retained drag-pipeline + cursor wiring (post group removal).
       setActiveDragAnchor: vi.fn(),
-      activeDragAnchor: null,
+      get activeDragAnchor() {
+        return activeDragAnchorMock.current;
+      },
       cursorMode: 'firefly',
       setCursorMode: vi.fn(),
+      // Story 3.4: hover publish/clear.
+      get hoveredTodoId() {
+        return hoverStateMock.current;
+      },
+      setHoveredTodoId: setHoveredTodoIdMock,
       // Story 4.2 cascade (2026-04-23): secondary-anchor map. Empty
       // Map plus no-op setters keeps unit-test runs deterministic —
       // the cascade branch in useFrame iterates an empty Map and
@@ -196,8 +210,11 @@ describe('LilyPad', () => {
     updateTodoMutateMock.mockClear();
     clearTargetPositionMock.mockClear();
     togglePadSelectionMock.mockClear();
+    setHoveredTodoIdMock.mockClear();
     completingTodosMock.clear();
     deletingTodosMock.clear();
+    hoverStateMock.current = null;
+    activeDragAnchorMock.current = null;
   });
 
   it('renders without errors', () => {
@@ -417,6 +434,67 @@ describe('LilyPad', () => {
       fireClickAt(padMesh);
       expect(togglePadSelectionMock).not.toHaveBeenCalled();
       expect(openPopupMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Story 3.4: hover publish/clear of hoveredTodoId
+  describe('hover → hoveredTodoId (story 3.4)', () => {
+    it('pointerEnter on a resting pad publishes the todo id', () => {
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerEnter(padMesh);
+      expect(setHoveredTodoIdMock).toHaveBeenCalledWith('123');
+    });
+
+    it('pointerLeave clears the hover when this pad is the current hover', () => {
+      hoverStateMock.current = '123';
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerLeave(padMesh);
+      expect(setHoveredTodoIdMock).toHaveBeenCalledWith(null);
+    });
+
+    it('pointerLeave does NOT clear when a different pad is the current hover (event-order guard)', () => {
+      hoverStateMock.current = 'other-pad';
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerLeave(padMesh);
+      expect(setHoveredTodoIdMock).not.toHaveBeenCalledWith(null);
+    });
+
+    it('pointerEnter on a completing pad does NOT publish', () => {
+      completingTodosMock.set('123', {
+        todo: mockTodo,
+        creatureType: 'firefly',
+        rarity: 'common',
+        startedAt: 0,
+      });
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerEnter(padMesh);
+      expect(setHoveredTodoIdMock).not.toHaveBeenCalled();
+    });
+
+    it('pointerEnter on a deleting pad does NOT publish', () => {
+      deletingTodosMock.set('123', { todo: mockTodo, startedAt: 0 });
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerEnter(padMesh);
+      expect(setHoveredTodoIdMock).not.toHaveBeenCalled();
+    });
+
+    it('pointerEnter while another pad is being dragged does NOT publish', () => {
+      activeDragAnchorMock.current = { padId: 'other-pad', x: 0, z: 0 };
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerEnter(padMesh);
+      expect(setHoveredTodoIdMock).not.toHaveBeenCalled();
     });
   });
 

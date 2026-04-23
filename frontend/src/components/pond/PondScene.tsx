@@ -16,6 +16,7 @@ import { PondCamera } from './PondCamera';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { ActionPopup } from '../ui/ActionPopup';
+import { InfoPopup } from '../ui/InfoPopup';
 
 // Milliseconds between consecutive pads entering the 'forming' phase on
 // the first staggered load. 100ms gives a visible cascade without dragging
@@ -33,6 +34,7 @@ export function PondScene() {
 
   const glowIntensity = usePondStore((s) => s.glowIntensity);
   const activePopupTodoId = usePondStore((s) => s.activePopupTodoId);
+  const hoveredTodoId = usePondStore((s) => s.hoveredTodoId);
   const completingTodos = usePondStore((s) => s.completingTodos);
   const deletingTodos = usePondStore((s) => s.deletingTodos);
   const [glError, setGlError] = useState<string | null>(null);
@@ -121,6 +123,9 @@ export function PondScene() {
   const popupTodo = activePopupTodoId
     ? renderTodos.find((t) => t.id === activePopupTodoId)
     : null;
+
+  const infoTodoId = activePopupTodoId ?? hoveredTodoId;
+  const infoTodo = infoTodoId ? renderTodos.find((t) => t.id === infoTodoId) : undefined;
 
   const handleComplete = () => {
     if (!popupTodo) return;
@@ -219,6 +224,9 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
+      {infoTodo && (
+        <InfoPopup todo={infoTodo} focused={activePopupTodoId === infoTodo.id} />
+      )}
       {popupTodo && (
         <ActionPopup
           key={popupTodo.id}

@@ -767,6 +767,11 @@ export function LilyPad({
       if (store.displacedPads.has(id)) {
         store.clearDisplacedPad(id);
       }
+      // Story 3.4: prevent a ghost hover when a pad unmounts (deletion
+      // refetch) while hovered.
+      if (store.hoveredTodoId === id) {
+        store.setHoveredTodoId(null);
+      }
     };
   }, [todo.id]);
 
@@ -957,6 +962,11 @@ export function LilyPad({
           dragStartStore.clearDisplacedPad(todo.id);
           siblingNudgeRef.current = { x: 0, z: 0 };
           lastNudgeTargetRef.current = null;
+          // Story 3.4 (user correction 2026-04-23): do NOT clear
+          // hoveredTodoId on drag-start — the pad is still under the
+          // cursor, so the info popup should follow it for the drag.
+          // The pointerEnter guard still blocks publishing NEW hover
+          // while a drag is active, which is enough.
         }
         // Convert client coords → canvas NDC → water-plane hit. If the
         // canvas rect has no area yet (mid-resize, offscreen, detached)
@@ -2493,6 +2503,17 @@ export function LilyPad({
           if (state.cursorMode === 'firefly') {
             state.setCursorMode('grab');
           }
+          // Story 3.4: publish hover only when the pad is resting and no
+          // drag is active (own or any other pad via activeDragAnchor).
+          if (
+            phaseRef.current === 'resting' &&
+            !isDraggingRef.current &&
+            !state.completingTodos.has(todo.id) &&
+            !state.deletingTodos.has(todo.id) &&
+            state.activeDragAnchor === null
+          ) {
+            state.setHoveredTodoId(todo.id);
+          }
         }}
         onPointerLeave={() => {
           const state = usePondStore.getState();
@@ -2500,6 +2521,12 @@ export function LilyPad({
           // is preserved; the drag's own onWindowUp will reset.
           if (state.cursorMode === 'grab' && !isDraggingRef.current) {
             state.setCursorMode('firefly');
+          }
+          // Story 3.4: only clear if we're still the current hover — the
+          // "A.leave fires after B.enter" event-order race means A's leave
+          // must not stomp B's newly-published id.
+          if (usePondStore.getState().hoveredTodoId === todo.id) {
+            state.setHoveredTodoId(null);
           }
         }}
       >

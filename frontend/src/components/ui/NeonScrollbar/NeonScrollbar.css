@@ -1,0 +1,177 @@
+/**
+ * NeonScrollbar — custom wireframe scrollbar overlay.
+ *
+ * Track width / height: 10 px
+ * Inner padding-right + padding-bottom: 10 px (content never overlaps tracks)
+ */
+
+/* ── Outer wrapper ────────────────────────────────────────────────────────── */
+.neon-scrollbar {
+  position: relative;
+  overflow: hidden;
+  /* height is determined by context: flex-item sizing, explicit height,
+     or max-height on this element — all work correctly */
+}
+
+/* ── Inner scrollable area ───────────────────────────────────────────────── */
+.neon-scrollbar-inner {
+  height: 100%;
+  min-height: 0;
+  overflow: scroll;
+  scrollbar-width: none;      /* Firefox */
+  /* Inherit max-height so auto-height outers (max-height only) constrain inner */
+  max-height: inherit;
+  /* Reserve space so content never slides under the tracks */
+  padding-right: 15px;
+  padding-bottom: 15px;
+  box-sizing: border-box;
+}
+
+.neon-scrollbar-inner::-webkit-scrollbar {
+  display: none;              /* Chrome / Safari */
+}
+
+/* ── Color custom properties (default: cyan) ─────────────────────────────── */
+.neon-scrollbar {
+  --nsb-track-bg:    rgba(0, 16, 20, 0.90);
+  --nsb-track-bdr:   rgba(0, 238, 255, 0.35);
+  --nsb-thumb:       rgba(0, 238, 255, 0.10);
+  --nsb-thumb-bdr:   rgba(0, 238, 255, 0.40);
+  --nsb-thumb-hover: rgba(0, 238, 255, 0.70);
+  --nsb-glow:        rgba(0, 238, 255, 0.25);
+  --nsb-glow-bright: rgba(0, 238, 255, 0.55);
+  --nsb-core:        0, 238, 255;
+}
+
+[data-color="orange"].neon-scrollbar {
+  --nsb-track-bg:    rgba(32, 10, 0, 0.90);
+  --nsb-track-bdr:   rgba(255, 102, 0, 0.35);
+  --nsb-thumb:       rgba(255, 102, 0, 0.10);
+  --nsb-thumb-bdr:   rgba(255, 102, 0, 0.40);
+  --nsb-thumb-hover: rgba(255, 102, 0, 0.70);
+  --nsb-glow:        rgba(255, 102, 0, 0.25);
+  --nsb-glow-bright: rgba(255, 102, 0, 0.55);
+  --nsb-core:        255, 102, 0;
+}
+
+[data-color="gold"].neon-scrollbar {
+  --nsb-track-bg:    rgba(28, 22, 0, 0.90);
+  --nsb-track-bdr:   rgba(255, 215, 0, 0.35);
+  --nsb-thumb:       rgba(255, 215, 0, 0.10);
+  --nsb-thumb-bdr:   rgba(255, 215, 0, 0.40);
+  --nsb-thumb-hover: rgba(255, 215, 0, 0.70);
+  --nsb-glow:        rgba(255, 215, 0, 0.25);
+  --nsb-glow-bright: rgba(255, 215, 0, 0.55);
+  --nsb-core:        255, 215, 0;
+}
+
+[data-color="green"].neon-scrollbar {
+  --nsb-track-bg:    rgba(0, 18, 0, 0.90);
+  --nsb-track-bdr:   rgba(57, 255, 20, 0.35);
+  --nsb-thumb:       rgba(57, 255, 20, 0.10);
+  --nsb-thumb-bdr:   rgba(57, 255, 20, 0.40);
+  --nsb-thumb-hover: rgba(57, 255, 20, 0.70);
+  --nsb-glow:        rgba(57, 255, 20, 0.22);
+  --nsb-glow-bright: rgba(57, 255, 20, 0.50);
+  --nsb-core:        57, 255, 20;
+}
+
+[data-color="pink"].neon-scrollbar {
+  --nsb-track-bg:    rgba(28, 0, 28, 0.90);
+  --nsb-track-bdr:   rgba(255, 16, 240, 0.35);
+  --nsb-thumb:       rgba(255, 16, 240, 0.10);
+  --nsb-thumb-bdr:   rgba(255, 16, 240, 0.40);
+  --nsb-thumb-hover: rgba(255, 16, 240, 0.70);
+  --nsb-glow:        rgba(255, 16, 240, 0.22);
+  --nsb-glow-bright: rgba(255, 16, 240, 0.50);
+  --nsb-core:        255, 16, 240;
+}
+
+/* ── Tracks ───────────────────────────────────────────────────────────────── */
+.nsb-track {
+  position: absolute;
+  z-index: 10;
+  background: var(--nsb-track-bg);
+}
+
+.nsb-track-y {
+  top: 0;
+  right: 0;
+  bottom: 15px;     /* leave room for corner */
+  width: 15px;
+  border-left: 1px solid var(--nsb-track-bdr);
+}
+
+.nsb-track-x {
+  left: 0;
+  right: 15px;      /* leave room for corner */
+  bottom: 0;
+  height: 15px;
+  border-top: 1px solid var(--nsb-track-bdr);
+}
+
+/* ── Corner ───────────────────────────────────────────────────────────────── */
+.nsb-corner {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 15px;
+  height: 15px;
+  z-index: 10;
+  background: var(--nsb-track-bg);
+  border-left: 1px solid var(--nsb-track-bdr);
+  border-top: 1px solid var(--nsb-track-bdr);
+}
+
+/* ── Thumbs ───────────────────────────────────────────────────────────────── */
+.nsb-thumb {
+  position: absolute;
+  border-radius: 3px;
+  cursor: pointer;
+  /* Wireframe: dim fill with visible border outline */
+  background: var(--nsb-thumb);
+  border: 1px solid var(--nsb-thumb-bdr);
+  box-shadow: 0 0 3px var(--nsb-glow);
+  transition: background 0.2s ease, border-color 0.2s ease,
+              box-shadow 0.2s ease;
+}
+
+.nsb-thumb:hover,
+.nsb-thumb:active {
+  background: var(--nsb-thumb-hover);
+  border-color: rgba(var(--nsb-core), 0.80);
+  box-shadow:
+    0 0 6px  var(--nsb-glow-bright),
+    0 0 14px var(--nsb-glow),
+    0 0 28px var(--nsb-glow);
+  animation: nsb-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes nsb-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 6px  var(--nsb-glow-bright),
+      0 0 14px var(--nsb-glow),
+      0 0 28px var(--nsb-glow);
+    background: var(--nsb-thumb-hover);
+  }
+  50% {
+    box-shadow:
+      0 0 10px var(--nsb-glow-bright),
+      0 0 22px var(--nsb-glow-bright),
+      0 0 40px var(--nsb-glow);
+    background: rgba(var(--nsb-core), 0.85);
+  }
+}
+
+/* Vertical thumb: left/right inset; top/height set by JS */
+.nsb-thumb-y {
+  left: 3px;
+  right: 3px;
+}
+
+/* Horizontal thumb: top/bottom inset; left/width set by JS */
+.nsb-thumb-x {
+  top: 3px;
+  bottom: 3px;
+}

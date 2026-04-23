@@ -675,4 +675,32 @@ describe('usePondStore', () => {
       expect(usePondStore.getState()).toBe(ref);
     });
   });
+
+  describe('setHoveredTodoId (story 3.4)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ hoveredTodoId: null });
+    });
+
+    it('initial value is null', () => {
+      expect(usePondStore.getState().hoveredTodoId).toBeNull();
+    });
+
+    it('sets a todo id', () => {
+      usePondStore.getState().setHoveredTodoId('abc');
+      expect(usePondStore.getState().hoveredTodoId).toBe('abc');
+    });
+
+    it('identical re-set is a no-op (state reference preserved)', () => {
+      usePondStore.getState().setHoveredTodoId('abc');
+      const ref = usePondStore.getState();
+      usePondStore.getState().setHoveredTodoId('abc');
+      expect(usePondStore.getState()).toBe(ref);
+    });
+
+    it('clears back to null', () => {
+      usePondStore.getState().setHoveredTodoId('abc');
+      usePondStore.getState().setHoveredTodoId(null);
+      expect(usePondStore.getState().hoveredTodoId).toBeNull();
+    });
+  });
 });

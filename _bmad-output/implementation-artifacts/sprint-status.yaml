@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-23 # stories 4-8 (batch position endpoint) done; cascade sibling-nudges landed; story 4.2 follow-up work wrapped
+last_updated: 2026-04-23 # story 3-4 (lily-pad info popup) moved to review
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -83,6 +83,7 @@ development_status:
   3-1-interactive-camera-controls: done  # implementation + CR patches landed in 48619b2; defer #1 promoted to fix, defer #2 remains [OPEN]
   3-2-atmosphere-mode-toggle: backlog
   3-3-todo-visibility-via-slash-commands: done  # slash-command TodoInput mode + 8 visibility commands; backend GET /api/todos + /api/search gain visibility flags; pads keep full colour + halo lerps green/red; Uncomplete/Undelete popup labels; POST /api/todos/:id/restore; animation suppressed when pad stays visible
+  3-4-lily-pad-info-popup: review  # NEW 2026-04-23 — hover-to-preview info popup (text, timestamps, status) mirrored to the LEFT of the existing ActionPopup; sticks + becomes interactive (scroll) while the pad's popup is focused. Ports NeonScrollbar from rag-csv-crew as the project-wide scroll chrome. Implementation landed 2026-04-23 with 2 user corrections (popup stays + follows during drag, sticky position to avoid release flash).
   epic-3-retrospective: pending
 
   # Epic 4: Organizing the Pond
@@ -107,7 +108,16 @@ development_status:
   5-6-cluster-aware-search: retired  # 2026-04-23: FR20 removed per sprint-change-proposal-2026-04-23.md (no clusters). Archived as *.retired.md.
   epic-5-retrospective: pending
 
-  # Epic 6: REMOVED (2026-04-16) — trash lizard, auto-archive, and first-run tutorial dropped from scope per PRD simplification
+  # Epic 6: The Intelligent Pond Companion (2026-04-23 addendum — replaced the REMOVED Epic 6 scope)
+  epic-6: in-progress
+  6-1-agent-foundation: ready-for-dev  # schema regen (chat_sessions/chat_messages/display_metadata) + chat_service + SkillContext + BaseTool tools + crew_runner + intent_classifier + chat skill + SSE endpoint
+  6-2-chat-panel: backlog
+  6-3-rephrase-skill: backlog
+  6-4-plan-skill: backlog
+  6-5-organize-skill: backlog
+  6-6-reformat-skill: backlog
+  6-7-oracle-frog: backlog
+  epic-6-retrospective: pending
 
   # Epic 7: The Living Ecosystem
   epic-7: backlog

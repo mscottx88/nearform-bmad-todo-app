@@ -190,6 +190,13 @@ interface PondState {
   // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
   cursorMode: 'firefly' | 'grab' | 'grabbing';
 
+  // Story 3.4: id of the pad the cursor is currently over, or null.
+  // Published by LilyPad's onPointerEnter/Leave and read by PondScene
+  // to decide whether to mount InfoPopup in hover mode.
+  // Identity-preserving setter (no-op on unchanged value).
+  hoveredTodoId: string | null;
+  setHoveredTodoId: (id: string | null) => void;
+
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -389,6 +396,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   activeDragAnchor: null,
   displacedPads: new Map(),
   cursorMode: 'firefly',
+  hoveredTodoId: null,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -680,6 +688,11 @@ export const usePondStore = create<PondState>((set, get) => ({
   setCursorMode: (mode) => {
     if (get().cursorMode === mode) return;
     set({ cursorMode: mode });
+  },
+
+  setHoveredTodoId: (id) => {
+    if (get().hoveredTodoId === id) return;
+    set({ hoveredTodoId: id });
   },
 }));
 
