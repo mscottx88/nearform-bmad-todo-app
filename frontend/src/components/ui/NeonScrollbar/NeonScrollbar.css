@@ -127,7 +127,11 @@
 .nsb-thumb {
   position: absolute;
   border-radius: 3px;
-  cursor: pointer;
+  /* Global `cursor: none` on html/body hides the OS cursor and the
+     app's neon firefly overlay tracks the real mouse position. A
+     `cursor: pointer` override here would reintroduce the OS arrow
+     on thumb hover, breaking the neon-cursor aesthetic. */
+  cursor: none;
   /* Wireframe: dim fill with visible border outline */
   background: var(--nsb-thumb);
   border: 1px solid var(--nsb-thumb-bdr);

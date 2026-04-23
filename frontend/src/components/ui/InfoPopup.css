@@ -34,11 +34,10 @@
   padding: 10px;
   min-width: 240px;
   max-width: 320px;
-  /* Merged-panel height budget: ~280 hover/info only, ~440 focused
-     (adds actions + optional swatch grid). The text region inside
-     stays bounded to 180 via NeonScrollbar. */
-  max-height: 440px;
-  overflow: hidden;
+  /* No max-height here — the panel grows with its content (edit mode
+     lets the user drag the textarea region up to 480 px; meta rows
+     + actions add ~200 px on top). The scrollable text / textarea
+     region uses NeonScrollbar for its own overflow budget. */
   background: rgba(0, 0, 0, 0.82);
   border: 1px solid var(--neon-cyan);
   border-radius: 2px;
@@ -217,26 +216,58 @@
 
 .info-popup__editor-resize {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-  height: 10px;
-  /* Firefly cursor stays — don't reintroduce the OS resize cursor. */
+  gap: 2px;
+  /* Taller hit area (was 10 px — felt finicky). 18 px gives a
+     comfortable grab region even when the panel reflows mid-drag. */
+  height: 18px;
+  padding: 2px 0;
+  /* Firefly cursor stays in charge — don't reintroduce the OS
+     resize cursor. Touch-friendly override: `touch-action: none`
+     keeps the resize drag from being hijacked by the browser's
+     native scroll/pinch gestures. */
   cursor: none;
+  touch-action: none;
   border-top: 1px solid rgba(0, 238, 255, 0.25);
   user-select: none;
-  color: rgba(0, 238, 255, 0.55);
-  text-shadow: 0 0 3px var(--neon-cyan);
-  transition: color 120ms ease, background 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
-.info-popup__editor-resize:hover,
+.info-popup__editor-resize:hover {
+  background: rgba(0, 238, 255, 0.1);
+  border-top-color: var(--neon-cyan);
+}
+
 .info-popup__editor-resize:active {
-  color: var(--neon-cyan);
-  background: rgba(0, 238, 255, 0.08);
+  background: rgba(0, 238, 255, 0.18);
+  border-top-color: var(--neon-cyan);
 }
 
+/* Three horizontal neon bars as the grip visual (clearer than a
+   textual `═══` and scale-independent of the host font). */
 .info-popup__editor-resize-grip {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.info-popup__editor-resize-grip::before,
+.info-popup__editor-resize-grip::after {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 1px;
+  background: rgba(0, 238, 255, 0.55);
+  box-shadow: 0 0 3px var(--neon-cyan);
+}
+
+.info-popup__editor-resize:hover .info-popup__editor-resize-grip::before,
+.info-popup__editor-resize:hover .info-popup__editor-resize-grip::after,
+.info-popup__editor-resize:active .info-popup__editor-resize-grip::before,
+.info-popup__editor-resize:active .info-popup__editor-resize-grip::after {
+  background: var(--neon-cyan);
+  box-shadow: 0 0 5px var(--neon-cyan);
 }

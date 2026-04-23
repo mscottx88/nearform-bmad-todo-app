@@ -219,12 +219,22 @@ export function InfoPopup({
     setEditorHeight(EDITOR_DEFAULT_HEIGHT);
   };
 
-  // Resize handle on the bottom edge of the editor — user drags it to
-  // grow/shrink the scrollable region. Uses window-level pointermove
-  // so the drag survives the cursor leaving the handle.
+  // Resize handle on the bottom edge of the editor — user drags it
+  // to grow/shrink the scrollable region. Uses setPointerCapture so
+  // the drag stays locked to the handle even when the cursor (and
+  // the handle itself, which moves as the panel reflows) can't
+  // perfectly track each other — gets rid of the "clunky" feel of
+  // window-level listeners lagging a fast drag.
   const handleEditorResizeStart = (e: React.PointerEvent<HTMLDivElement>): void => {
     e.stopPropagation();
     e.preventDefault();
+    const handle = e.currentTarget;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      // jsdom / older browsers may not support setPointerCapture; the
+      // listeners below still fire via standard event propagation.
+    }
     editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
     const onMove = (ev: PointerEvent): void => {
       const start = editorResizeRef.current;
@@ -232,15 +242,20 @@ export function InfoPopup({
       const next = start.baseH + (ev.clientY - start.startY);
       setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
     };
-    const onUp = (): void => {
+    const onUp = (ev: PointerEvent): void => {
       editorResizeRef.current = null;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      try {
+        handle.releasePointerCapture(ev.pointerId);
+      } catch {
+        // Ignore — releasePointerCapture may throw if never captured.
+      }
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   };
 
   return (
@@ -299,10 +314,10 @@ export function InfoPopup({
                 className="info-popup__editor-resize"
                 onPointerDown={handleEditorResizeStart}
                 aria-label="Resize editor"
+                role="separator"
+                aria-orientation="horizontal"
               >
-                <span className="info-popup__editor-resize-grip" aria-hidden>
-                  ═══
-                </span>
+                <span className="info-popup__editor-resize-grip" aria-hidden />
               </div>
             </div>
           ) : (
