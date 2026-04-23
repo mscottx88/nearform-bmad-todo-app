@@ -1622,27 +1622,63 @@ export function LilyPad({
           let nudgeZ = 0;
           const anchor = usePondStore.getState().activeDragAnchor;
           if (anchor && anchor.padId !== todo.id) {
+            // Engage threshold based on anchor-to-REST distance: when
+            // the dragged pad's cursor is within NUDGE_RADIUS of this
+            // pad's slot, push this pad aside. Rest-based engagement
+            // keeps the nudge self-releasing — once the dragged pad
+            // moves far from this slot, the nudge decays to 0 and the
+            // pad returns home regardless of how far it was displaced.
             const tdx = posX - anchor.x;
             const tdz = posZ - anchor.z;
             const dist = Math.sqrt(tdx * tdx + tdz * tdz);
             if (dist < NUDGE_RADIUS) {
-              // Push the sibling to EXACTLY NUDGE_RADIUS from anchor
-              // along the radial — guarantees no residual overlap.
-              //   target = anchor + dir * NUDGE_RADIUS
-              //   nudge  = target − posX = dir * (NUDGE_RADIUS − dist)
-              // Coincident case (dist ≤ 1e-4): pick a deterministic
-              // direction seeded by the pad's driftSeed so overlapping
-              // pads still separate instead of silently overlapping
-              // during the drag. Mirrors the jitter approach used by
-              // spreadOut.ts for exactly-coincident pairs.
-              const push = NUDGE_RADIUS - dist;
-              if (dist > 1e-4) {
-                nudgeX = (tdx / dist) * push;
-                nudgeZ = (tdz / dist) * push;
+              // Direction: from anchor TOWARD the sibling's currently
+              // displaced position (rest + existing nudge). Using the
+              // displaced position keeps the nudge MONOTONIC — once
+              // this pad has been pushed to one side, the dragged pad
+              // crossing its rest slot does NOT flip it to the
+              // opposite side. The previous formula used
+              // `(posX − anchor) / dist` which reversed sign when the
+              // anchor crossed posX, which read as a visible "swap"
+              // when two pads met at their midpoints (user report
+              // 2026-04-23).
+              const nudgedX = posX + siblingNudgeRef.current.x;
+              const nudgedZ = posZ + siblingNudgeRef.current.z;
+              const adx = nudgedX - anchor.x;
+              const adz = nudgedZ - anchor.z;
+              const adist = Math.sqrt(adx * adx + adz * adz);
+              let dirX: number;
+              let dirZ: number;
+              if (adist > 1e-4) {
+                dirX = adx / adist;
+                dirZ = adz / adist;
               } else {
-                nudgeX = Math.cos(driftSeed) * push;
-                nudgeZ = Math.sin(driftSeed) * push;
+                // Nudged position lands exactly on the anchor. Prefer
+                // the existing nudge direction (preserves monotonicity
+                // across the exact crossing); if there is no existing
+                // nudge, fall back to a deterministic per-pad vector
+                // seeded by driftSeed so coincident pads still
+                // separate rather than silently overlapping.
+                const prevMag = Math.sqrt(
+                  siblingNudgeRef.current.x * siblingNudgeRef.current.x +
+                    siblingNudgeRef.current.z * siblingNudgeRef.current.z,
+                );
+                if (prevMag > 1e-4) {
+                  dirX = siblingNudgeRef.current.x / prevMag;
+                  dirZ = siblingNudgeRef.current.z / prevMag;
+                } else {
+                  dirX = Math.cos(driftSeed);
+                  dirZ = Math.sin(driftSeed);
+                }
               }
+              // Target absolute position: anchor + dir × NUDGE_RADIUS.
+              // Target nudge = target_abs − rest. Equivalent to the
+              // previous `dir * (NUDGE_RADIUS − dist)` formulation when
+              // dir has the same sign, but derived from `anchor + dir·R`
+              // so it stays valid when `dir` comes from the displaced
+              // position rather than the rest slot.
+              nudgeX = anchor.x + dirX * NUDGE_RADIUS - posX;
+              nudgeZ = anchor.z + dirZ * NUDGE_RADIUS - posZ;
             }
           }
           // (Sibling-nudge commit-on-release moved above the drag/sticky
