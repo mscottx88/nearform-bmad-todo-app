@@ -17,6 +17,13 @@ export interface Todo {
   // backend `TodoResponse.group_id` via an outerjoin on
   // `group_memberships` (see backend/src/services/todo_service.py).
   groupId: string | null;
+  // Story 4.6 (user feedback 2026-04-23): piggybacked from the owning
+  // Group row via the same outerjoin. Null for solo pads, or when the
+  // group's label/color is null. Lets the frontend reconstruct the
+  // per-group label/color caches on cold load without needing a
+  // separate GET /api/groups.
+  groupLabel: string | null;
+  groupColor: string | null;
 }
 
 export interface Group {

@@ -332,6 +332,13 @@ export function ActionPopup({
                     className="action-popup__label-input"
                     autoFocus
                     defaultValue={groupLabel ?? ''}
+                    // Preselect any existing label text (user feedback
+                    // 2026-04-23) — typing immediately replaces the old
+                    // label without needing a manual select-all, while
+                    // still keeping the current value visible for users
+                    // who only want to tweak a character or two (they
+                    // can press End or Arrow to deselect).
+                    onFocus={(e) => e.currentTarget.select()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         onSetLabel?.(e.currentTarget.value.trim() || null);

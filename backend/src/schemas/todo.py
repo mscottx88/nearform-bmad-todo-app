@@ -64,3 +64,12 @@ class TodoResponse(BaseModel):
     # is ALWAYS set explicitly by the service — pydantic's
     # from_attributes mode does NOT auto-populate it.
     group_id: uuid.UUID | None = None
+    # Story 4.6 (user feedback 2026-04-23): piggyback the group's
+    # label and color onto each member so the frontend can rebuild
+    # `groupLabels` / `groupColors` on refresh without needing a
+    # separate GET /api/groups. Null for solo pads (no group row
+    # joined) or when the group's label/color is itself null. The
+    # service's outerjoin on Group populates these; solo pads leave
+    # them null.
+    group_label: str | None = None
+    group_color: str | None = None

@@ -152,14 +152,16 @@ const POP_SCALE_AMPLITUDE = 0.25;
 // Story 4.6 (user feedback 2026-04-22): any pad being dragged pushes
 // nearby pads out of the way — not just cluster siblings. The impact
 // radius is 2× SELECTION_RING_OUTER so two pads "touch" right at the
-// visible halo-ring edge; inside that radius the nearby pad slides
-// radially away with magnitude proportional to overlap depth, capped
-// at NUDGE_MAX so a fast pass can't fling a sibling across the pond.
-// Smoothed in-place via a per-pad nudge ref (same lerp-toward pattern
-// as the earlier SIBLING_REPEL, but applied to every pad, not just
-// same-group siblings).
+// visible halo-ring edge.
+//
+// Nudge formula pushes the sibling to EXACTLY NUDGE_RADIUS from the
+// drag anchor along the radial — this guarantees the two pads end up
+// non-overlapping regardless of how deep the approach went. A simpler
+// "linear overlap × max" push (2026-04-22 feedback iteration) capped
+// the nudge at NUDGE_MAX ≈ 0.8, which wasn't enough to clear an
+// approach that stopped at the anchor (dist ≈ 0 → required push ≈
+// NUDGE_RADIUS), so pads stayed visibly overlapped.
 const NUDGE_RADIUS = 2 * SELECTION_RING_OUTER;
-const NUDGE_MAX = 0.8;
 
 // Story 4.6 AC #16: minimum cadence between wake emissions during a
 // grouped-pad drag, and the velocity threshold below which no wakes
@@ -1624,6 +1626,40 @@ export function LilyPad({
         group.scale.setScalar(THREE.MathUtils.lerp(currentScale, targetScale, COMPLETION_LERP));
       }
 
+      // Story 4.6 (user feedback 2026-04-23): on drag-release (anchor
+      // transitions non-null → null), if this pad built up a significant
+      // nudge during the drag, COMMIT it so the pad stays out of the
+      // dragged pad's way instead of snapping back and overlapping.
+      // MUST run BEFORE the drag/sticky/spread branch below — once
+      // stickyDragRef flips true, the IF branch below picks up on the
+      // same frame and writes the committed position to group.position.
+      // Running this after would leave a one-frame gap where siblingNudge
+      // has been reset to 0 but the ELSE branch still writes posX
+      // (original rest, pre-nudge), flashing back to the un-nudged
+      // position for a tick before the IF branch takes over.
+      const liveAnchor = usePondStore.getState().activeDragAnchor;
+      const hadLiveAnchor = hadDragAnchorRef.current;
+      hadDragAnchorRef.current = liveAnchor !== null;
+      if (
+        hadLiveAnchor &&
+        liveAnchor === null &&
+        !isDraggingRef.current &&
+        !stickyDragRef.current &&
+        (Math.abs(siblingNudgeRef.current.x) > 0.05 ||
+          Math.abs(siblingNudgeRef.current.z) > 0.05)
+      ) {
+        const commitX = posX + siblingNudgeRef.current.x;
+        const commitZ = posZ + siblingNudgeRef.current.z;
+        dragPosRef.current = { x: commitX, z: commitZ };
+        stickyDragRef.current = true;
+        updateTodo.mutate({
+          id: todo.id,
+          positionX: commitX,
+          positionY: commitZ,
+        });
+        siblingNudgeRef.current = { x: 0, z: 0 };
+      }
+
       // Story 4.2: drag + /spread-out overrides. Applied before the
       // ambient drift so the pad sits exactly where the user's
       // finger / the spread target says, not offset by the drift.
@@ -1697,54 +1733,32 @@ export function LilyPad({
             const tdz = posZ - anchor.z;
             const dist = Math.sqrt(tdx * tdx + tdz * tdz);
             if (dist < NUDGE_RADIUS && dist > 1e-4) {
-              // Overlap depth — from 0 at the ring edge to 1 at the
-              // center. Scales the nudge so a near-center pass feels
-              // strong and a glancing one is subtle.
-              const overlap = 1 - dist / NUDGE_RADIUS;
-              const strength = overlap * NUDGE_MAX;
-              nudgeX = (tdx / dist) * strength;
-              nudgeZ = (tdz / dist) * strength;
+              // Push the sibling to EXACTLY NUDGE_RADIUS from anchor
+              // along the radial — guarantees no residual overlap.
+              //   target = anchor + dir * NUDGE_RADIUS
+              //   nudge  = target − posX = dir * (NUDGE_RADIUS − dist)
+              const push = NUDGE_RADIUS - dist;
+              nudgeX = (tdx / dist) * push;
+              nudgeZ = (tdz / dist) * push;
             }
           }
-          // Story 4.6 (user feedback 2026-04-23): on drag-release
-          // (anchor transitions non-null → null), if this pad built up
-          // a significant nudge during the drag, COMMIT it so the pad
-          // stays out of the dragged pad's way instead of snapping back
-          // to its rest position and overlapping. Reuses the stickyDrag
-          // pin so the new position doesn't flash back to the old
-          // posX/posZ during the PATCH → refetch window (same pattern
-          // as the single-pad drag and /spread-out arrival).
-          const hadAnchor = hadDragAnchorRef.current;
-          hadDragAnchorRef.current = anchor !== null;
-          if (
-            hadAnchor &&
-            anchor === null &&
-            (Math.abs(siblingNudgeRef.current.x) > 0.05 ||
-              Math.abs(siblingNudgeRef.current.z) > 0.05)
-          ) {
-            const commitX = posX + siblingNudgeRef.current.x;
-            const commitZ = posZ + siblingNudgeRef.current.z;
-            dragPosRef.current = { x: commitX, z: commitZ };
-            stickyDragRef.current = true;
-            updateTodo.mutate({
-              id: todo.id,
-              positionX: commitX,
-              positionY: commitZ,
-            });
-            siblingNudgeRef.current = { x: 0, z: 0 };
-          }
-          // Smooth nudge changes (fast-attack, slow-decay via same ref
-          // lerped in place) so the push-off doesn't snap when the
-          // anchor crosses the radius.
+          // (Sibling-nudge commit-on-release moved above the drag/sticky
+          // branch — see the "Story 4.6 (user feedback 2026-04-23)"
+          // block near the top of the resting phase.)
+          // Smooth nudge changes — but fast enough that a mid-speed
+          // drag through another pad visibly displaces it before the
+          // anchor passes. 0.35 reaches 90% of a new target in ~6
+          // frames (~100ms at 60fps), which reads as a firm slide
+          // rather than a lazy drift.
           siblingNudgeRef.current.x = THREE.MathUtils.lerp(
             siblingNudgeRef.current.x,
             nudgeX,
-            0.2,
+            0.35,
           );
           siblingNudgeRef.current.z = THREE.MathUtils.lerp(
             siblingNudgeRef.current.z,
             nudgeZ,
-            0.2,
+            0.35,
           );
           // Story 4.6 AC #21–#25: cluster-handle translation. When a
           // cluster-drag handle is active (or held sticky during the

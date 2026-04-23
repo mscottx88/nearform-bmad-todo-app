@@ -212,18 +212,36 @@ export function PondScene() {
   }, [renderTodos]);
 
   // Story 4.6: derive group metadata from the live todo list. The backend
-  // returns `group_id` on each todo but not the group label. Labels are
-  // cached session-locally in `groupLabels` state and updated from
-  // mutation onSuccess callbacks so the Label input pre-fills correctly.
+  // returns `group_id`, `group_label`, and `group_color` on each todo
+  // via the list_todos three-way outerjoin. Label/color survive a
+  // refresh without needing a separate GET /api/groups. The local
+  // `groupLabels` / `groupColors` state serves only as an optimistic
+  // override between mutation success and refetch completion — a
+  // just-set label is visible immediately instead of after the ~50ms
+  // refetch round-trip.
   const groups = useMemo<Map<string, Group>>(() => {
     const map = new Map<string, Group>();
     for (const todo of renderTodos) {
       if (todo.groupId && !map.has(todo.groupId)) {
         const members = renderTodos.filter((t) => t.groupId === todo.groupId);
+        // Optimistic-cache override first, else piggybacked value from
+        // the latest GET /api/todos. Both may be null (label not set).
+        const optimisticLabel = groupLabels.get(todo.groupId);
+        const optimisticColor = groupColors.get(todo.groupId);
         map.set(todo.groupId, {
           id: todo.groupId,
-          label: groupLabels.get(todo.groupId) ?? null,
-          color: groupColors.get(todo.groupId) ?? null,
+          // Normalise `undefined` → `null` so the label-render filter
+          // (g.label !== null) behaves consistently whether the field
+          // was missing from the fixture or explicitly unset by the
+          // backend.
+          label:
+            optimisticLabel !== undefined
+              ? optimisticLabel
+              : todo.groupLabel ?? null,
+          color:
+            optimisticColor !== undefined
+              ? optimisticColor
+              : todo.groupColor ?? null,
           positionX: null,
           positionY: null,
           createdAt: '',
@@ -432,6 +450,7 @@ export function PondScene() {
           return (
             <ClusterLabel
               key={gid}
+              groupId={gid}
               label={g.label!}
               memberPositions={memberPositions}
             />

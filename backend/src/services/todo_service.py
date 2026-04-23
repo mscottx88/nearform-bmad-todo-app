@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from src.exceptions import TodoNotFoundError
-from src.models.group import GroupMembership
+from src.models.group import Group, GroupMembership
 from src.models.todo import Todo
 from src.schemas.todo import TodoCreate, TodoResponse, TodoUpdate
 from src.workers import embedding_worker
@@ -15,27 +15,44 @@ from src.workers import embedding_worker
 def _build_response(
     todo: Todo,
     group_id: uuid.UUID | None,
+    group_label: str | None = None,
+    group_color: str | None = None,
 ) -> TodoResponse:
     """Shape a Todo ORM row + its (optional) group membership into
     a TodoResponse. Story 4.6 — `group_id` is not a column on the
     Todo model; callers pass the join-table-derived value explicitly.
+    `group_label` / `group_color` default to None; solo pads never
+    have them, and only list_todos (which has the three-way join)
+    populates them today — the single-row mutation paths look up
+    the row separately via `_group_meta_for`.
     """
     return TodoResponse.model_validate(
-        {**TodoResponse.model_validate(todo).model_dump(), "group_id": group_id}
+        {
+            **TodoResponse.model_validate(todo).model_dump(),
+            "group_id": group_id,
+            "group_label": group_label,
+            "group_color": group_color,
+        }
     )
 
 
-def _group_id_for(db: Session, todo_id: uuid.UUID) -> uuid.UUID | None:
-    """Single-row lookup of a pad's group membership. Returns None
-    for solo pads. Used by update/delete/restore/create paths where
-    we need to echo the current group_id back in the response.
+def _group_meta_for(
+    db: Session, todo_id: uuid.UUID
+) -> tuple[uuid.UUID | None, str | None, str | None]:
+    """Single-row lookup of a pad's group membership + label + color.
+    Returns (None, None, None) for solo pads. Used by update/delete/
+    restore/create paths to echo the CURRENT group metadata back in
+    the response without duplicating the join each time.
     """
     row = (
-        db.query(GroupMembership.group_id)
+        db.query(GroupMembership.group_id, Group.label, Group.color)
+        .join(Group, GroupMembership.group_id == Group.id)
         .filter(GroupMembership.todo_id == todo_id)
         .first()
     )
-    return row[0] if row else None
+    if row is None:
+        return None, None, None
+    return row[0], row[1], row[2]
 
 
 def _get_active_todo(
@@ -98,10 +115,14 @@ def list_todos(
         # coerce to active-only; the empty pond is the feature.
         return []
     rows = (
-        db.query(Todo, GroupMembership.group_id)
+        db.query(Todo, GroupMembership.group_id, Group.label, Group.color)
         .outerjoin(
             GroupMembership,
             Todo.id == GroupMembership.todo_id,
+        )
+        .outerjoin(
+            Group,
+            GroupMembership.group_id == Group.id,
         )
         .filter(
             Todo.archived == False,  # noqa: E712
@@ -110,7 +131,9 @@ def list_todos(
         .order_by(Todo.created_at.desc())
         .all()
     )
-    return [_build_response(todo, gid) for todo, gid in rows]
+    return [
+        _build_response(todo, gid, glabel, gcolor) for todo, gid, glabel, gcolor in rows
+    ]
 
 
 def get_todo(db: Session, todo_id: uuid.UUID) -> Todo:
@@ -127,7 +150,8 @@ def update_todo(
         setattr(todo, field, value)
     db.commit()
     db.refresh(todo)
-    return _build_response(todo, _group_id_for(db, todo.id))
+    gid, glabel, gcolor = _group_meta_for(db, todo.id)
+    return _build_response(todo, gid, glabel, gcolor)
 
 
 def delete_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
@@ -136,7 +160,8 @@ def delete_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
     todo.deleted_at = datetime.now(UTC)
     db.commit()
     db.refresh(todo)
-    return _build_response(todo, _group_id_for(db, todo.id))
+    gid, glabel, gcolor = _group_meta_for(db, todo.id)
+    return _build_response(todo, gid, glabel, gcolor)
 
 
 def restore_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
@@ -151,4 +176,5 @@ def restore_todo(db: Session, todo_id: uuid.UUID) -> TodoResponse:
     todo.deleted_at = None
     db.commit()
     db.refresh(todo)
-    return _build_response(todo, _group_id_for(db, todo.id))
+    gid, glabel, gcolor = _group_meta_for(db, todo.id)
+    return _build_response(todo, gid, glabel, gcolor)
