@@ -945,3 +945,658 @@ User Interaction → React Event Handler → Hook (useSearch, usePondInteraction
 8. Popup Color Swatch sub-panel
 9. Popup Group/Ungroup actions
 10. Search endpoint + embedding pipeline + type-anywhere UX
+
+---
+
+## Addendum: CrewAI Chat Agent (2026-04-23)
+
+_Scoped extension to support an AI agent chat interface. Appended in place to preserve the existing architecture as the canonical source for downstream skills. Not a rewrite — the core decisions in §§ Project Context, Starter Eval, Core Decisions, Patterns, and Structure remain authoritative._
+
+### Addendum Context & Scope Boundary
+
+**What this adds:**
+- A CrewAI-based chat agent exposed via F1 and the `/help` slash command.
+- A chat panel UI (right-side drawer) with session management, history, and streaming assistant replies.
+- An extensible skill system: `chat` (free-form), `organize`, `plan`, `rephrase`, `reformat`, plus an `intent_classifier` for inferred routing.
+- Two new DB tables (`chat_sessions`, `chat_messages`) and one new column on `todos` (`display_metadata`).
+- A read-only database tool surface for the crew, wrapping existing services.
+- SSE-based streaming from backend to frontend for live assistant output.
+
+**What this does NOT change:**
+- Existing REST endpoints for todos, search, embeddings — untouched.
+- Existing frontend stores, components, and the TodoInput slash-command framework — the framework stays pure for toggle commands; `/help` is a parser carve-out.
+- Constitutional constraints — thread-based concurrency only, sync FastAPI handlers, sync psycopg_pool.
+- Existing Epic 1–5, 7, 8 scope.
+
+**Why addendum vs. rewrite:** the base architecture is complete and production-shaped. The agent is additive to a well-formed substrate, not a rearchitecture. Keeping the addendum in-place gives downstream epic/story creation a single authoritative document to read.
+
+**Epic assignment:** slots cleanly into the gap at Epic 6 in `epics.md` (current list jumps 5 → 7).
+
+**Reference repo:** patterns follow the local `C:\Users\michael\nearform\rag-csv-crew`, with one deliberate divergence (tool dependency injection — see Decision 3.1).
+
+---
+
+### Decision 1: CrewAI Hosting & Concurrency Strategy
+
+**Problem:** CrewAI's `crew.kickoff()` is sync (compatible with the constitution) but multi-second per run. Calling it inline inside a FastAPI request handler blocks a worker thread for the full crew duration.
+
+**Decision: thread-per-request with SSE streaming.**
+
+| Aspect | Choice |
+|---|---|
+| Crew execution | Daemon `threading.Thread` per chat request |
+| Response shape | `StreamingResponse` with sync Python generator yielding SSE frames |
+| Thread ↔ SSE transport | `queue.Queue` — crew thread enqueues events, generator dequeues and yields |
+| Cancellation | `threading.Event` per in-flight message; crew thread checks at step boundaries |
+| Lifetime | Daemon threads die on app shutdown; no join required |
+| Multi-worker deployment | Single-process v1; cancellation map is in-memory per-process (noted as upgrade path) |
+
+**Thread hygiene:**
+- No module-level globals for per-request state. Dependencies injected via `BaseTool.__init__` (see Decision 3.1).
+- LLM credentials loaded once at app startup (`Settings` via Pydantic), not per-request.
+- Cancellation endpoint (`POST /api/agent/sessions/{id}/cancel`) reserved even if UX doesn't expose it in v1.
+
+**Constitutional compliance:**
+- No `async`/`await`/`asyncio` anywhere in this substrate.
+- `time.sleep()` (used in simulated streaming — Decision 6.3) releases the GIL and is thread-safe.
+- FastAPI `StreamingResponse` with a sync generator is supported natively and does not require async handlers.
+
+---
+
+### Decision 2: Chat & History Data Model
+
+#### Schema
+
+```sql
+chat_sessions (
+  id            UUID PRIMARY KEY,
+  title         TEXT,                          -- auto-derived from first user message, user-editable
+  created_at    TIMESTAMP DEFAULT NOW(),
+  updated_at    TIMESTAMP DEFAULT NOW()        -- bumped on new message
+)
+
+chat_messages (
+  id            UUID PRIMARY KEY,
+  session_id    UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role          VARCHAR(16) NOT NULL
+                CHECK (role IN ('user','assistant','system','tool')),
+  content       TEXT NOT NULL,
+  skill         VARCHAR(64),                   -- which skill handled it; NULL for user msgs
+  metadata      JSONB DEFAULT '{}',            -- proposal envelope, todo_refs, etc.
+  status        VARCHAR(16) NOT NULL DEFAULT 'complete'
+                CHECK (status IN ('pending','streaming','complete','failed','cancelled')),
+  error         TEXT,                          -- populated when status='failed'
+  created_at    TIMESTAMP DEFAULT NOW()
+)
+
+CREATE INDEX idx_chat_messages_session_created ON chat_messages(session_id, created_at);
+```
+
+#### Semantics
+
+| Aspect | Decision |
+|---|---|
+| Clear-history semantics | Hard delete via `DELETE /api/agent/sessions/{id}`; `ON DELETE CASCADE` drops messages |
+| Session model | Multiple sessions, user-managed, auto-titled from first user message |
+| Context window | Last 20 turns (user+assistant pairs) passed to each crew run; simple `ORDER BY created_at DESC LIMIT` then reversed |
+| Todo cross-link | `metadata.todo_refs: ["uuid", ...]` — cheap JSONB list, not queryable; promote to junction table later if needed |
+| In-flight row writes | Row inserted at message-arrival with `status='pending'`, final `content` written once at end (not appended per-token) |
+| Retention / auto-purge | None in v1; manual delete only |
+
+**Rationale:**
+- Hard delete matches the user's expectation of "clear" and avoids soft-delete admin debt in a single-user app.
+- 20-turn window is a predictable token budget; upgrade to rolling-summary compaction if sessions routinely exceed it.
+- JSONB `todo_refs` covers 90% of debug use cases without a new table.
+
+---
+
+### Decision 3: Database Tool Contract for the Crew
+
+#### 3.1 Tool authorship: `BaseTool` subclasses, not `@tool` decorators
+
+Each tool is a `BaseTool` subclass instantiated per-request with explicit dependencies:
+
+```
+src/agent/tools/
+├── __init__.py
+├── base.py                  # Shared BaseTool subclass with pool/service injection
+├── list_todos.py
+├── get_todo.py
+├── search_todos.py
+└── get_chat_history.py
+```
+
+**Deliberate divergence from rag-csv-crew:** the reference repo uses the `@tool` decorator with module-level globals for context (`_schema_inspector_service = ...`). This is unsafe in concurrent threaded contexts — two simultaneous crews would share and overwrite each other's state. Class-based tools with `__init__` injection are thread-safe by construction.
+
+#### 3.2 Read-only in v1
+
+Tools only read. Skills produce **proposals** that the frontend renders as previews; the user clicks Apply; the frontend then calls existing REST endpoints to mutate. Rationale:
+
+- Trust gradient — LLM gets read access before write access.
+- No duplicate mutation paths — existing `PATCH /api/todos` / `PATCH /api/todos/positions` / `POST /api/todos` already carry validation, embedding re-triggering, and soft-delete semantics.
+- Undo is free — rejected proposals leave no state.
+
+#### 3.3 Tool inventory
+
+| Tool | Purpose | Wraps |
+|---|---|---|
+| `ListTodosTool` | Fetch active todos with id/text/color/completed/position/created_at. Optional `filter`: `active\|completed\|all`. | `todo_service.list_for_agent(filter, limit)` (new method) |
+| `GetTodoTool` | Full detail for one todo. | `todo_service.get_by_id(id)` (existing) |
+| `SearchTodosTool` | Hybrid search. | `search_service.search(query, limit)` (existing) |
+| `GetChatHistoryTool` | Last N messages of current session, scoped by `session_id` at construction. | `chat_service.list_messages(session_id, limit)` (new) |
+
+**Not in the tool set:** `CreateTodoTool`, `UpdateTodoTool`, `DeleteTodoTool`, `BatchPositionTool` — these exist as REST endpoints and are called by the frontend on Apply.
+
+#### 3.4 Tool I/O shape
+
+- Tools return **JSON-serialized strings** (CrewAI's expected return shape).
+- Field names compact (`id`, `text`, `done`, `color`, `x`, `y`, `created`) to minimize LLM token overhead.
+- `ListTodosTool` default result cap: 100 todos; hard cap: 500. Crews that need more use `SearchTodosTool`.
+
+#### 3.5 Proposal envelope (the structured output side)
+
+Every skill's final message carries in `metadata`:
+
+```json
+{
+  "skill": "organize",
+  "proposal": {
+    "kind": "position_deltas",
+    "payload": { /* kind-specific */ },
+    "targets": ["<todo_id>", ...],
+    "reasoning": "<1-2 sentence user-facing rationale>"
+  }
+}
+```
+
+**`kind` values:**
+
+| Skill | kind | Payload shape |
+|---|---|---|
+| `organize` | `position_deltas` | `[{id, x, y}, ...]` matching `PATCH /api/todos/positions` body exactly |
+| `plan` | `plan` | `{steps: [{text, done?, order}], rationale}` |
+| `rephrase` | `text_rewrite` | `[{id, current, suggested, notes[]}, ...]` |
+| `reformat` | `visual_cues` | `{id, cues: {emphasis?, icons?, badges?}}` |
+| `chat` | `none` | — plain prose |
+
+#### 3.6 Safety baseline
+
+- **Bounded result sets** (see 3.4).
+- **SQL injection** — tools call service methods; services use SQLAlchemy/psycopg parameterized queries; no string interpolation near the LLM.
+- **Prompt-injection framing** — the crew's system prompt explicitly frames `todos.text` and `chat_messages.content` as *untrusted data*, never as instructions. A user todo like "ignore previous instructions and…" must not hijack the agent.
+- **Tool-call audit logging — deferred.** A per-invocation log at `message.metadata.tool_calls: [{tool, inputs, result_summary, duration_ms}]` is valuable for debugging but not load-bearing for v1. Captured as a deferred-work story; trigger to pull forward = first "why did the agent do that?" investigation.
+
+---
+
+### Decision 4: Skill Registry & Extensibility Pattern
+
+#### 4.1 Skill model: crew preset
+
+A skill is a factory that builds a `Crew` for that skill's purpose:
+
+```python
+def build_crew(ctx: SkillContext) -> Crew: ...
+```
+
+Each skill picks its own agents, tasks, and tool subset. This matches rag-csv-crew's mental model and gives each skill specialization headroom at ~30 lines per skill.
+
+#### 4.2 Routing: explicit or inferred
+
+- **Explicit:** frontend sends `skill: "rephrase"` — service dispatches directly.
+- **Inferred:** frontend sends `skill: null` — service runs the `intent_classifier` skill (one lightweight LLM call) to pick a skill, then dispatches.
+
+The `intent_classifier` is itself a skill — symmetric registry treatment.
+
+#### 4.3 Registry
+
+```python
+# src/agent/skills/registry.py
+
+@dataclass(frozen=True)
+class SkillSpec:
+    name: str
+    description: str                            # Used in classifier prompt
+    proposal_kind: str | None                   # From Decision 3.5
+    builder: Callable[[SkillContext], Crew]
+
+SKILL_REGISTRY: dict[str, SkillSpec] = { ... }
+```
+
+`SkillContext` is an immutable bundle: `{pool, session_id, user_message, message_history, todos_snapshot?, event_queue}`. The `event_queue` is the `queue.Queue` from Decision 1.
+
+#### 4.4 Layout
+
+```
+src/agent/skills/
+├── __init__.py
+├── registry.py              # SKILL_REGISTRY, SkillSpec, SkillContext
+├── base.py                  # Shared helpers (system-prompt base, proposal builders)
+├── intent_classifier.py
+├── chat.py
+├── organize.py
+├── plan.py
+├── rephrase.py
+└── reformat.py
+```
+
+#### 4.5 Agent count per initial skill
+
+| Skill | Agent shape |
+|---|---|
+| `chat` | 1 agent (conversational assistant with read tools) |
+| `organize` | 2 agents sequentially: *relationship-finder* → *layout-proposer* |
+| `plan` | 1 agent (planner with read tools) |
+| `rephrase` | 1 agent (editor with read tools) |
+| `reformat` | 1 agent (analyst emitting cue hints) |
+| `intent_classifier` | 1 agent, no tools |
+
+#### 4.6 Extension contract
+
+Adding a skill requires:
+1. New file `src/agent/skills/<name>.py` exporting `build_crew(ctx) -> Crew`.
+2. Registration row in `SKILL_REGISTRY`.
+3. (If the skill produces proposals) a new `kind` value + frontend proposal renderer in the same PR.
+4. Description entry for the `intent_classifier`.
+
+No other wiring. Crew runner, SSE plumbing, persistence, sessions are skill-agnostic.
+
+#### 4.7 Flags
+
+- **`organize` leverages existing embeddings.** Relationship discovery uses pgvector similarity via `SearchTodosTool`, then an LLM judgment pass proposes groupings. Cheaper and more robust than asking the LLM to cluster by raw text.
+- **`reformat` has a locked v1 cue vocabulary:** `emphasis: 'warning'|'success'|'neutral'`, `icons: [...]`, `badges: [{text, tone}]`. Richer cues (hue shifts, animations) added only as the frontend renderer grows — prevents the skill's ambiguity from leaking into frontend complexity.
+
+---
+
+### Decision 5: Frontend Integration
+
+#### 5.1 F1 keybinding
+
+- Registered in existing `frontend/src/hooks/useKeyboardShortcuts.ts`.
+- `event.preventDefault()` — some browsers hijack F1 for native help.
+- Toggles panel open/closed; on open, auto-focuses the composer.
+- Guards match story 3-3's `/` shortcut: suppressed if an input has focus, action popup is open, or search is active.
+
+#### 5.2 `/help` routing
+
+- Parser carve-out at TodoInput's entry, **before** the existing slash-command registry walk.
+- `/help` bare → open panel, empty input.
+- `/help <text>` → open panel, prefill composer with `<text>`, do not auto-send.
+- New file `frontend/src/utils/helpCommand.ts` handles detection. TodoInput invokes it first; falls through to the existing registry if no match.
+
+The toggle-command framework from story 3-3 remains pure (boolean toggles only). `/help` is a distinct concern — chat invocation — with its own parser branch. Pattern precedent: story 5.3's search hook got a similar one-line carve-out for `/`.
+
+#### 5.3 Panel UX
+
+- **Right-side drawer**, ~440px desktop, full-width mobile.
+- Translucent neon-bordered surface; pond stays interactive behind at full opacity.
+- **Three zones:** header (title + new-chat + sessions menu + close), message scroll area, composer.
+- **Sessions UI:** hamburger in header opens in-panel sessions list overlay (not a separate sidebar). Delete-on-hover (red neon X).
+- **Composer:** multi-line auto-grow (6-line cap). Enter sends; Shift+Enter newline; Esc closes panel.
+- **Dismissal:** F1, Escape (composer not focused or empty), or X button. Non-destructive — state persists server-side.
+
+#### 5.4 State
+
+New Zustand store `useAgentStore`:
+
+| Field | Purpose |
+|---|---|
+| `panelOpen` | Visibility flag |
+| `activeSessionId` | Current session UUID |
+| `sessions` | List of session summaries |
+| `messages` | Messages for the active session |
+| `inputDraft` | Composer text |
+| `streamingMessageId` | ID of in-flight assistant message; null when idle |
+| `streamingBuffer` | Accumulated tokens/thoughts for the streaming message |
+| `proposalPreviews` | Map of `messageId → activePreview` |
+
+Actions: `openPanel`, `closePanel`, `togglePanel`, `newSession`, `switchSession`, `sendMessage`, `deleteSession`, `setDraft`, `ingestSseEvent`, `dismissPreview`.
+
+#### 5.5 SSE consumption
+
+- Native `EventSource` API.
+- Typed event handlers dispatch into `useAgentStore.ingestSseEvent()`.
+- On `done`/`error`: close EventSource, mutate streaming message to final state, invalidate relevant React Query caches (todos list after an Apply).
+- On unexpected disconnect: single-attempt fallback to `GET /api/agent/messages/{id}` for final stored state (no auto-retry SSE).
+
+#### 5.6 Proposal rendering
+
+One component per `kind` in `frontend/src/components/agent/proposals/`:
+
+| kind | Component | Preview | Apply |
+|---|---|---|---|
+| `position_deltas` | `OrganizeProposal.tsx` | Ghost pad positions on the pond (reuses drag-preview pattern) | `PATCH /api/todos/positions` |
+| `plan` | `PlanProposal.tsx` | Inline steps list + checkboxes | Per-step `POST /api/todos` |
+| `text_rewrite` | `RephraseProposal.tsx` | Inline diff with per-suggestion accept | Per-accepted `PATCH /api/todos/{id}` |
+| `visual_cues` | `ReformatProposal.tsx` | Hover-preview cue styling on the pad | `PATCH /api/todos/{id}` with `display_metadata` |
+| *(none)* | — | Plain markdown | — |
+
+Applied proposals freeze in the transcript (grayed Apply + "Applied ✓").
+
+#### 5.7 Reformat cue persistence → new column on `todos`
+
+Visual cues must persist across reloads ("help reformat content … for better rendering"). Schema change: add `todos.display_metadata JSONB NOT NULL DEFAULT '{}'`. `LilyPad.tsx` reads it at render time and interprets `emphasis` / `icons` / `badges` against neon design tokens.
+
+Column is generic enough to carry future display concerns (custom reactions, per-todo theming) without another migration.
+
+#### 5.8 Frontend code layout
+
+```
+frontend/src/
+├── components/
+│   └── agent/
+│       ├── AgentPanel.tsx
+│       ├── AgentMessageList.tsx
+│       ├── AgentMessage.tsx
+│       ├── AgentComposer.tsx
+│       ├── AgentSessionsMenu.tsx
+│       ├── AgentPanelHeader.tsx
+│       └── proposals/
+│           ├── OrganizeProposal.tsx
+│           ├── PlanProposal.tsx
+│           ├── RephraseProposal.tsx
+│           └── ReformatProposal.tsx
+├── hooks/
+│   └── useAgentSse.ts
+├── stores/
+│   └── useAgentStore.ts
+├── api/
+│   └── agentApi.ts
+└── utils/
+    └── helpCommand.ts
+```
+
+---
+
+### Decision 6: API & Streaming Surface
+
+#### 6.1 Endpoint inventory
+
+All under `/api/agent/*`, snake_case JSON payloads, sync FastAPI handlers.
+
+| Verb | Path | Purpose | Response |
+|---|---|---|---|
+| `POST` | `/api/agent/chat` | Send user message, stream assistant reply | **SSE stream** |
+| `GET` | `/api/agent/sessions` | List sessions | `[{id, title, updated_at, message_count}]` |
+| `POST` | `/api/agent/sessions` | Create empty session | `{id, title: null, created_at}` |
+| `GET` | `/api/agent/sessions/{id}` | Session + full message list | `{id, title, messages, updated_at}` |
+| `PATCH` | `/api/agent/sessions/{id}` | Rename | updated session |
+| `DELETE` | `/api/agent/sessions/{id}` | Hard-delete (cascades to messages) | 204 |
+| `POST` | `/api/agent/sessions/{id}/cancel` | Cancel in-flight message | 202 |
+| `GET` | `/api/agent/messages/{id}` | Single-message fallback for SSE drop | message row |
+
+**Clear-current-session UX** = `DELETE` on the active session, then `POST` a new one. Two idempotent calls; no dedicated "clear" verb.
+
+#### 6.2 `POST /api/agent/chat` — the streaming endpoint
+
+**Request:**
+```json
+{
+  "session_id": "<uuid>",
+  "content": "<user prompt>",
+  "skill": "organize" | "plan" | "rephrase" | "reformat" | "chat" | null,
+  "context": { "todo_ids": ["<uuid>", ...] }
+}
+```
+
+`skill: null` → `intent_classifier` picks. `context.todo_ids` is an optional pre-selection hint (e.g., right-click pad → `/help rephrase this todo`).
+
+**Handler flow (sync, thread-based):**
+
+1. Validate body via Pydantic.
+2. DB transaction: insert user message (`status='complete'`), insert assistant placeholder (`status='pending'`), commit. Capture assistant `message_id`.
+3. Build `SkillContext`, select skill (explicit or via classifier), build `Crew` via registry factory.
+4. Create `queue.Queue` and `threading.Event` (cancellation). Register `{message_id → cancel_event}` in in-memory map.
+5. Spawn daemon `threading.Thread` running the crew. Thread enqueues events and writes final message row at end.
+6. Return `StreamingResponse` with a sync generator that pulls from the queue and yields SSE frames until `done`/`error` or client disconnect.
+
+**SSE event types:**
+
+| Event | Payload | When |
+|---|---|---|
+| `start` | `{message_id, session_id, skill}` | First event |
+| `thought` | `{text}` | Optional agent reasoning trace |
+| `tool_call` | `{tool, inputs_summary, started_at}` | Tool invocation begin |
+| `tool_result` | `{tool, ok, duration_ms}` | Tool return |
+| `chunk` | `{text}` | Prose chunk (see 6.3) |
+| `proposal` | `{kind, payload, targets, reasoning}` | Structured proposal at end |
+| `done` | `{message_id, final_content_hash}` | Terminal |
+| `error` | `{code, message, recoverable}` | Terminal on failure |
+
+**Client disconnect handling:** sync generator detects broken pipe at next yield, sets `cancel_event`. Crew thread checks at step boundaries and aborts. Assistant row's final state persists (`cancelled` or `complete` — whichever wins the race). Client can refetch via `GET /api/agent/messages/{id}`.
+
+#### 6.3 Simulated streaming
+
+**CrewAI `kickoff()` returns all-at-once; it does not stream tokens natively.** True per-token streaming would require hooking the LLM callback through CrewAI's event system. v1 does not do that.
+
+**Instead, simulate streaming:**
+
+- Once `kickoff()` returns, the final assistant prose is **chunked on word boundaries into groups of ~2–5 words**.
+- The crew-runner thread emits one `chunk` event per group with `time.sleep(AGENT_CHUNK_DELAY_MS / 1000)` between them.
+- `AGENT_CHUNK_DELAY_MS` is a tunable constant, initial value 30–80ms.
+- **Total simulated-typing duration capped at ~3s.** For long responses, the delay compresses proportionally (`actual_delay = min(configured_delay, 3000ms / chunk_count)`).
+- Agent step events (`thought`, `tool_call`, `tool_result`) bypass the delay loop — they emit in real time as the crew progresses.
+- Chunking lives in `src/agent/crew_runner.py` as the single choke point. Skills do not pre-chunk.
+- `time.sleep()` releases the GIL and is thread-safe; constitutionally compliant.
+
+If real per-token streaming is desired later, the SSE contract does not change — only the implementation of chunk emission swaps.
+
+#### 6.4 Cancellation
+
+- `POST /api/agent/sessions/{id}/cancel` sets the `threading.Event` for the session's in-flight message (if any).
+- Crew thread checks at step boundaries; bails at next opportunity.
+- Assistant row ends with `status='cancelled'` and any partial content.
+- In-memory `{message_id → cancel_event}` map; single-process v1. Multi-worker deployments would need external state (Redis, DB flag) — noted as upgrade path.
+
+#### 6.5 Errors
+
+Follows the existing error envelope from § API & Communication Patterns:
+
+```json
+{
+  "error": "<code>",
+  "message": "<user-safe message>",
+  "session_id": "<uuid>",
+  "message_id": "<uuid>",
+  "recoverable": true|false
+}
+```
+
+Codes:
+- `session_not_found` (404)
+- `invalid_skill` (400)
+- `llm_provider_error` (502, often `recoverable=true`)
+- `tool_execution_failed` (500)
+- `agent_crew_failed` (500 — catch-all)
+- `cancelled` (200 — row state, not an error)
+
+Errors mid-stream are delivered as `event: error` **and** written to the message row. Pre-stream errors (validation, 404) come back as standard JSON before the stream opens.
+
+#### 6.6 Idempotency, rate limiting, observability
+
+- **Idempotency:** none in v1. Double-sends produce two messages; user deletes the dupe. `Idempotency-Key` header contract added later if retries become a UX concern.
+- **Rate limiting:** none in v1 (single-user).
+- **Observability:** message-row status only. Tool-call audit trail and per-invocation metrics are a deferred-work story.
+
+#### 6.7 Schema delta — folded into initial migration
+
+**Per explicit decision, Epic 6 does NOT ship an Alembic `ALTER` migration.** Instead:
+
+1. Update SQLAlchemy models: add `ChatSession`, `ChatMessage`, add `display_metadata` to `Todo`.
+2. `alembic downgrade base` (wipes everything).
+3. Regenerate the initial migration (`alembic revision --autogenerate`) so v1 schema is one atomic migration file.
+4. `alembic upgrade head`.
+
+**Side-effect:** any dev DB loses its data on this cycle. Pre-production, no deployed users — acceptable. Dev stories will call this out as a pre-flight step. Precedent: story 3.3's "truncate todos if legacy seed" stance.
+
+Resulting schema additions:
+```sql
+-- New tables in initial migration
+chat_sessions (...)
+chat_messages (...)
+
+-- New column on existing table (also in initial migration, not as ALTER)
+todos.display_metadata JSONB NOT NULL DEFAULT '{}'
+```
+
+No backwards compatibility, no evolutionary cruft, history stays a single "v1 schema" migration.
+
+---
+
+### Patterns & Conventions Delta
+
+Applies only to agent-subsystem code. All base-architecture patterns (§§ Naming / Structure / Format / Communication / Process) remain in force.
+
+| # | Pattern | Statement |
+|---|---|---|
+| P1 | Skill file shape | Every skill in `src/agent/skills/<skill>.py` exports `build_crew(ctx: SkillContext) -> Crew` and registers in `registry.py`. No other exports. |
+| P2 | Proposal envelope is contractual | `metadata.proposal = {kind, payload, targets, reasoning}` is a frontend/backend contract. New `kind` values require matching frontend renderer in same PR. |
+| P3 | Tool classes, not tool functions | Agent tools are `BaseTool` subclasses with deps injected at `__init__`. No `@tool` decorators. No module-level globals for context. |
+| P4 | Tool inputs stay bounded | `ListTodosTool` default cap 100, hard cap 500. Crews needing more use `SearchTodosTool`. |
+| P5 | Assistant prose is chunked, not atomic | Chunking lives in `src/agent/crew_runner.py` as a single choke point. Skills do not pre-chunk. |
+| P6 | Agent never bypasses existing services | Read tools wrap `todo_service` / `search_service` / `chat_service`. No raw SQL, no direct `pool.connection()` in tool code. Missing methods are added to services, not shortcut. |
+| P7 | `src/agent/` is a bounded context | Only `src/api/agent.py` imports from `src/agent/*`. `src/agent/*` imports only services from outside. Swap-out blast radius is contained. |
+| P8 | F1 and `/help` converge | Both land at `useAgentStore.openPanel()`. `/help <text>` adds prefill. No parallel code paths. |
+| P9 | Proposal Preview is non-destructive | Preview is client-side only (ghost meshes, in-memory overlays, diff views). Apply is the only mutation path. Enforced by code review. |
+| P10 | No chat without a session | Every `POST /api/agent/chat` requires a `session_id`. Client creates a session first. No implicit/ambient chat. |
+| P11 | Schema is one migration | `chat_sessions`, `chat_messages`, `todos.display_metadata` are folded into the initial Alembic migration by regeneration. No `ALTER`s in Epic 6. |
+
+---
+
+### Structure Delta
+
+Additions to § Complete Project Directory Structure:
+
+```
+src/
+├── agent/                                     # NEW — CrewAI agent substrate
+│   ├── __init__.py
+│   ├── service.py                             # AgentService: public entry; picks skill, builds crew
+│   ├── crew_runner.py                         # Background thread runner, event queue, chunking
+│   ├── skills/
+│   │   ├── __init__.py
+│   │   ├── registry.py                        # SKILL_REGISTRY, SkillSpec, SkillContext
+│   │   ├── base.py                            # Shared helpers
+│   │   ├── intent_classifier.py
+│   │   ├── chat.py
+│   │   ├── organize.py
+│   │   ├── plan.py
+│   │   ├── rephrase.py
+│   │   └── reformat.py
+│   └── tools/
+│       ├── __init__.py
+│       ├── base.py                            # Shared BaseTool subclass with pool injection
+│       ├── list_todos.py
+│       ├── get_todo.py
+│       ├── search_todos.py
+│       └── get_chat_history.py
+├── api/
+│   └── agent.py                               # NEW — FastAPI routes under /api/agent/*
+├── models/
+│   ├── chat_session.py                        # NEW
+│   └── chat_message.py                        # NEW
+├── schemas/
+│   └── agent.py                               # NEW — Pydantic request/response schemas
+└── services/
+    └── chat_service.py                        # NEW — session & message CRUD
+
+frontend/src/
+├── components/
+│   └── agent/                                 # NEW
+│       ├── AgentPanel.tsx
+│       ├── AgentMessageList.tsx
+│       ├── AgentMessage.tsx
+│       ├── AgentComposer.tsx
+│       ├── AgentSessionsMenu.tsx
+│       ├── AgentPanelHeader.tsx
+│       └── proposals/
+│           ├── OrganizeProposal.tsx
+│           ├── PlanProposal.tsx
+│           ├── RephraseProposal.tsx
+│           └── ReformatProposal.tsx
+├── hooks/
+│   └── useAgentSse.ts                         # NEW
+├── stores/
+│   └── useAgentStore.ts                       # NEW
+├── api/
+│   └── agentApi.ts                            # NEW
+└── utils/
+    └── helpCommand.ts                         # NEW — /help parser carve-out
+```
+
+---
+
+### Addendum Validation
+
+#### Requirements Coverage
+
+| Michael's requirement | Covered by |
+|---|---|
+| CrewAI-based chat agent following rag-csv-crew patterns | Decisions 1, 3 (with thread-safety divergence), 4 |
+| Chat interface: Q&A + contextual history | Decision 5.3 (panel UX), 2.3 (20-turn context window) |
+| Local database for chats + chat history | Decision 2 (schema), 6.7 (folded into initial migration) |
+| `/help` slash command to invoke the agent | Decision 5.2 (parser carve-out) |
+| F1 keybinding to invoke the agent | Decision 5.1 |
+| Chat history recollection and inspection | Decision 6.1 (`GET /api/agent/sessions/{id}`), Decision 5.3 (sessions menu) |
+| Chat history clearable | Decision 2.1 (hard delete), Decision 6.1 (`DELETE /api/agent/sessions/{id}`) |
+| Crew reads todos for context | Decision 3.3 (`ListTodosTool`, `GetTodoTool`, `SearchTodosTool`) |
+| DB tool using existing plumbing | Decision 3.1 + P6 (tools wrap existing services, reuse `psycopg_pool`) |
+| Extensible skills | Decision 4 (registry + builder contract + one-file-per-skill) |
+| Skill: organize by relationships | Decision 4.5 (2-agent organize), 4.7 (leverages pgvector embeddings) |
+| Skill: draft a plan | Decision 4.5 (1-agent plan), 5.6 (plan proposal with step→todo creation) |
+| Skill: rephrase content + suggest missing fields | Decision 4.5 (1-agent rephrase), 5.6 (diff view + per-suggestion accept) |
+| Skill: reformat with visual cues | Decision 4.5 (1-agent reformat), 4.7 (locked v1 vocabulary), 5.7 (persistence via `todos.display_metadata`) |
+
+All requirements traced. No gaps.
+
+#### Constitutional Compliance (CLAUDE.md Principle VI)
+
+| Constraint | Status |
+|---|---|
+| No `async`/`await`/`asyncio` anywhere | ✓ Thread-based throughout; sync FastAPI handlers; sync `StreamingResponse` generator |
+| `psycopg_pool.ConnectionPool` sync driver | ✓ Reused via service-layer dependency injection into tools |
+| `ThreadPoolExecutor` / `Thread` / `Event` / `Queue` for concurrency | ✓ Daemon `Thread` per chat, `queue.Queue` for SSE transport, `threading.Event` for cancellation |
+| No async HTTP clients | ✓ Only LLM SDK used for CrewAI; must be sync-configured (same pattern as rag-csv-crew's `get_llm_for_crew()`) |
+| FastAPI sync route handlers | ✓ All `/api/agent/*` endpoints are `def`, not `async def` |
+| No async third-party libs | ✓ CrewAI's `kickoff()` is sync; no async-flavored tooling introduced |
+
+#### Deferred-Work Items
+
+| Item | Trigger to pull forward |
+|---|---|
+| Tool-call audit trail in `message.metadata.tool_calls` | First "why did the agent do that?" investigation |
+| `Idempotency-Key` header on `POST /api/agent/chat` | Observed double-send UX issue |
+| Rolling-summary context compaction (>20 turn chats) | Chats routinely exceed 20 turns and token budget bites |
+| Per-token streaming via LLM callback hook through CrewAI event system | Simulated-streaming UX feels stale or LLM latency is low enough that word-groups don't stream naturally |
+| Cross-session todo cross-link queries (junction table) | Need to query "every chat where todo X was discussed" |
+| Multi-worker cancellation via external state (Redis / DB flag) | Multi-worker deployment topology |
+
+#### Open Risks & Upgrade Paths
+
+| Risk | Mitigation / Path |
+|---|---|
+| LLM provider choice not locked here | Deliberate — reuses project-level LLM config (`get_llm_for_crew()` pattern from rag-csv-crew). First implementation story picks the concrete provider. |
+| CrewAI version drift (events API evolving) | Pin `crewai>=0.11.0,<0.30.0` in `pyproject.toml`. Upgrade triggered explicitly, not by range float. |
+| Prompt-injection via todo text | System-prompt framing (todos are data, not instructions). Covered in Decision 3.6. Watch for escape attempts during dogfooding. |
+| Legacy dev DBs lose data on migration regeneration | Explicit pre-flight step in dev stories; single-user pre-production tolerates it. |
+| Agent-subsystem test complexity (crew + threads + SSE) | Three-layer testing: (1) unit-test each skill's `build_crew()` with mocked LLM; (2) integration-test `AgentService` with in-memory queue; (3) E2E test one happy path per skill through the SSE endpoint. |
+| Visual-cue proliferation (reformat skill) leaking UX complexity | Locked v1 cue vocabulary (Decision 4.7). Additions gated by explicit architecture review. |
+
+#### Architecture Readiness for Epic 6
+
+**Status:** READY FOR EPIC/STORY CREATION
+
+**Implementation sequence hint (not a story plan — PM owns that):**
+1. Schema regeneration — models + initial migration rewrite
+2. `chat_service` + session CRUD endpoints + basic tests
+3. Agent substrate scaffolding: `SkillContext`, registry, `BaseTool`, tool classes, `crew_runner` with chunking
+4. `chat` skill + `POST /api/agent/chat` end-to-end (simulated streaming, no proposals yet)
+5. Frontend: `useAgentStore`, `AgentPanel`, `useAgentSse`, `F1` binding, `/help` parser
+6. `intent_classifier` skill + frontend skill selection
+7. `organize` skill + `OrganizeProposal.tsx`
+8. `plan` skill + `PlanProposal.tsx`
+9. `rephrase` skill + `RephraseProposal.tsx`
+10. `reformat` skill + `ReformatProposal.tsx` + `LilyPad.tsx` read of `display_metadata`
+11. Cancellation endpoint + frontend abort UX
+12. Session rename + delete UX polish
+
+**Hand-off:** PM runs `bmad-create-epics-and-stories` scoped to "Epic 6 — CrewAI Chat Agent" referencing this addendum as the authoritative architecture.

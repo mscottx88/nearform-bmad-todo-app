@@ -2,7 +2,9 @@
 stepsCompleted: [1, 2, 3, 4]
 status: 'complete'
 completedAt: '2026-04-14'
+updatedAt: '2026-04-23'
 inputDocuments: ['_bmad-output/planning-artifacts/prd.md', '_bmad-output/planning-artifacts/architecture.md', '_bmad-output/planning-artifacts/ux-design-specification.md']
+addendum: 'Epic 6 — CrewAI Chat Agent (7 stories) added and validated 2026-04-23 per architecture addendum'
 ---
 
 # nearform-bmad-todo-app - Epic Breakdown
@@ -97,6 +99,29 @@ This document provides the complete epic and story breakdown for nearform-bmad-t
 - AR12: Creature API endpoint (POST /api/creatures) for resident creature creation during tutorial
 - AR13: Future-proofed auth: route handlers accept dependency-injectable current_user defaulting to None
 
+**From Architecture Addendum — Epic 6 Agent Requirements (2026-04-23):**
+- AR6-1: User can invoke the AI chat panel via F1 key (toggles open/closed)
+- AR6-2: User can invoke the AI chat panel via `/help` slash command in TodoInput (bare = open empty; `/help <text>` = open with prefill)
+- AR6-3: User can send messages to the AI agent and receive streaming responses in a neon right-side drawer panel that keeps the pond interactive behind it
+- AR6-4: User can create new chat sessions and switch between existing ones via a sessions menu in the panel header
+- AR6-5: User can inspect full chat history of any session
+- AR6-6: User can delete (hard delete) any chat session, clearing its history permanently
+- AR6-7: Agent reads existing todos for context via read-only database tools (ListTodos, GetTodo, SearchTodos, GetChatHistory)
+- AR6-8: User can ask the agent to organize todos by relationship — agent proposes position changes, user previews ghost positions on the pond and applies via existing batch endpoint
+- AR6-9: User can ask the agent to draft a plan from todos — agent produces ordered steps, user can create selected steps as new todos
+- AR6-10: User can ask the agent to rephrase a todo — agent suggests improved text + flags missing fields (e.g., "consider adding a due date"), user accepts suggestions individually
+- AR6-11: User can ask the agent to reformat a todo with visual cues — agent infers emphasis/icons/badges from content, user applies and cues persist on the lily pad across reloads
+- AR6-12: Agent auto-routes free-form messages to the best skill via an intent classifier
+- AR6-13: Agent streams its progress live (step thoughts, tool calls) and simulates prose streaming via word-group chunking with artificial delay (cap: 3s total)
+- AR6-14: Schema delivered via full Alembic regeneration (downgrade base → update models → regenerate → upgrade head). No ALTER migrations.
+- AR6-15: Three new schema items in initial migration: chat_sessions, chat_messages, todos.display_metadata JSONB column
+- AR6-16: All agent code is thread-based (no async/await/asyncio) — constitutional compliance
+- AR6-17: CrewAI tools use BaseTool subclass pattern with deps injected at __init__ for thread safety (deliberate divergence from rag-csv-crew module-global pattern)
+- AR6-18: src/agent/ is a bounded context — only src/api/agent.py imports from it
+- AR6-19: Proposal envelope {kind, payload, targets, reasoning} in message.metadata is a contractual frontend/backend interface
+- AR6-20: Prompt-injection framing: system prompt must frame todo text as untrusted data
+- AR6-21: CrewAI pinned at crewai>=0.11.0,<0.30.0
+
 ### UX Design Requirements
 
 - UX-DR1: Custom neon snake cursor ported from rag-csv-crew CursorSnake component — canvas-based hexagon chain with spring animation, replacing system cursor entirely
@@ -170,6 +195,20 @@ User can assign neon colors to todos and group lily pads into labeled clusters, 
 User can find any todo by typing anywhere — the pond reorganizes itself, surfacing matches and submerging the rest with semantic understanding.
 **FRs:** FR14-FR25, FR40
 **UX-DRs:** UX-DR11
+
+### Epic 6: The Intelligent Pond Companion
+User can summon the Oracle Frog — an AI agent embodied as a neon 3D frog living on his own lily pad — to get intelligent help with their todos through a streaming neon chat panel, with skills to rephrase content, draft plans, organize by relationships, and apply visual cues, all with persistent chat history across sessions.
+**ARs:** AR6-1 through AR6-21 (Oracle Frog design captured in Story 6.7)
+**Depends on:** Epic 2 (todos exist), Epic 5 (embeddings power the organize skill's relationship discovery)
+
+**Stories:**
+- 6.1: Agent Foundation — schema regen, chat_service, session CRUD, agent substrate (SkillContext, registry, BaseTool, 4 read tools, crew_runner, intent_classifier), chat skill, SSE endpoint
+- 6.2: Chat Panel — F1 + /help + AgentPanel + useAgentStore + useAgentSse + sessions UX + free-form chat end-to-end
+- 6.3: Rephrase Skill — rephrase crew + RephraseProposal.tsx (diff view + per-suggestion accept + missing-field hints) [FIRST SKILL — highest user value velocity]
+- 6.4: Plan Skill — plan crew + PlanProposal.tsx (steps list + create as todos)
+- 6.5: Organize Skill — organize crew (2-agent, leverages pgvector embeddings) + OrganizeProposal.tsx (ghost pads + Apply → PATCH /api/todos/positions)
+- 6.6: Reformat Skill — reformat crew + ReformatProposal.tsx + todos.display_metadata persistence + LilyPad.tsx renders cues
+- 6.7: The Oracle Frog — 3D frog mesh (semi-transparent neon body + Catmull-Rom TubeGeometry spline wireframe), expression system (idle/listening/thinking/speaking/success/error), dedicated lily pad with boundary-return dissolve animation, secondary <View> camera in AgentPanel framing frog+pad at 75% fill (aquarium window — same scene, same WebGL context)
 
 ### Epic 7: The Living Ecosystem
 The pond teems with life — creatures scale with user activity, popup Complete actions spawn random creatures with rarity tiers, and casino-inspired surprises keep the experience delightful.
@@ -562,6 +601,252 @@ So that finding todos feels like speaking to the pond and watching it respond.
 
 **And** Backspace edits the search text
 **And** full-text results appear first (fast), vector results refine ranking progressively
+
+## Epic 6: The Intelligent Pond Companion
+
+User can summon the Oracle Frog — an AI agent embodied as a neon 3D frog living on his own lily pad — to get intelligent help with their todos through a streaming neon chat panel, with skills to rephrase content, draft plans, organize by relationships, and apply visual cues, all with persistent chat history across sessions.
+
+### Story 6.1: Agent Foundation
+
+As a developer,
+I want the backend AI substrate in place — schema, session CRUD, read-only tools, crew runner, and chat skill —
+So that the chat panel (Story 6.2) has a complete, tested API contract to build against.
+
+**Acceptance Criteria:**
+
+**Given** the Alembic migration base
+**When** I run `alembic downgrade base && alembic upgrade head`
+**Then** the database has `chat_sessions` (id UUID PK, created_at, updated_at, title TEXT), `chat_messages` (id UUID PK, session_id FK, role TEXT, content TEXT, metadata JSONB DEFAULT '{}', created_at), and `todos.display_metadata JSONB NOT NULL DEFAULT '{}'`
+**And** no ALTER TABLE migrations exist — schema is delivered via full regeneration of the initial migration only
+
+**Given** the agent service is running
+**When** I call `POST /api/agent/sessions`
+**Then** a new chat session is created and returned with id, created_at, and title
+**And** `GET /api/agent/sessions` returns all sessions ordered by updated_at DESC
+**And** `DELETE /api/agent/sessions/{id}` hard-deletes the session and all its messages
+**And** `GET /api/agent/sessions/{id}/messages` returns all messages for the session ordered by created_at
+
+**Given** a chat session exists
+**When** I call `POST /api/agent/sessions/{id}/chat` with `{"message": "help me organize"}`
+**Then** the endpoint returns a `StreamingResponse` with `text/event-stream` content-type
+**And** SSE events are emitted in `data: {json}\n\n` format with event types: `chunk`, `tool_call`, `proposal`, `done`, `error`
+**And** the intent classifier routes the message to the chat skill when no specific skill is matched
+**And** the crew runs synchronously in a daemon `threading.Thread` pushing events to a `queue.Queue`
+**And** the SSE generator reads from the queue until a sentinel `None` is received
+
+**Given** the agent bounded context
+**When** I inspect the import graph
+**Then** only `src/api/agent.py` imports from `src/agent/`
+**And** `SkillContext` is an immutable dataclass with `session_id`, `user_message`, `pool`, and `llm`
+**And** `SKILL_REGISTRY` maps skill names to `build_crew(ctx: SkillContext) -> Crew` callables
+**And** all BaseTool subclasses (ListTodos, GetTodo, SearchTodos, GetChatHistory) inject `pool` via `__init__`, never via module globals
+**And** `src/agent/system_prompt.py` frames todo text as untrusted data in the system prompt
+**And** prose streaming is simulated by word-group chunking (2-5 words per chunk) with `AGENT_CHUNK_DELAY_MS` constant (30-80ms), capped at 3s total
+
+**Given** the test suite
+**When** I run `pytest src/agent/`
+**Then** all unit tests pass with tools and crew_runner covered
+**And** ruff, mypy --strict, and pylint 10.00/10.00 pass on all new agent files
+
+### Story 6.2: Chat Panel
+
+As a user,
+I want to open a neon chat panel and have a free-form conversation with the AI agent,
+So that I can get intelligent help with my todos without leaving the pond.
+
+**Acceptance Criteria:**
+
+**Given** the pond is loaded
+**When** I press F1
+**Then** a neon right-side drawer panel slides in from the right edge, keeping the 3D pond fully interactive behind it
+**And** pressing F1 again (or clicking ×) closes the panel
+**And** F1 is handled in `useKeyboardShortcuts.ts` with `event.preventDefault()` to suppress the browser devtools shortcut
+
+**Given** the TodoInput is active
+**When** I type `/help` and press Enter
+**Then** the agent panel opens with an empty message input (the `/help` parser carve-out fires before the slash-command registry walk)
+**When** I type `/help plan my week` and press Enter
+**Then** the agent panel opens with "plan my week" pre-filled in the message input
+
+**Given** the agent panel is open
+**When** I type a message and press Enter or click Send
+**Then** my message appears immediately in the chat thread in a neon user bubble
+**And** a streaming response begins, rendering word-group chunks as they arrive via SSE EventSource
+**And** a neon "thinking…" indicator is visible while the stream is in progress
+**And** the EventSource is managed by `useAgentSse.ts` which dispatches events to `useAgentStore` (Zustand)
+**And** the full message is saved to `chat_messages` when the stream completes (`done` event)
+
+**Given** a session with prior messages
+**When** the agent panel opens for that session
+**Then** full chat history loads from `GET /api/agent/sessions/{id}/messages`, newest message at the bottom
+
+**Given** the panel is open
+**When** I click the sessions menu icon in the panel header
+**Then** I see all sessions listed with their titles and last-updated timestamps
+**And** I can click a session to switch to it, loading its message history
+**And** I can click "+ New chat" to start a fresh session
+**And** I can click the trash icon beside a session to delete it after a confirmation prompt
+**And** `useAgentStore` tracks `currentSessionId`, `sessions[]`, `messages[]`, and `streaming` state
+
+**Given** the panel was closed and then reopened
+**When** the panel opens
+**Then** the last active session id is restored from `useAgentStore` and its history is re-fetched
+
+### Story 6.3: Rephrase Skill
+
+As a user,
+I want to select a todo and ask the agent to rephrase it, seeing suggested improvements inline with missing-field hints,
+So that my todos become clearer and more actionable without retyping from scratch.
+
+**Acceptance Criteria:**
+
+**Given** at least one todo exists
+**When** I send "rephrase [todo text]" or "rephrase this" after clicking a todo
+**Then** the intent classifier routes to the rephrase skill
+**And** the rephrase crew (single agent) produces a `RephraseProposal` with `kind: "rephrase"`, `targets: [todo_id]`, `payload: {suggestions: [{field, original, revised, reason}], missing_fields: [str]}`, `reasoning: str`
+**And** the proposal is emitted as an SSE `proposal` event and stored in the message's `metadata` JSONB column
+
+**Given** a rephrase proposal has arrived
+**When** `RephraseProposal.tsx` renders
+**Then** a diff view shows each original field struck-through beside the revised version
+**And** each suggestion has an individual Accept and Dismiss button
+**And** accepting a suggestion fires `PATCH /api/todos/{id}` with the revised field value — no new endpoint needed
+**And** missing-field hints appear below (e.g., "Consider adding a due date — no deadline mentioned")
+**And** accepted changes appear on the lily pad immediately via optimistic update
+
+**Given** the rephrase crew backend
+**When** I inspect the implementation
+**Then** `GetTodo` BaseTool fetches the todo content (read-only)
+**And** the crew uses a single `Crew` with one `Task` whose output is a structured JSON string matching the proposal envelope
+**And** the crew never calls `PATCH /api/todos` — it only produces proposals; the user applies them
+**And** `crew.kickoff()` is called synchronously; no `async`, `await`, or `asyncio` is present
+
+### Story 6.4: Plan Skill
+
+As a user,
+I want to ask the agent to draft an ordered action plan from my current todos,
+So that I can see a prioritized sequence and optionally create missing steps as new todos.
+
+**Acceptance Criteria:**
+
+**Given** at least one todo exists
+**When** I send "draft me a plan" or "what should I do first"
+**Then** the intent classifier routes to the plan skill
+**And** the plan crew fetches all active todos via `ListTodos` BaseTool and produces a `PlanProposal`: `{kind: "plan", targets: [], payload: {steps: [{order, title, description, source_todo_id|null}]}, reasoning: str}`
+**And** the proposal is emitted as an SSE `proposal` event
+
+**Given** a plan proposal has arrived
+**When** `PlanProposal.tsx` renders
+**Then** steps are displayed as a numbered neon list, each with a "New todo" badge or a reference to the existing source todo
+**And** each step has a checkbox the user can tick to include in creation
+**And** a "Create selected as todos" button fires `POST /api/todos` for each checked step with no `source_todo_id`
+**And** steps with a `source_todo_id` have a "go to" link that highlights the corresponding lily pad on the pond
+
+**Given** the plan crew backend
+**When** I inspect the implementation
+**Then** it is a single-agent crew that reads todos in one task and outputs the ordered plan
+**And** `ListTodos` BaseTool returns todos sorted by creation date with text, completion status, and id
+**And** no write operations are performed by the crew
+
+### Story 6.5: Organize Skill
+
+As a user,
+I want to ask the agent to rearrange my lily pads by semantic relationship so that related todos cluster together spatially,
+So that the pond becomes a visual knowledge map I can navigate by theme.
+
+**Acceptance Criteria:**
+
+**Given** at least 3 todos with vector embeddings exist (Epic 5 infrastructure)
+**When** I send "organize my todos by theme" or "cluster related pads"
+**Then** the intent classifier routes to the organize skill
+**And** the organize crew runs with 2 agents: an Embeddings Analyst and a Layout Strategist
+**And** the Embeddings Analyst uses `SearchTodos` BaseTool with cosine similarity to identify related todo clusters
+**And** the Layout Strategist assigns 2D positions (x, z) so that related clusters are spatially grouped
+**And** the crew produces an `OrganizeProposal`: `{kind: "organize", targets: [todo_ids], payload: {positions: [{todo_id, x, z}]}, reasoning: str}`
+**And** the proposal is emitted as an SSE `proposal` event
+
+**Given** an organize proposal has arrived
+**When** `OrganizeProposal.tsx` renders
+**Then** ghost lily pads appear at proposed positions on the pond (semi-transparent, dashed outline), while original pads remain in place
+**And** an "Apply Layout" button fires `PATCH /api/todos/positions` (existing batch endpoint) with the proposed positions
+**And** on Apply, ghost pads dissolve and real pads animate to their new positions
+**And** a "Dismiss" button removes ghost pads without moving any pads
+
+**Given** fewer than 3 todos with embeddings
+**When** the organize skill is invoked
+**Then** the agent responds with a friendly message explaining more embedded todos are needed and no proposal is emitted
+
+### Story 6.6: Reformat Skill
+
+As a user,
+I want to ask the agent to apply visual cues — icons, badges, emphasis — to a todo based on what the content means,
+So that the lily pad communicates intent at a glance and those cues persist across reloads.
+
+**Acceptance Criteria:**
+
+**Given** at least one todo exists
+**When** I send "add visual cues to this" or "reformat [todo text]"
+**Then** the intent classifier routes to the reformat skill
+**And** the reformat crew infers visual metadata from the todo content and produces a `ReformatProposal`: `{kind: "reformat", targets: [todo_id], payload: {display_metadata: {icon: str|null, badge: str|null, emphasis: "normal"|"high"|"urgent"}}, reasoning: str}`
+**And** the proposal is emitted as an SSE `proposal` event
+
+**Given** a reformat proposal has arrived
+**When** `ReformatProposal.tsx` renders
+**Then** a preview shows the lily pad with proposed icon, badge, and emphasis glow applied
+**And** an "Apply" button fires `PATCH /api/todos/{id}` with `{display_metadata: {...}}` written to the `todos.display_metadata` JSONB column
+**And** `LilyPad.tsx` reads `display_metadata` from the todo response and renders the icon, badge, and emphasis in the CSS2DRenderer overlay
+**And** applied cues persist across page reloads (stored server-side)
+**And** a "Clear formatting" control resets `display_metadata` to `{}`
+
+**Given** the `PATCH /api/todos/{id}` endpoint
+**When** a `display_metadata` key is included in the request body
+**Then** the endpoint merges new keys into the existing `todos.display_metadata` JSONB (partial update, not full replace)
+
+### Story 6.7: The Oracle Frog
+
+As a user,
+I want to see a neon frog living in the pond on his own lily pad, and see him come alive with expressions in the chat panel that mirror the agent's state,
+So that the AI agent has a physical presence that makes the experience feel magical.
+
+**Acceptance Criteria:**
+
+**Given** the app is loaded
+**When** the pond scene renders
+**Then** the Oracle Frog appears on his dedicated oracle lily pad (`type: 'oracle'` discriminant in pad state)
+**And** the frog body uses `MeshPhysicalMaterial` with semi-transparent neon material (opacity ~0.55, neon cyan/green emissive, transmission ~0.3)
+**And** the frog silhouette wireframe is a `TubeGeometry` tracing Catmull-Rom spline control points — smooth closed curves, not a triangulated mesh wireframe
+**And** the frog fills approximately 85% of his lily pad diameter
+
+**Given** the Oracle Frog exists on the pond
+**When** another pad or user interaction pushes the oracle lily pad beyond a configurable boundary radius
+**Then** the pad begins a "dissolve → teleport → rematerialize" animation back to its home position
+**And** the animation emits a neon particle burst on departure and a ripple on arrival, completing in ~1.5 seconds
+**And** the home position is encoded in the oracle pad's state and is immutable
+
+**Given** the agent panel is open
+**When** the panel renders
+**Then** a `<View>` secondary camera (from `@react-three/drei`) renders a live view of the Oracle Frog and his lily pad in the upper section of the panel (aquarium window metaphor)
+**And** the view shares the same WebGL context as the main pond scene — no dual renderer is created
+**And** the camera frames the frog and lily pad with approximately 15% buffer, filling ~75% of the panel width
+**And** the pond environment behind the frog remains visible through the view
+
+**Given** the agent transitions between states
+**When** the agent state changes
+**Then** the Oracle Frog's procedural animation and expression update to match:
+- `idle` — gentle body sway, eyes half-closed, occasional blink
+- `listening` — body leans forward, eyes wide, subtle head tilt toward user
+- `thinking` — eyes track left-right, occasional bubble particle rises above head
+- `speaking` — throat sac inflates/deflates with each word-group chunk arrival
+- `success` — brief hop, bright neon flash, eyes crinkle upward
+- `error` — body contracts, emissive color shifts toward red-orange, slow downward droop
+**And** state transitions are driven by SSE event types: `chunk` → speaking, `tool_call` → thinking, `done` → success then idle, `error` → error, no events → idle
+**And** `useAgentStore` includes `agentState: 'idle' | 'listening' | 'thinking' | 'speaking' | 'success' | 'error'`
+
+**Given** the oracle lily pad
+**When** I inspect pad rendering
+**Then** no completion egg, aphid, chameleon, or CRUD popup renders on the oracle pad
+**And** the oracle pad is not returned by `GET /api/todos` — it is a frontend-only resident managed by `OracleFrogManager.tsx`
+**And** `OracleFrogManager.tsx` initializes the oracle pad position at a fixed anchor point on first load and persists it in `useAgentStore`
 
 ## Epic 7: The Living Ecosystem
 
