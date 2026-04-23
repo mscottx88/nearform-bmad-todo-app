@@ -917,7 +917,14 @@ export function LilyPad({
               lastWakeWorldRef.current = { x: newX, z: newZ, t: nowMs };
             }
 
-            // Pop-out check — AC #18.
+            // Pop-out check — AC #18. Camera-follow engagement (AC #18.iii)
+            // deferred after 2026-04-22 user feedback: the 0.12 lerp toward
+            // a moving drag-pos read as a dramatic camera jerk at the
+            // pop-out instant. The pop still fires (mutation + pop
+            // animation); the camera simply stays put so the user keeps
+            // context. Cluster-handle grip-phase follow (Task 10 / AC #24)
+            // remains — that's a handle-driven gesture and the follow
+            // feels correct there.
             const own = ownGroupSnapshotRef.current;
             if (!hasPoppedOutRef.current && own) {
               const dx = newX - own.centroid.x;
@@ -925,20 +932,16 @@ export function LilyPad({
               const dist = Math.sqrt(dx * dx + dz * dz);
               if (dist > own.R) {
                 hasPoppedOutRef.current = true;
-                store.setFollowTarget({ worldX: newX, worldZ: newZ });
                 onMemberPopOut?.(own.groupId, todo.id, newX, newZ);
               }
-            }
-            // After pop-out, keep the camera follow target in sync with
-            // the pad so the pan tracks the cursor (AC #18.iii).
-            if (hasPoppedOutRef.current) {
-              store.setFollowTarget({ worldX: newX, worldZ: newZ });
             }
           } else {
             // Story 4.6 AC #20: solo pad — pop-in detection iterates
             // the captured all-groups snapshot once, fires the first
             // hit's callback, then suppresses further checks for this
-            // drag.
+            // drag. Camera-follow engagement deferred per user feedback
+            // (see pop-out branch above) — the mutation + pop fire, but
+            // the camera holds position so the drag context isn't lost.
             if (!hasPoppedInRef.current) {
               for (const [gid, meta] of allGroupsSnapshotRef.current) {
                 const dx = newX - meta.centroid.x;
@@ -946,14 +949,10 @@ export function LilyPad({
                 const dist = Math.sqrt(dx * dx + dz * dz);
                 if (dist < meta.R) {
                   hasPoppedInRef.current = true;
-                  usePondStore.getState().setFollowTarget({ worldX: newX, worldZ: newZ });
                   onSoloPopIn?.(gid, todo.id, newX, newZ);
                   break;
                 }
               }
-            }
-            if (hasPoppedInRef.current) {
-              usePondStore.getState().setFollowTarget({ worldX: newX, worldZ: newZ });
             }
           }
         }
