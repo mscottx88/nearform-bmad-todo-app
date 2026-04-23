@@ -23,6 +23,7 @@ import { ActionPopup } from '../ui/ActionPopup';
 import { ClusterLabel } from './ClusterLabel';
 import { ClusterHalo } from './ClusterHalo';
 import { ClusterDragHandle } from './ClusterDragHandle';
+import { GroupHaloHover } from './GroupHaloHover';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
   if (members.length === 0) return { x: 0, z: 0 };
@@ -536,6 +537,11 @@ export function PondScene() {
           }}
         />
       )}
+      {/* Story 4.6 AC #13: halo-hover detector — drives ClusterDragHandle
+          visibility via hoveredGroupId. Watches the canvas pointermove
+          rather than relying on per-pad pointer enter/leave (which made
+          the handle appear only when the pad itself was hovered). */}
+      <GroupHaloHover />
       <PondCamera />
 
       <EffectComposer>
