@@ -149,14 +149,17 @@ const SELECTION_RING_Y = 0.12;
 const POP_DURATION_MS = 150;
 const POP_SCALE_AMPLITUDE = 0.25;
 
-// Story 4.6 AC #15: within-cluster sibling drag-repel. When one member
-// of a cluster is being dragged, the other members push away from the
-// anchor linearly up to SIBLING_REPEL_RADIUS world units. Magnitude is
-// capped at SIBLING_REPEL_MAX so a close-pass can't launch a sibling
-// across the pond. Release commits each sibling's final position plus
-// an autoSpread on the whole group.
-const SIBLING_REPEL_RADIUS = 1.5;
-const SIBLING_REPEL_MAX = 0.6;
+// Story 4.6 (user feedback 2026-04-22): any pad being dragged pushes
+// nearby pads out of the way — not just cluster siblings. The impact
+// radius is 2× SELECTION_RING_OUTER so two pads "touch" right at the
+// visible halo-ring edge; inside that radius the nearby pad slides
+// radially away with magnitude proportional to overlap depth, capped
+// at NUDGE_MAX so a fast pass can't fling a sibling across the pond.
+// Smoothed in-place via a per-pad nudge ref (same lerp-toward pattern
+// as the earlier SIBLING_REPEL, but applied to every pad, not just
+// same-group siblings).
+const NUDGE_RADIUS = 2 * SELECTION_RING_OUTER;
+const NUDGE_MAX = 0.8;
 
 // Story 4.6 AC #16: minimum cadence between wake emissions during a
 // grouped-pad drag, and the velocity threshold below which no wakes
@@ -874,13 +877,19 @@ export function LilyPad({
         );
         dragRaycaster.setFromCamera(dragNDC, camera);
         if (dragRaycaster.ray.intersectPlane(WATER_PLANE, worldDragPoint)) {
-          const prevPos = dragPosRef.current;
           const newX = worldDragPoint.x;
           const newZ = worldDragPoint.z;
           dragPosRef.current = { x: newX, z: newZ };
 
+          // Story 4.6 (user feedback): publish the drag anchor for
+          // every other pad's nudge logic. Applies to both grouped
+          // and solo drags — any nearby pad slides out of the way.
+          usePondStore
+            .getState()
+            .setActiveDragAnchor({ padId: todo.id, x: newX, z: newZ });
+
           // Story 4.6: grouped-pad branch — publish drag target (for
-          // sibling repulsion), emit wakes at cadence + velocity gate,
+          // pop-out detection), emit wakes at cadence + velocity gate,
           // detect pop-out once per drag.
           if (todo.groupId) {
             const store = usePondStore.getState();
@@ -995,6 +1004,7 @@ export function LilyPad({
         // next drag cycle.
         const releaseStore = usePondStore.getState();
         releaseStore.setGroupDragTarget(null);
+        releaseStore.setActiveDragAnchor(null);
         releaseStore.setFollowTarget(null);
         ownGroupSnapshotRef.current = null;
         allGroupsSnapshotRef.current = new Map();
@@ -1664,26 +1674,28 @@ export function LilyPad({
             });
           }
         } else {
-          // Story 4.6 AC #15: sibling repulsion. If another member of
-          // this pad's group is being dragged and is close to THIS
-          // pad's rest position, nudge away along the radial
-          // (sibling − anchor). Magnitude scales linearly toward zero
-          // at SIBLING_REPEL_RADIUS, capped at SIBLING_REPEL_MAX. The
-          // nudge is additive to drift so idle movement still reads.
+          // Story 4.6 (user feedback 2026-04-22): ANY pad being dragged
+          // pushes nearby pads out of the way, not just same-cluster
+          // siblings. Impact radius is NUDGE_RADIUS (2 ×
+          // SELECTION_RING_OUTER) so the threshold sits right at the
+          // visible halo-ring edge — no more overlap between a dragged
+          // pad and its neighbours. Reads from activeDragAnchor, which
+          // LilyPad writes on every pointermove during its own drag
+          // regardless of group membership. The nudge is additive to
+          // drift so idle movement still reads.
           let nudgeX = 0;
           let nudgeZ = 0;
-          const drag = usePondStore.getState().groupDragTarget;
-          if (
-            drag &&
-            todo.groupId &&
-            drag.groupId === todo.groupId &&
-            drag.anchorId !== todo.id
-          ) {
-            const tdx = posX - drag.x;
-            const tdz = posZ - drag.z;
+          const anchor = usePondStore.getState().activeDragAnchor;
+          if (anchor && anchor.padId !== todo.id) {
+            const tdx = posX - anchor.x;
+            const tdz = posZ - anchor.z;
             const dist = Math.sqrt(tdx * tdx + tdz * tdz);
-            if (dist < SIBLING_REPEL_RADIUS && dist > 1e-4) {
-              const strength = (1 - dist / SIBLING_REPEL_RADIUS) * SIBLING_REPEL_MAX;
+            if (dist < NUDGE_RADIUS && dist > 1e-4) {
+              // Overlap depth — from 0 at the ring edge to 1 at the
+              // center. Scales the nudge so a near-center pass feels
+              // strong and a glancing one is subtle.
+              const overlap = 1 - dist / NUDGE_RADIUS;
+              const strength = overlap * NUDGE_MAX;
               nudgeX = (tdx / dist) * strength;
               nudgeZ = (tdz / dist) * strength;
             }

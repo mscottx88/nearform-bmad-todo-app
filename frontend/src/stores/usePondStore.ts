@@ -187,6 +187,15 @@ interface PondState {
   // Null at rest and outside of grouped-member drags.
   groupDragTarget: { groupId: string; anchorId: string; x: number; z: number } | null;
 
+  // Story 4.6 (user feedback 2026-04-22): live snapshot of ANY pad
+  // currently being dragged — grouped or solo. Every OTHER pad reads
+  // this in useFrame and slides out of the way when the drag is within
+  // the "impact radius" (2 × SELECTION_RING_OUTER, so pads visually
+  // touch right at the edge of the halo rings instead of overlapping).
+  // Null at rest. Written by LilyPad on every pointermove during its
+  // own drag; cleared on pointerup.
+  activeDragAnchor: { padId: string; x: number; z: number } | null;
+
   // Story 4.6: accumulated translation delta from a cluster-drag grip
   // phase. Siblings (non-handle-holder members) read this in useFrame
   // and apply the delta to their rest position. Null at rest.
@@ -389,6 +398,17 @@ interface PondState {
     target: { groupId: string; anchorId: string; x: number; z: number } | null,
   ) => void;
 
+  /**
+   * Story 4.6 (user feedback): set or clear the global active-drag
+   * anchor. Written by LilyPad on every pointermove during any pad
+   * drag; read by EVERY other pad in its useFrame to compute a slide-
+   * out-of-the-way nudge. No-op when the incoming value is identical
+   * to the current one (per-pad useFrame reads would otherwise churn).
+   */
+  setActiveDragAnchor: (
+    anchor: { padId: string; x: number; z: number } | null,
+  ) => void;
+
   // Story 4.6: cluster-translation setter/clearer.
   /**
    * Set the cumulative (dx, dz) offset for a cluster-handle drag along
@@ -474,6 +494,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   selectedPadIds: new Set(),
   hoveredGroupId: null,
   groupDragTarget: null,
+  activeDragAnchor: null,
   clusterTranslation: null,
   pendingPops: new Map(),
   wakes: [],
@@ -755,6 +776,24 @@ export const usePondStore = create<PondState>((set, get) => ({
 
   // Story 4.6: live drag-target for intra-group member drag.
   setGroupDragTarget: (target) => set({ groupDragTarget: target }),
+
+  setActiveDragAnchor: (anchor) => {
+    const prev = get().activeDragAnchor;
+    if (anchor === null) {
+      if (prev === null) return;
+      set({ activeDragAnchor: null });
+      return;
+    }
+    if (
+      prev &&
+      prev.padId === anchor.padId &&
+      prev.x === anchor.x &&
+      prev.z === anchor.z
+    ) {
+      return;
+    }
+    set({ activeDragAnchor: anchor });
+  },
 
   setClusterTranslation: (translation) => set({ clusterTranslation: translation }),
 

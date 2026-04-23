@@ -121,12 +121,14 @@ vi.mock('../../stores/usePondStore', () => ({
       // defaulted to jest mocks so the click + drag tests run without
       // exercising those branches (no groupId on the stock mockTodo).
       setGroupDragTarget: vi.fn(),
+      setActiveDragAnchor: vi.fn(),
       setFollowTarget: vi.fn(),
       firePop: vi.fn(),
       clearPendingPop: vi.fn(),
       addWake: vi.fn(),
       groupMeta: new Map(),
       groupDragTarget: null,
+      activeDragAnchor: null,
     }),
   }),
   selectCompleting: () => () => undefined,
