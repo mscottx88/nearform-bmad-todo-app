@@ -65,16 +65,15 @@ export function GroupHaloHover() {
       store.setHoveredGroupId(matched);
     };
 
-    const onLeave = () => {
-      const store = usePondStore.getState();
-      if (store.hoveredGroupId !== null) store.setHoveredGroupId(null);
-    };
-
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerleave', onLeave);
+    // Window-level (not canvas-level) so the listener keeps firing when
+    // the cursor moves over the ClusterDragHandle div — drei's <Html>
+    // portals the handle OUTSIDE the canvas's DOM subtree, so a
+    // canvas-bound listener would briefly stop updating as the cursor
+    // transitions canvas → handle, causing the handle to blink out for
+    // one frame before isHandleHoveredRef picks it back up.
+    window.addEventListener('pointermove', onMove);
     return () => {
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerleave', onLeave);
+      window.removeEventListener('pointermove', onMove);
     };
   }, [camera, gl]);
 
