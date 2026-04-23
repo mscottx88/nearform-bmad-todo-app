@@ -48,14 +48,16 @@ export function registerSpreadOutCommand(
     project: (world) => world,
     execute: () => {
       const todos = getTodos();
-      // Story 4.6 Task 15 (AC #30): pass real group memberships so grouped
-      // pads move as rigid units. Non-grouped pads map to nothing (omitted).
-      const groupings = new Map(
-        todos
-          .filter((t) => t.groupId != null)
-          .map((t) => [t.id, t.groupId!]),
-      );
-      const targets = computeSpreadPositions(todos, groupings);
+      // Story 4.6 (user feedback 2026-04-23): treat every pad as its
+      // own singleton so /spread-out actually spreads. The earlier
+      // "groups move as rigid units" behavior (AC #30) meant that a
+      // pond where all pads lived inside one cluster produced an
+      // empty target map (every pair skipped same-group repulsion)
+      // and the command silently did nothing. Users expect /spread-
+      // out to resolve overlaps — preserving an exact cluster layout
+      // is subordinate to that goal. The group's own Spread Out
+      // button still exists for layout-within-a-cluster only.
+      const targets = computeSpreadPositions(todos, new Map());
       if (targets.size > 0) {
         usePondStore.getState().setTargetPositions(targets);
       }

@@ -587,7 +587,18 @@ export function PondScene() {
             const members = renderTodos.filter(
               (t) => t.groupId === popupTodo.groupId,
             );
-            autoSpread(members);
+            // Spread the GROUP'S OWN MEMBERS apart — pass an empty
+            // groupings map so computeSpreadPositions treats each
+            // member as its own singleton. The default autoSpread()
+            // helper would hand real groupings through, and the
+            // algorithm's same-group-skip-repulsion rule would leave
+            // every pair rigid → no movement at all. Using an empty
+            // map flips each member into a free singleton so they
+            // push apart from one another within the cluster.
+            const targets = computeSpreadPositions(members, new Map());
+            if (targets.size > 0) {
+              usePondStore.getState().setTargetPositions(targets);
+            }
             usePondStore.getState().closePopup();
           }}
           onSetLabel={(label) => {

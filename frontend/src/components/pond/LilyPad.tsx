@@ -551,6 +551,12 @@ export function LilyPad({
   // top of rest position during an in-progress intra-group drag. Reset
   // to zero when the anchor releases.
   const siblingNudgeRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
+  // Story 4.6 (user feedback 2026-04-23): track "did activeDragAnchor
+  // exist on the previous frame" so we can detect the null-transition
+  // at drag release. When it happens, we commit any significant nudge
+  // THIS pad has accumulated so it stays out of the dragged pad's way
+  // (rather than snapping back to its rest position and overlapping).
+  const hadDragAnchorRef = useRef(false);
   // Story 4.2: useUpdateTodo — fires PATCH {position_x, position_y}
   // on drag-release AND on spread-out arrival. Already wires
   // clearTodoError/setTodoError into the 2.6 decay system, so a
@@ -1699,6 +1705,33 @@ export function LilyPad({
               nudgeX = (tdx / dist) * strength;
               nudgeZ = (tdz / dist) * strength;
             }
+          }
+          // Story 4.6 (user feedback 2026-04-23): on drag-release
+          // (anchor transitions non-null → null), if this pad built up
+          // a significant nudge during the drag, COMMIT it so the pad
+          // stays out of the dragged pad's way instead of snapping back
+          // to its rest position and overlapping. Reuses the stickyDrag
+          // pin so the new position doesn't flash back to the old
+          // posX/posZ during the PATCH → refetch window (same pattern
+          // as the single-pad drag and /spread-out arrival).
+          const hadAnchor = hadDragAnchorRef.current;
+          hadDragAnchorRef.current = anchor !== null;
+          if (
+            hadAnchor &&
+            anchor === null &&
+            (Math.abs(siblingNudgeRef.current.x) > 0.05 ||
+              Math.abs(siblingNudgeRef.current.z) > 0.05)
+          ) {
+            const commitX = posX + siblingNudgeRef.current.x;
+            const commitZ = posZ + siblingNudgeRef.current.z;
+            dragPosRef.current = { x: commitX, z: commitZ };
+            stickyDragRef.current = true;
+            updateTodo.mutate({
+              id: todo.id,
+              positionX: commitX,
+              positionY: commitZ,
+            });
+            siblingNudgeRef.current = { x: 0, z: 0 };
           }
           // Smooth nudge changes (fast-attack, slow-decay via same ref
           // lerped in place) so the push-off doesn't snap when the
