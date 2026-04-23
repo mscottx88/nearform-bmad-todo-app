@@ -526,13 +526,12 @@ export function LilyPad({
   // state rather than a mid-lerp under-shoot. Null = "not engaged yet
   // this session" (don't snap, use the current ref as-is).
   const lastNudgeTargetRef = useRef<{ x: number; z: number } | null>(null);
-  // Story 4.2 cascade (2026-04-23): tracks whether this pad is
-  // currently published to the store's `displacedPads` secondary-anchor
-  // map. Avoids calling setDisplacedPad every frame once we're steady
-  // above threshold — only publish on transition in/out or when the
-  // position has shifted noticeably. Separate from siblingNudgeRef so
-  // the publish/clear decision is cheap (ref read, no Map clone).
-  const isPublishedRef = useRef(false);
+  // (`isPublishedRef` removed 2026-04-23 — the local ref can desync
+  // from the store's actual `displacedPads` contents, leaving stale
+  // entries that nudge far-away pads. Both setDisplacedPad and
+  // clearDisplacedPad short-circuit on no-change inputs, so calling
+  // them unconditionally each frame based on current nudge magnitude
+  // is cheap AND fully self-correcting.)
   // Story 4-8: batch position PATCH. Fires on drag release (with the
   // dragged pad plus all cascade-displaced siblings in one call), on
   // spread-out arrival (single-entry batch), and previously on the
@@ -916,10 +915,7 @@ export function LilyPad({
           // activeDragAnchor below). Drop it from the secondary map
           // to avoid double-publishing, and reset its nudge — the
           // user is placing this pad deliberately.
-          if (isPublishedRef.current) {
-            dragStartStore.clearDisplacedPad(todo.id);
-            isPublishedRef.current = false;
-          }
+          dragStartStore.clearDisplacedPad(todo.id);
           siblingNudgeRef.current = { x: 0, z: 0 };
           lastNudgeTargetRef.current = null;
         }
@@ -1691,10 +1687,7 @@ export function LilyPad({
           // dragger fired, we'd miss the batch — clear ourselves
           // regardless so future cascade reads don't chase a stale
           // position.
-          if (isPublishedRef.current) {
-            usePondStore.getState().clearDisplacedPad(todo.id);
-            isPublishedRef.current = false;
-          }
+          usePondStore.getState().clearDisplacedPad(todo.id);
         }
       }
 
@@ -1871,45 +1864,6 @@ export function LilyPad({
           // displacements would be visually pinned (sticky) but never
           // reach the server, resetting on refresh.
           //
-          // Publish the STEADY-STATE TARGET position (posX + cached
-          // target nudge) rather than the current mid-lerp position.
-          // Three things have to agree at drag release:
-          //   (a) the dragger's batch payload (reads displacedPads)
-          //   (b) this pad's dragPosRef at commit (= posX + snapped
-          //       target via lastNudgeTargetRef)
-          //   (c) the sticky-clear check (refetch vs dragPosRef)
-          // If we publish mid-lerp instead, the backend stores mid-
-          // lerp, the refetch returns mid-lerp, but dragPosRef is the
-          // target — the 0.05 sticky threshold is easily exceeded on
-          // short drags, sticky never clears, and the pad then takes
-          // the sticky IF branch every frame forever, silently
-          // ignoring subsequent drags. Publishing the target keeps
-          // all three values aligned.
-          const DISPLACED_PUBLISH_THRESHOLD = 0.3;
-          const nudgeMag = Math.sqrt(
-            siblingNudgeRef.current.x * siblingNudgeRef.current.x +
-              siblingNudgeRef.current.z * siblingNudgeRef.current.z,
-          );
-          if (nudgeMag > DISPLACED_PUBLISH_THRESHOLD) {
-            const publishTarget = lastNudgeTargetRef.current;
-            const publishX = publishTarget
-              ? posX + publishTarget.x
-              : posX + siblingNudgeRef.current.x;
-            const publishZ = publishTarget
-              ? posZ + publishTarget.z
-              : posZ + siblingNudgeRef.current.z;
-            // Publish every engaged frame so secondaries chase the
-            // moving pad. setDisplacedPad short-circuits on identical
-            // inputs, so idle frames are cheap.
-            usePondStore.getState().setDisplacedPad(todo.id, {
-              x: publishX,
-              z: publishZ,
-            });
-            isPublishedRef.current = true;
-          } else if (isPublishedRef.current) {
-            usePondStore.getState().clearDisplacedPad(todo.id);
-            isPublishedRef.current = false;
-          }
           group.position.x =
             posX +
             Math.sin(t * 0.3 + seed) * 0.08 * ramp +
@@ -1919,6 +1873,48 @@ export function LilyPad({
             Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp +
             siblingNudgeRef.current.z;
         }
+      }
+
+      // Publish / unpublish this pad's displaced position for the
+      // cascade's secondary-anchor channel — runs UNCONDITIONALLY in
+      // the resting phase after the drag/sticky/spread/cascade logic
+      // above has settled this frame's nudge state. Previously lived
+      // inside the cascade branch, which meant sticky / spread pads
+      // never ran it and any stale displacedPads entries they carried
+      // in would linger, nudging far-away pads from beyond
+      // NUDGE_RADIUS of the dragger.
+      //
+      // Publishing the STEADY-STATE TARGET position (posX + cached
+      // target nudge) rather than the current mid-lerp position
+      // keeps three values aligned at drag release:
+      //   (a) the dragger's batch payload (reads displacedPads)
+      //   (b) each sibling's dragPosRef at commit (snapped to target)
+      //   (c) the sticky-clear check (refetch vs dragPosRef)
+      // Mid-lerp publishes would drift these apart and leave pads
+      // stuck sticky, then inert to further drags.
+      //
+      // Both store actions short-circuit on no-change inputs, so
+      // calling them every frame is cheap. The store is the sole
+      // source of truth; no local "am I published?" ref is kept.
+      const DISPLACED_PUBLISH_THRESHOLD = 0.3;
+      const currentNudgeMag = Math.sqrt(
+        siblingNudgeRef.current.x * siblingNudgeRef.current.x +
+          siblingNudgeRef.current.z * siblingNudgeRef.current.z,
+      );
+      if (currentNudgeMag > DISPLACED_PUBLISH_THRESHOLD) {
+        const publishTarget = lastNudgeTargetRef.current;
+        const publishX = publishTarget
+          ? posX + publishTarget.x
+          : posX + siblingNudgeRef.current.x;
+        const publishZ = publishTarget
+          ? posZ + publishTarget.z
+          : posZ + siblingNudgeRef.current.z;
+        usePondStore.getState().setDisplacedPad(todo.id, {
+          x: publishX,
+          z: publishZ,
+        });
+      } else {
+        usePondStore.getState().clearDisplacedPad(todo.id);
       }
 
       // Story 2.10: pad rides the water surface. Sample elevation at
