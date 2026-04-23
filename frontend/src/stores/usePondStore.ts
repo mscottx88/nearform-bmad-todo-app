@@ -197,6 +197,20 @@ interface PondState {
   // `bornAt` is performance.now() (UI clock) so expiration is simple.
   wakes: Array<{ id: string; x: number; z: number; angle: number; bornAt: number }>;
 
+  // Story 4.6: per-group metadata cache — centroid + halo radius + member
+  // ids — maintained by PondScene from `renderTodos`. LilyPad snapshots
+  // this at drag start so pop-out (grouped-pad drag exiting its own halo)
+  // and pop-in (solo-pad drag entering another group's halo) can be
+  // detected without threading a members-prop through the component tree.
+  groupMeta: Map<string, { centroid: { x: number; z: number }; R: number; memberIds: string[] }>;
+
+  // Story 4.6 AC #18, #20, #24: camera-follow target during pop-out /
+  // pop-in / grip-phase cluster drag. When set, PondCamera pans toward
+  // the (x, z) world point each frame so the dragged pad / mouse stays
+  // roughly under the cursor. Null at rest. No snap-back on clear —
+  // the camera simply holds its last position per the spec.
+  followTarget: { worldX: number; worldZ: number } | null;
+
   toggleAtmosphere: () => void;
   setViewportSize: (width: number, height: number) => void;
   /**
@@ -371,6 +385,19 @@ interface PondState {
   }) => void;
   /** Remove all wake entries older than `maxAge` ms at `now`. Called by PondScene each frame. */
   expireWakes: (now: number, maxAge: number) => void;
+
+  /**
+   * Story 4.6: replace the per-group metadata cache. Called by PondScene
+   * whenever `renderTodos` changes so LilyPad can read current centroid +
+   * radius without threading a members prop through. Identity-preserving
+   * no-op when the content is unchanged by shallow key comparison.
+   */
+  setGroupMeta: (
+    meta: Map<string, { centroid: { x: number; z: number }; R: number; memberIds: string[] }>,
+  ) => void;
+
+  /** Story 4.6 AC #18, #20, #24: set (non-null) or clear (null) the camera follow target. */
+  setFollowTarget: (target: { worldX: number; worldZ: number } | null) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({
@@ -404,6 +431,8 @@ export const usePondStore = create<PondState>((set, get) => ({
   clusterTranslation: null,
   pendingPops: new Map(),
   wakes: [],
+  groupMeta: new Map(),
+  followTarget: null,
 
   toggleAtmosphere: () =>
     set((state) => {
@@ -689,6 +718,42 @@ export const usePondStore = create<PondState>((set, get) => ({
       if (kept.length === state.wakes.length) return state;
       return { wakes: kept };
     }),
+
+  setGroupMeta: (meta) =>
+    set((state) => {
+      // Cheap shallow equality check: same key-set and same memberIds
+      // signature skips the write so PondScene re-running its useEffect
+      // without real change (React Query identity flips) doesn't churn.
+      if (meta.size === state.groupMeta.size) {
+        let changed = false;
+        for (const [id, value] of meta) {
+          const prev = state.groupMeta.get(id);
+          if (
+            !prev ||
+            prev.R !== value.R ||
+            prev.centroid.x !== value.centroid.x ||
+            prev.centroid.z !== value.centroid.z ||
+            prev.memberIds.length !== value.memberIds.length
+          ) {
+            changed = true;
+            break;
+          }
+        }
+        if (!changed) return state;
+      }
+      return { groupMeta: meta };
+    }),
+
+  setFollowTarget: (target) => {
+    if (target === null) {
+      if (get().followTarget === null) return;
+      set({ followTarget: null });
+      return;
+    }
+    const prev = get().followTarget;
+    if (prev && prev.worldX === target.worldX && prev.worldZ === target.worldZ) return;
+    set({ followTarget: target });
+  },
 }));
 
 // Convenience selector per story 2.4 spec — consumers pass it to the hook

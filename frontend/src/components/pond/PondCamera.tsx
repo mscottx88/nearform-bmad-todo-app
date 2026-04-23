@@ -35,6 +35,13 @@ const hitPoint = new THREE.Vector3();
 const resetTargetPos = new THREE.Vector3();
 const resetTargetTarget = new THREE.Vector3();
 
+// Story 4.6 AC #18, #20, #24: speed of the "camera follows the pad /
+// cursor" lerp when followTarget is set. ~0.12 reaches 90% of a new
+// target in ~170ms at 60fps — responsive enough that a user-driven
+// cursor movement pulls the camera along without feeling laggy,
+// gentle enough that small drag jitter doesn't shake the view.
+const FOLLOW_LERP = 0.12;
+
 export function PondCamera() {
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera, gl } = useThree();
@@ -213,6 +220,25 @@ export function PondCamera() {
         resetAnimating.current = false;
         usePondStore.getState().clearCameraResetRequest();
       }
+      return;
+    }
+
+    // Story 4.6 AC #18, #20, #24: camera follow during pop-out, pop-in,
+    // and grip-phase cluster drag. When `followTarget` is non-null,
+    // pan the camera + controls.target laterally toward (worldX, worldZ)
+    // at FOLLOW_LERP. Y is untouched — following preserves the user's
+    // existing elevation / zoom. No snap-back on clear per the spec:
+    // clearing simply stops updating, and the camera holds its last
+    // position until a new input arrives.
+    const followTarget = storeSnapshot.followTarget;
+    if (followTarget) {
+      const targetDeltaX = followTarget.worldX - controls.target.x;
+      const targetDeltaZ = followTarget.worldZ - controls.target.z;
+      controls.target.x += targetDeltaX * FOLLOW_LERP;
+      controls.target.z += targetDeltaZ * FOLLOW_LERP;
+      camera.position.x += targetDeltaX * FOLLOW_LERP;
+      camera.position.z += targetDeltaZ * FOLLOW_LERP;
+      controls.update();
       return;
     }
 

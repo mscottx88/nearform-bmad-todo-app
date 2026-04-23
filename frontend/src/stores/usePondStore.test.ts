@@ -695,4 +695,74 @@ describe('usePondStore', () => {
       expect(usePondStore.getState().wakes).toBe(before);
     });
   });
+
+  describe('setGroupMeta (story 4.6 — pop-out/pop-in snapshot source)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ groupMeta: new Map() });
+    });
+
+    it('stores a new meta map', () => {
+      const meta = new Map([
+        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
+      ]);
+      usePondStore.getState().setGroupMeta(meta);
+      expect(usePondStore.getState().groupMeta.get('g1')?.R).toBe(3);
+    });
+
+    it('skips the set when the shape is unchanged (identity preserved)', () => {
+      const meta1 = new Map([
+        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
+      ]);
+      usePondStore.getState().setGroupMeta(meta1);
+      const ref = usePondStore.getState().groupMeta;
+      // Identical content in a fresh Map — should not replace the ref.
+      const meta2 = new Map([
+        ['g1', { centroid: { x: 1, z: 2 }, R: 3, memberIds: ['a', 'b'] }],
+      ]);
+      usePondStore.getState().setGroupMeta(meta2);
+      expect(usePondStore.getState().groupMeta).toBe(ref);
+    });
+
+    it('updates when R changes', () => {
+      const meta1 = new Map([
+        ['g1', { centroid: { x: 0, z: 0 }, R: 1, memberIds: ['a'] }],
+      ]);
+      usePondStore.getState().setGroupMeta(meta1);
+      const meta2 = new Map([
+        ['g1', { centroid: { x: 0, z: 0 }, R: 2, memberIds: ['a'] }],
+      ]);
+      usePondStore.getState().setGroupMeta(meta2);
+      expect(usePondStore.getState().groupMeta.get('g1')?.R).toBe(2);
+    });
+  });
+
+  describe('setFollowTarget (story 4.6 AC #18, #20, #24)', () => {
+    beforeEach(() => {
+      usePondStore.setState({ followTarget: null });
+    });
+
+    it('sets a new target', () => {
+      usePondStore.getState().setFollowTarget({ worldX: 5, worldZ: 7 });
+      expect(usePondStore.getState().followTarget).toEqual({ worldX: 5, worldZ: 7 });
+    });
+
+    it('clearing when already null is a no-op', () => {
+      const before = usePondStore.getState();
+      usePondStore.getState().setFollowTarget(null);
+      expect(usePondStore.getState()).toBe(before);
+    });
+
+    it('setting an identical target is a no-op', () => {
+      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
+      const ref = usePondStore.getState().followTarget;
+      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
+      expect(usePondStore.getState().followTarget).toBe(ref);
+    });
+
+    it('clears to null', () => {
+      usePondStore.getState().setFollowTarget({ worldX: 1, worldZ: 2 });
+      usePondStore.getState().setFollowTarget(null);
+      expect(usePondStore.getState().followTarget).toBeNull();
+    });
+  });
 });

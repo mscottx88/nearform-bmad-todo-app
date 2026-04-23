@@ -117,6 +117,16 @@ vi.mock('../../stores/usePondStore', () => ({
       // Story 4.6: Shift/Ctrl/Meta-click on a pad routes into the
       // selection slice instead of the drag / popup pipeline.
       togglePadSelection: togglePadSelectionMock,
+      // Story 4.6: drag pipeline + pop/wake/camera-follow wiring. All
+      // defaulted to jest mocks so the click + drag tests run without
+      // exercising those branches (no groupId on the stock mockTodo).
+      setGroupDragTarget: vi.fn(),
+      setFollowTarget: vi.fn(),
+      firePop: vi.fn(),
+      clearPendingPop: vi.fn(),
+      addWake: vi.fn(),
+      groupMeta: new Map(),
+      groupDragTarget: null,
     }),
   }),
   selectCompleting: () => () => undefined,
@@ -132,6 +142,10 @@ vi.mock('../../stores/usePondStore', () => ({
   // selection-visual branch (useFrame oscillation) is therefore
   // inactive for these tests.
   selectIsSelected: () => () => false,
+  // Story 4.6: pop animation is inactive by default — no pending pop
+  // for this pad. Individual tests drive the branch by re-mocking
+  // this selector (see "pop animation" describe block below).
+  selectPendingPop: () => () => undefined,
 }));
 
 const mockTodo: Todo = {

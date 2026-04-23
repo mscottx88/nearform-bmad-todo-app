@@ -11,6 +11,7 @@ import { usePondSearchKeyboard } from '../../hooks/usePondSearchKeyboard';
 import { usePondSearchSync } from '../../hooks/usePondSearchSync';
 import { useCameraResetOnDoubleEscape } from '../../hooks/useCameraResetOnDoubleEscape';
 import { computeSpreadPositions } from '../../utils/spreadOut';
+import { computeCentroid as computeHaloCentroid, computeHaloRadius } from '../../lib/clusterGeometry';
 import type { Group, Todo } from '../../types';
 import { fitCameraToPads } from './fitCameraToPads';
 import { WaterSurface } from './WaterSurface';
@@ -22,6 +23,7 @@ import { ActionPopup } from '../ui/ActionPopup';
 import { ClusterLabel } from './ClusterLabel';
 import { ClusterHalo } from './ClusterHalo';
 import { ClusterDragHandle } from './ClusterDragHandle';
+import { WakeLayer } from './Wake';
 
 function computeCentroid(members: Todo[]): { x: number; z: number } {
   if (members.length === 0) return { x: 0, z: 0 };
@@ -136,6 +138,35 @@ export function PondScene() {
     }
     return extras.length > 0 ? [...todos, ...extras] : todos;
   }, [todos, completingTodos, deletingTodos]);
+
+  // Story 4.6: per-group geometry (centroid + halo radius) cached into
+  // the store so LilyPad can read it at drag start for pop-out / pop-in
+  // detection without threading members as a prop. Runs alongside the
+  // `groups` memo so both reflect the same renderTodos snapshot.
+  useEffect(() => {
+    const perGroup = new Map<
+      string,
+      { centroid: { x: number; z: number }; R: number; memberIds: string[] }
+    >();
+    const seen = new Set<string>();
+    for (const todo of renderTodos) {
+      if (!todo.groupId || seen.has(todo.groupId)) continue;
+      seen.add(todo.groupId);
+      const members = renderTodos.filter((t) => t.groupId === todo.groupId);
+      const positions = members.map((t) => ({
+        x: t.positionX ?? 0,
+        z: t.positionY ?? 0,
+      }));
+      const centroid = computeHaloCentroid(positions);
+      const R = computeHaloRadius(positions, centroid);
+      perGroup.set(todo.groupId, {
+        centroid,
+        R,
+        memberIds: members.map((t) => t.id),
+      });
+    }
+    usePondStore.getState().setGroupMeta(perGroup);
+  }, [renderTodos]);
 
   // Story 4.6: derive group metadata from the live todo list. The backend
   // returns `group_id` on each todo but not the group label. Labels are
@@ -281,6 +312,49 @@ export function PondScene() {
           }}
           focused={activePopupTodoId === todo.id}
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
+          // Story 4.6 AC #18: grouped pad escaped its own halo mid-drag.
+          // Collapse the group to solos if only one would remain; else
+          // PATCH the member list. Fire pop animation on the escapee
+          // and autoSpread the remaining cluster on success.
+          onMemberPopOut={(groupId, draggedId) => {
+            const remaining = renderTodos.filter(
+              (t) => t.groupId === groupId && t.id !== draggedId,
+            );
+            if (remaining.length <= 1) {
+              deleteGroup.mutate(groupId, {
+                onSuccess: () => autoSpread(remaining),
+              });
+            } else {
+              updateGroup.mutate(
+                { id: groupId, memberIds: remaining.map((t) => t.id) },
+                { onSuccess: () => autoSpread(remaining) },
+              );
+            }
+            usePondStore.getState().firePop(draggedId, performance.now());
+          }}
+          // Story 4.6 AC #20: solo pad entered another group's halo.
+          // Append to its member list, fire pop animation on the
+          // joiner, autoSpread the destination on success.
+          onSoloPopIn={(targetGroupId, draggedId) => {
+            const existing = renderTodos
+              .filter((t) => t.groupId === targetGroupId)
+              .map((t) => t.id);
+            const nextMembers = [...existing, draggedId];
+            updateGroup.mutate(
+              { id: targetGroupId, memberIds: nextMembers },
+              {
+                onSuccess: () => {
+                  const future = renderTodos
+                    .filter((t) => nextMembers.includes(t.id))
+                    .map((t) =>
+                      t.id === draggedId ? { ...t, groupId: targetGroupId } : t,
+                    );
+                  autoSpread(future);
+                },
+              },
+            );
+            usePondStore.getState().firePop(draggedId, performance.now());
+          }}
         />
       ))}
       {/* Story 4.6 AC #11: single neon-cyan ring encircling each group.
@@ -346,6 +420,10 @@ export function PondScene() {
                 store.requestCameraReset(fitCameraToPads(updated));
               }
               store.setClusterTranslation(null);
+              // Story 4.6 AC #25: release the camera-follow engagement
+              // that grip phase set. No snap-back — the camera simply
+              // stops tracking and holds its current position.
+              store.setFollowTarget(null);
             }}
           />
         );
@@ -459,6 +537,10 @@ export function PondScene() {
           }}
         />
       )}
+      {/* Story 4.6 AC #16: crescent wakes emitted during grouped member
+          drag. Mounted once; reads the `wakes` store slice and expires
+          entries after WAKE_LIFETIME_MS each frame. */}
+      <WakeLayer />
       <PondCamera />
 
       <EffectComposer>

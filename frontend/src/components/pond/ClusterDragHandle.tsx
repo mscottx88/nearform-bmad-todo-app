@@ -157,6 +157,11 @@ export function ClusterDragHandle({
         cumulativeDzRef.current += ddz;
         handleWorldPosRef.current = { ...M };
         onTranslate(cumulativeDxRef.current, cumulativeDzRef.current);
+        // Story 4.6 AC #24: camera follows the mouse during grip phase.
+        // The new centroid world-pos is the right follow target — it's
+        // where the cluster is being moved TO each frame. On pointerup
+        // the parent's onDragEnd clears followTarget.
+        usePondStore.getState().setFollowTarget({ worldX: newCx, worldZ: newCz });
       }
     };
 
