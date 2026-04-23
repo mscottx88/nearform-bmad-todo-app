@@ -17,12 +17,39 @@ interface Point {
 
 // Story 4.6 (user feedback 2026-04-23): frog-hand glyphs drawn in
 // place of the firefly when the cursor is over a draggable affordance.
-// Webbed digits + bulbous fingertips match the pond theme. Neon-green
-// so the frog reference reads immediately and the swap is visually
-// distinct from the cyan cluster ring.
+// Iter 4 matches a classic frog-footprint silhouette — four slim
+// stick digits radiating from a tiny palm, each ending in a bulbous
+// round toe-pad. No webbing (the reference doesn't show any). Neon
+// green so the swap reads as a pond creature and stays distinct
+// from the cyan cluster ring.
 const GRAB_COLOR = '#39ff14';
-const GRAB_WEB_COLOR = 'rgba(57, 255, 20, 0.28)';
 const GRAB_SHADOW = 14;
+
+// Helper: draw a single frog digit from a root point out to a tip,
+// with the stem tapering into a bulbous round toe-pad. The reference
+// image (2026-04-23 user feedback iter 4) has slim stick-stems and
+// prominent bulb tips — that's the whole silhouette.
+function drawFrogDigit(
+  ctx: CanvasRenderingContext2D,
+  rootX: number,
+  rootY: number,
+  tipX: number,
+  tipY: number,
+  tipRadius: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(rootX, rootY);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, tipRadius, 0, Math.PI * 2);
+  ctx.fill();
+  // Outline the bulb so bloom doesn't wash it out at high exposure.
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, tipRadius, 0, Math.PI * 2);
+  ctx.stroke();
+}
 
 function drawGrabHand(
   ctx: CanvasRenderingContext2D,
@@ -32,59 +59,37 @@ function drawGrabHand(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.strokeStyle = GRAB_COLOR;
-  ctx.fillStyle = GRAB_WEB_COLOR;
+  ctx.fillStyle = GRAB_COLOR;
   ctx.lineWidth = 2.0;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.shadowBlur = GRAB_SHADOW;
   ctx.shadowColor = GRAB_COLOR;
 
-  // Three digits splayed in a fan above the palm. User feedback
-  // 2026-04-23 (iter 3): "longer frog fingers, smaller palm size".
-  // Tips reach further (up to y=-26), palm base pulled in from
-  // y=+15 to y=+9, palm width shrunk from ±13 to ±9.
+  // Four digits fanning out like a starburst from a tiny palm — per
+  // the reference: long slim stems with pronounced bulb toe-pads,
+  // NO visible webbing, the palm barely peeks below the digit roots.
   const tips: Array<{ x: number; y: number }> = [
-    { x: -14, y: -16 },
-    { x: 0, y: -26 },
-    { x: 14, y: -16 },
+    { x: -22, y: -10 }, // far-left (nearly horizontal)
+    { x: -9, y: -24 }, // left-center (tallest)
+    { x: 9, y: -24 }, // right-center
+    { x: 22, y: -10 }, // far-right
   ];
-  const palmTop = -2;
+  const TIP_R = 3.5;
 
-  // Webbing: one filled blob whose outline tracks up to each digit
-  // tip, then scallops back down between tips. Drawn FIRST so the
-  // digit strokes + toe pads sit on top.
+  // Tiny palm — just a small oval at the base. Sized so it reads as
+  // a "toe-print" pad rather than a full hand.
   ctx.beginPath();
-  ctx.moveTo(-9, palmTop);
+  ctx.ellipse(0, 3, 6, 4, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Draw each digit from a root on the palm oval's edge out to the
+  // tip. Digit roots cluster at y ≈ -2 (palm top) and spread
+  // slightly in x.
+  const rootXs = [-4, -1.5, 1.5, 4];
   for (let i = 0; i < tips.length; i++) {
     const tip = tips[i]!;
-    ctx.lineTo(tip.x, tip.y);
-    if (i < tips.length - 1) {
-      const next = tips[i + 1]!;
-      const midX = (tip.x + next.x) / 2;
-      const midY = Math.max(tip.y, next.y) + 8;
-      ctx.quadraticCurveTo(midX, midY, next.x, next.y);
-    }
-  }
-  ctx.lineTo(9, palmTop);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-
-  // Palm: rounded base below the digit roots — smaller than before.
-  ctx.beginPath();
-  ctx.moveTo(-9, palmTop);
-  ctx.quadraticCurveTo(-10, palmTop + 7, -5, palmTop + 9);
-  ctx.lineTo(5, palmTop + 9);
-  ctx.quadraticCurveTo(10, palmTop + 7, 9, palmTop);
-  ctx.stroke();
-
-  // Toe pads — bulbous tips. Filled with solid green (vs the faint
-  // webbing fill) so they pop as sticky fingertips.
-  ctx.fillStyle = GRAB_COLOR;
-  for (const tip of tips) {
-    ctx.beginPath();
-    ctx.arc(tip.x, tip.y, 3, 0, Math.PI * 2);
-    ctx.fill();
+    drawFrogDigit(ctx, rootXs[i]!, -2, tip.x, tip.y, TIP_R);
   }
 
   ctx.restore();
@@ -98,43 +103,34 @@ function drawGrabbingFist(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.strokeStyle = GRAB_COLOR;
-  ctx.fillStyle = GRAB_WEB_COLOR;
+  ctx.fillStyle = GRAB_COLOR;
   ctx.lineWidth = 2.0;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.shadowBlur = GRAB_SHADOW;
   ctx.shadowColor = GRAB_COLOR;
 
-  // Curled three-digit frog hand. Scaled ~1.8× with room for three
-  // curled digit ridges instead of four. Wider at the base (palm),
-  // tapered at the top where the digits tuck under.
+  // Same 4-digit frog hand but CURLED inward — tips clustered near
+  // the top, stems shorter and more upright, palm slightly more
+  // prominent (fist base). No webbing, matching the open-hand
+  // reference.
+  const tips: Array<{ x: number; y: number }> = [
+    { x: -10, y: -8 },
+    { x: -3.5, y: -13 },
+    { x: 3.5, y: -13 },
+    { x: 10, y: -8 },
+  ];
+  const TIP_R = 3.0;
+
+  // Fist base — a slightly larger oval than the grab's palm.
   ctx.beginPath();
-  ctx.moveTo(-13, 8);
-  ctx.quadraticCurveTo(-17, -4, -8, -12);
-  ctx.quadraticCurveTo(0, -15, 8, -12);
-  ctx.quadraticCurveTo(17, -4, 13, 8);
-  ctx.quadraticCurveTo(6, 13, 0, 13);
-  ctx.quadraticCurveTo(-6, 13, -13, 8);
-  ctx.closePath();
-  ctx.fill();
+  ctx.ellipse(0, 4, 7, 5, 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Three curled-digit ridges along the top of the fist.
-  for (let i = 0; i < 3; i++) {
-    const y = -4 + i * 3.5;
-    ctx.beginPath();
-    ctx.moveTo(-7, y);
-    ctx.quadraticCurveTo(0, y - 2.5, 7, y);
-    ctx.stroke();
-  }
-
-  // Toe pads peeking out at the curl front — three dots matching
-  // the three digits.
-  ctx.fillStyle = GRAB_COLOR;
-  for (const tx of [-6, 0, 6]) {
-    ctx.beginPath();
-    ctx.arc(tx, -8, 2.2, 0, Math.PI * 2);
-    ctx.fill();
+  const rootXs = [-3.5, -1.2, 1.2, 3.5];
+  for (let i = 0; i < tips.length; i++) {
+    const tip = tips[i]!;
+    drawFrogDigit(ctx, rootXs[i]!, 0, tip.x, tip.y, TIP_R);
   }
 
   ctx.restore();
