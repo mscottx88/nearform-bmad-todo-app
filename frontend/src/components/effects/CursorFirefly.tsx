@@ -17,10 +17,11 @@ interface Point {
 
 // Story 4.6 (user feedback 2026-04-23): frog-hand glyphs drawn in
 // place of the firefly when the cursor is over a draggable affordance.
-// Webbed digits + bulbous fingertips match the pond theme; neon-cyan
-// so the mode switch reads as "this is a cluster affordance".
-const GRAB_COLOR = '#00eeff';
-const GRAB_WEB_COLOR = 'rgba(0, 238, 255, 0.28)';
+// Webbed digits + bulbous fingertips match the pond theme. Neon-green
+// so the frog reference reads immediately and the swap is visually
+// distinct from the cyan cluster ring.
+const GRAB_COLOR = '#39ff14';
+const GRAB_WEB_COLOR = 'rgba(57, 255, 20, 0.28)';
 const GRAB_SHADOW = 14;
 
 function drawGrabHand(
@@ -32,51 +33,51 @@ function drawGrabHand(
   ctx.translate(cx, cy);
   ctx.strokeStyle = GRAB_COLOR;
   ctx.fillStyle = GRAB_WEB_COLOR;
-  ctx.lineWidth = 1.3;
+  ctx.lineWidth = 2.0;
   ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
   ctx.shadowBlur = GRAB_SHADOW;
   ctx.shadowColor = GRAB_COLOR;
 
-  // Four finger tip positions — splayed fan above the palm. Each
-  // finger is a short stem ending in a round toe-pad (frog digits
-  // have bulbous tips for sticking). Thumb is absent on a frog's
-  // front hand; four digits is correct anatomy.
+  // Three digits splayed in a fan above the palm. User feedback
+  // 2026-04-23 (2nd round): "bigger + three fingers". Scale is
+  // ~1.8× the previous four-digit version so the hand reads clearly
+  // at a glance. Each digit is a stem ending in a bulbous toe-pad
+  // (frog fingertips) — cartoon frogs are typically drawn with
+  // three visible digits, matching the spec.
   const tips: Array<{ x: number; y: number }> = [
-    { x: -8, y: -5 },
-    { x: -3, y: -10 },
-    { x: 3, y: -10 },
-    { x: 8, y: -5 },
+    { x: -14, y: -10 },
+    { x: 0, y: -18 },
+    { x: 14, y: -10 },
   ];
-  const palmTop = -1;
+  const palmTop = -2;
 
-  // Webbing: one filled blob spanning all four digit roots and
-  // rising toward the tips. Drawn FIRST so the digit strokes sit on
-  // top. Quadratic curves through tip positions give the webbing its
-  // characteristic scalloped edge.
+  // Webbing: one filled blob whose outline tracks up to each digit
+  // tip, then scallops back down between tips. Drawn FIRST so the
+  // digit strokes + toe pads sit on top.
   ctx.beginPath();
-  ctx.moveTo(-7, palmTop);
+  ctx.moveTo(-13, palmTop);
   for (let i = 0; i < tips.length; i++) {
     const tip = tips[i]!;
     ctx.lineTo(tip.x, tip.y);
     if (i < tips.length - 1) {
       const next = tips[i + 1]!;
-      // Dip between fingers — web scallop
       const midX = (tip.x + next.x) / 2;
-      const midY = Math.max(tip.y, next.y) + 2.5;
+      const midY = Math.max(tip.y, next.y) + 6;
       ctx.quadraticCurveTo(midX, midY, next.x, next.y);
     }
   }
-  ctx.lineTo(7, palmTop);
+  ctx.lineTo(13, palmTop);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
   // Palm: rounded base below the digit roots.
   ctx.beginPath();
-  ctx.moveTo(-7, palmTop);
-  ctx.quadraticCurveTo(-8, palmTop + 6, -4, palmTop + 8);
-  ctx.lineTo(4, palmTop + 8);
-  ctx.quadraticCurveTo(8, palmTop + 6, 7, palmTop);
+  ctx.moveTo(-13, palmTop);
+  ctx.quadraticCurveTo(-15, palmTop + 11, -7, palmTop + 15);
+  ctx.lineTo(7, palmTop + 15);
+  ctx.quadraticCurveTo(15, palmTop + 11, 13, palmTop);
   ctx.stroke();
 
   // Toe pads — bulbous tips. Filled with solid cyan (vs the faint
@@ -84,7 +85,7 @@ function drawGrabHand(
   ctx.fillStyle = GRAB_COLOR;
   for (const tip of tips) {
     ctx.beginPath();
-    ctx.arc(tip.x, tip.y, 1.5, 0, Math.PI * 2);
+    ctx.arc(tip.x, tip.y, 3, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -100,42 +101,43 @@ function drawGrabbingFist(
   ctx.translate(cx, cy);
   ctx.strokeStyle = GRAB_COLOR;
   ctx.fillStyle = GRAB_WEB_COLOR;
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = 2.0;
   ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
   ctx.shadowBlur = GRAB_SHADOW;
   ctx.shadowColor = GRAB_COLOR;
 
-  // Curled frog hand — a leaf-shaped blob with the fingers tucked
-  // under. Wider at the base (palm), tapered at the top (curled
-  // fingers).
+  // Curled three-digit frog hand. Scaled ~1.8× with room for three
+  // curled digit ridges instead of four. Wider at the base (palm),
+  // tapered at the top where the digits tuck under.
   ctx.beginPath();
-  ctx.moveTo(-7, 4);
-  ctx.quadraticCurveTo(-9, -2, -4, -6);
-  ctx.quadraticCurveTo(0, -8, 4, -6);
-  ctx.quadraticCurveTo(9, -2, 7, 4);
-  ctx.quadraticCurveTo(3, 7, 0, 7);
-  ctx.quadraticCurveTo(-3, 7, -7, 4);
+  ctx.moveTo(-13, 8);
+  ctx.quadraticCurveTo(-17, -4, -8, -12);
+  ctx.quadraticCurveTo(0, -15, 8, -12);
+  ctx.quadraticCurveTo(17, -4, 13, 8);
+  ctx.quadraticCurveTo(6, 13, 0, 13);
+  ctx.quadraticCurveTo(-6, 13, -13, 8);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // Curled-finger ridges — three arcs along the top of the fist.
+  // Three curled-digit ridges along the top of the fist.
   for (let i = 0; i < 3; i++) {
-    const y = -2 + i * 2;
+    const y = -4 + i * 3.5;
     ctx.beginPath();
-    ctx.moveTo(-3.5, y);
-    ctx.quadraticCurveTo(0, y - 1.5, 3.5, y);
+    ctx.moveTo(-7, y);
+    ctx.quadraticCurveTo(0, y - 2.5, 7, y);
     ctx.stroke();
   }
 
-  // Toe pads peeking out at the curl front — two small dots.
+  // Toe pads peeking out at the curl front — three dots matching
+  // the three digits.
   ctx.fillStyle = GRAB_COLOR;
-  ctx.beginPath();
-  ctx.arc(-2, -4.5, 1.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(2, -4.5, 1.2, 0, Math.PI * 2);
-  ctx.fill();
+  for (const tx of [-6, 0, 6]) {
+    ctx.beginPath();
+    ctx.arc(tx, -8, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   ctx.restore();
 }
@@ -306,19 +308,12 @@ export function CursorFirefly() {
       const nodes: Point[] = nodesRef.current;
 
       // Story 4.6 (user feedback 2026-04-23): when over the cluster
-      // drag handle, swap the firefly for a neon grip / fist glyph.
-      // Read imperatively (not as a subscription) so the RAF loop
-      // doesn't restart on every mode change.
+      // drag handle, swap the firefly for a neon green frog-hand
+      // glyph at the head, AND tint the existing trail green. The
+      // node/trail update runs unconditionally so the frog hand has
+      // the same lingering trail when moved — user feedback "should
+      // leave a trail when moved".
       const mode = usePondStore.getState().cursorMode;
-      if (mode !== 'firefly') {
-        if (mode === 'grab') {
-          drawGrabHand(ctx, mouse.x, mouse.y);
-        } else {
-          drawGrabbingFist(ctx, mouse.x, mouse.y);
-        }
-        rafRef.current = requestAnimationFrame(draw);
-        return;
-      }
 
       // 1. Update positions via lerp
       nodes[0]!.x += (mouse.x - nodes[0]!.x) * HEAD_LERP;
@@ -349,7 +344,10 @@ export function CursorFirefly() {
       }
       const heading: number = headingRef.current;
 
-      // 5. Draw neon yellow glow trail
+      // 5. Draw the trail. Colour swaps to neon green when in grab /
+      //    grabbing mode so the frog hand leaves a green trail
+      //    instead of the firefly's yellow (user feedback 2026-04-23).
+      const trailColor = mode === 'firefly' ? TRAIL_COLOR : GRAB_COLOR;
       for (let i: number = 1; i < TRAIL_LENGTH; i++) {
         const t: number = i / TRAIL_LENGTH;
         const alpha: number = (1 - t) * 0.85;
@@ -358,17 +356,24 @@ export function CursorFirefly() {
 
         ctx.save();
         ctx.globalAlpha = alpha * dotPulse;
-        ctx.fillStyle = TRAIL_COLOR;
+        ctx.fillStyle = trailColor;
         ctx.shadowBlur = SHADOW_BLUR * (1 - t);
-        ctx.shadowColor = TRAIL_COLOR;
+        ctx.shadowColor = trailColor;
         ctx.beginPath();
         ctx.arc(nodes[i]!.x, nodes[i]!.y, dotSize, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
 
-      // 6. Draw firefly at head position
-      drawFirefly(ctx, nodes[0]!.x, nodes[0]!.y, frameRef.current, fireflyColor, heading);
+      // 6. Draw head glyph — firefly by default, frog-hand when the
+      //    cluster drag handle is hovered / being dragged.
+      if (mode === 'grab') {
+        drawGrabHand(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else if (mode === 'grabbing') {
+        drawGrabbingFist(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else {
+        drawFirefly(ctx, nodes[0]!.x, nodes[0]!.y, frameRef.current, fireflyColor, heading);
+      }
 
       rafRef.current = requestAnimationFrame(draw);
     };
