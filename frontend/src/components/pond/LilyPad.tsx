@@ -501,6 +501,15 @@ export function LilyPad({
   // catch up to the committed drag target (within the same
   // arrival threshold used by the /spread-out lerp).
   const stickyDragRef = useRef(false);
+  // Defensive backstop (2026-04-23): timestamp at which sticky was
+  // last set. The useFrame resting branch auto-clears sticky if it
+  // has been held for more than STICKY_MAX_MS — prevents a pad from
+  // freezing forever if the server returns a clamped / rounded
+  // position that never matches dragPosRef within the arrival
+  // threshold. The pad's visual would snap back to the server's
+  // value in that case, which is at worst a minor pop, far better
+  // than silently ignoring all subsequent drags.
+  const stickySetAtMsRef = useRef<number | null>(null);
   // Story 4.6 (retained): accumulated repulsion offset applied on top of
   // rest position while ANOTHER pad is being dragged nearby. Story 4.2
   // option-2 (2026-04-23): persists across anchor-out-of-range — the pad
@@ -672,6 +681,7 @@ export function LilyPad({
     // paths.
     if (errorEntry) {
       stickyDragRef.current = false;
+      stickySetAtMsRef.current = null;
       restStartTime.current = 0;
       return;
     }
@@ -683,6 +693,7 @@ export function LilyPad({
       Math.abs(py - target.z) < SPREAD_ARRIVE_THRESHOLD
     ) {
       stickyDragRef.current = false;
+      stickySetAtMsRef.current = null;
       // Jitter-fix (2026-04-23): reset the resting-phase clock so the
       // drift amplitude ramps from 0 over ~3s again. Without this, a
       // pad that was pinned (sticky) through a drag would start
@@ -695,6 +706,12 @@ export function LilyPad({
       restStartTime.current = 0;
     }
   }, [todo.positionX, todo.positionY, errorEntry]);
+
+  // Defensive sticky-clear timeout. If a pad holds sticky for more
+  // than STICKY_MAX_MS the watchdog useFrame (below) force-clears it.
+  // Keeps this constant co-located with the ref declaration so the
+  // relationship is obvious.
+  const STICKY_MAX_MS = 5000;
 
   // Cleanup effect — on unmount, clear this pad from both the primary
   // (activeDragAnchor) and secondary (displacedPads) anchor channels.
@@ -974,6 +991,7 @@ export function LilyPad({
           // dragPosRef, nudgeRef) but no longer dispatches its own
           // mutation — the dragger owns the write.
           stickyDragRef.current = true;
+          stickySetAtMsRef.current = performance.now();
           const batch: UpdatePositionEntry[] = [];
           batch.push({
             id: todo.id,
@@ -1598,6 +1616,26 @@ export function LilyPad({
       const liveAnchor = usePondStore.getState().activeDragAnchor;
       const hadLiveAnchor = hadDragAnchorRef.current;
       hadDragAnchorRef.current = liveAnchor !== null;
+      // Watchdog for the sticky-drag pin. If sticky has been held for
+      // more than STICKY_MAX_MS, force-clear it. Guards against a
+      // backend that returns a clamped / rounded position that never
+      // matches dragPosRef within the 0.05 arrival threshold — the
+      // useEffect-based clear would never fire and the pad would
+      // freeze indefinitely, taking the sticky IF branch every frame
+      // and silently ignoring every subsequent drag. Worst case with
+      // the watchdog: the pad snaps to the server's actual position
+      // after 5s, which is a far better failure mode than "pads stop
+      // interacting."
+      if (
+        stickyDragRef.current &&
+        stickySetAtMsRef.current !== null &&
+        performance.now() - stickySetAtMsRef.current > STICKY_MAX_MS
+      ) {
+        stickyDragRef.current = false;
+        stickySetAtMsRef.current = null;
+        restStartTime.current = 0;
+      }
+
       // Story 4-8: sibling-nudge commit is now LOCAL ONLY. On
       // drag-release (activeDragAnchor transitions non-null → null)
       // this block still pins the pad at its displaced position via
@@ -1642,6 +1680,7 @@ export function LilyPad({
           const commitZ = posZ + siblingNudgeRef.current.z;
           dragPosRef.current = { x: commitX, z: commitZ };
           stickyDragRef.current = true;
+          stickySetAtMsRef.current = performance.now();
           siblingNudgeRef.current = { x: 0, z: 0 };
           lastNudgeTargetRef.current = null;
           // The dragger's onWindowUp batch fires via the shared
@@ -1708,6 +1747,7 @@ export function LilyPad({
             // arrives matching the target.
             dragPosRef.current = { x: spreadTarget.x, z: spreadTarget.z };
             stickyDragRef.current = true;
+            stickySetAtMsRef.current = performance.now();
             // Story 4-8: use the batch endpoint for consistency even
             // on a single-pad arrival. Spread arrivals stagger across
             // frames so they don't aggregate — each pad fires its own
@@ -1830,18 +1870,40 @@ export function LilyPad({
           // into the backend batch — otherwise small-but-committed
           // displacements would be visually pinned (sticky) but never
           // reach the server, resetting on refresh.
+          //
+          // Publish the STEADY-STATE TARGET position (posX + cached
+          // target nudge) rather than the current mid-lerp position.
+          // Three things have to agree at drag release:
+          //   (a) the dragger's batch payload (reads displacedPads)
+          //   (b) this pad's dragPosRef at commit (= posX + snapped
+          //       target via lastNudgeTargetRef)
+          //   (c) the sticky-clear check (refetch vs dragPosRef)
+          // If we publish mid-lerp instead, the backend stores mid-
+          // lerp, the refetch returns mid-lerp, but dragPosRef is the
+          // target — the 0.05 sticky threshold is easily exceeded on
+          // short drags, sticky never clears, and the pad then takes
+          // the sticky IF branch every frame forever, silently
+          // ignoring subsequent drags. Publishing the target keeps
+          // all three values aligned.
           const DISPLACED_PUBLISH_THRESHOLD = 0.3;
           const nudgeMag = Math.sqrt(
             siblingNudgeRef.current.x * siblingNudgeRef.current.x +
               siblingNudgeRef.current.z * siblingNudgeRef.current.z,
           );
           if (nudgeMag > DISPLACED_PUBLISH_THRESHOLD) {
+            const publishTarget = lastNudgeTargetRef.current;
+            const publishX = publishTarget
+              ? posX + publishTarget.x
+              : posX + siblingNudgeRef.current.x;
+            const publishZ = publishTarget
+              ? posZ + publishTarget.z
+              : posZ + siblingNudgeRef.current.z;
             // Publish every engaged frame so secondaries chase the
             // moving pad. setDisplacedPad short-circuits on identical
             // inputs, so idle frames are cheap.
             usePondStore.getState().setDisplacedPad(todo.id, {
-              x: posX + siblingNudgeRef.current.x,
-              z: posZ + siblingNudgeRef.current.z,
+              x: publishX,
+              z: publishZ,
             });
             isPublishedRef.current = true;
           } else if (isPublishedRef.current) {
