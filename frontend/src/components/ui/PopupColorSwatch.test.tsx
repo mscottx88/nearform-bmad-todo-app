@@ -156,23 +156,21 @@ describe('PopupColorSwatch (story 4.1)', () => {
     expect(onCollapse).not.toHaveBeenCalled();
   });
 
-  it('NEON_SWATCHES is the 12-hue rainbow-ordered palette (AC #1 + 2026-04-20 extension)', () => {
+  it('NEON_SWATCHES is the 12-hue rainbow-ordered palette (pink immediately after red, wraps backward through the cool side)', () => {
     expect(NEON_SWATCHES.map((s) => s.color)).toEqual([
-      // Row 1: warm (red → yellow)
+      // Warm start, pink adjacent to red per the 2026-04-23 reorder.
       '#ff0040', // neon red
-      '#ff6600', // neon orange
-      '#ffd700', // neon gold
-      '#ffff00', // neon yellow
-      // Row 2: green/teal
-      '#aaff00', // neon chartreuse
-      '#39ff14', // neon green
-      '#00ff88', // neon lily — pond's default lily-pad green
-      '#00eeff', // neon cyan
-      // Row 3: cool → pink (closes the wheel)
-      '#00aaff', // neon electric blue
-      '#aa00ff', // neon violet
-      '#ff00ff', // neon magenta
       '#ff1493', // neon hot pink
+      '#ff00ff', // neon magenta
+      '#aa00ff', // neon violet
+      '#00aaff', // neon electric blue
+      '#00eeff', // neon cyan
+      '#00ff88', // neon lily — pond's default lily-pad green
+      '#39ff14', // neon green
+      '#aaff00', // neon chartreuse
+      '#ffff00', // neon yellow
+      '#ffd700', // neon gold
+      '#ff6600', // neon orange
     ]);
   });
 });

@@ -1,0 +1,70 @@
+/* Color-swatch sub-panel. Rendered conditionally below the action
+   buttons when the Set Color toggle is engaged. The divider line
+   visually separates the picker from the actions. */
+.action-popup__color-swatches {
+  display: flex;
+  flex-direction: row;
+  /* Swatches flex-wrap to fill the popup's available width. The
+     container spans the full panel width (no max-width pin) so rows
+     auto-pack at whatever column count the panel supports; extra
+     horizontal space is distributed between swatches via
+     `justify-content: space-between`. */
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(0, 238, 255, 0.2);
+  width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Individual swatch — 24px circle with a 1px currentColor ring and
+   a hue-matched glow. `color` is set inline per swatch from the
+   NEON_SWATCHES constant; `currentColor` in the rules below picks
+   it up so border + glow are in-hue. */
+.action-popup__color-swatch {
+  width: 24px;
+  height: 24px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  padding: 0;
+  /* Global CSS hides the system cursor in favor of the neon firefly —
+     matches the action buttons. */
+  cursor: none;
+  box-shadow: 0 0 8px currentColor;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.action-popup__color-swatch:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 12px currentColor, inset 0 0 6px currentColor;
+}
+
+.action-popup__color-swatch:active {
+  transform: scale(0.92);
+}
+
+.action-popup__color-swatch:focus-visible {
+  outline: 2px solid var(--neon-cyan);
+  outline-offset: 3px;
+}
+
+/* Current-color marker — the swatch whose hex matches the pad's
+   committed color gets a white outer ring + a subtle "you are here"
+   glow. `outline` renders OUTSIDE the border so the hue-matched
+   border stays intact inside. The ring is white (not hue-matched)
+   so it contrasts against every swatch color equally. */
+.action-popup__color-swatch--current {
+  outline: 2px solid rgba(255, 255, 255, 0.95);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 8px currentColor,
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+
+.action-popup__color-swatch--current:hover {
+  /* Keep the "current" ring visible while hovering — the hover
+     transform + inner glow still apply from the base :hover rule. */
+  outline-color: rgba(255, 255, 255, 1);
+}

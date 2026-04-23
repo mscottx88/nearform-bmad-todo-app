@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
 import { NeonScrollbar } from './NeonScrollbar';
+import { PopupColorSwatch } from './PopupColorSwatch';
 import { usePondStore } from '../../stores/usePondStore';
 import { formatTimestamp, formatRelative } from '../../utils/formatTodoMeta';
 import './InfoPopup.css';
@@ -9,9 +10,40 @@ import './InfoPopup.css';
 const INFO_PANEL_OFFSET_X = 280;
 const INFO_PANEL_OFFSET_Y = 120;
 
+// ROYGBIV — Set Color letter tinting (lifted from ActionPopup).
+const RAINBOW_HUES = [
+  '#ff1744', // R
+  '#ff9100', // O
+  '#ffea00', // Y
+  '#00e676', // G
+  '#00b0ff', // B
+  '#3d5afe', // I
+  '#d500f9', // V
+];
+function makeRainbowLetters(text: string): ReadonlyArray<{ ch: string; hue: string | null }> {
+  let hueIdx = 0;
+  return text.split('').map((ch) => {
+    if (ch === ' ') return { ch, hue: null };
+    const hue = RAINBOW_HUES[hueIdx % RAINBOW_HUES.length];
+    hueIdx += 1;
+    return { ch, hue };
+  });
+}
+const SET_COLOR_LETTERS = makeRainbowLetters('Set Color');
+
 interface InfoPopupProps {
   todo: Todo;
   focused: boolean;
+  /** Fired when Complete/Uncomplete clicked. Only called in focused mode. */
+  onComplete?: () => void;
+  /** Fired when Delete/Undelete clicked. Only called in focused mode. */
+  onDelete?: () => void;
+  /** Fired when a swatch is committed. Only called in focused mode. */
+  onCommitColor?: (color: string) => void;
+  /** Fired on swatch hover/unhover. Only called in focused mode. */
+  onPreviewColor?: (color: string | null) => void;
+  /** Fired when a new text value is committed via edit mode. */
+  onCommitText?: (text: string) => void;
 }
 
 function StatusBadge({ label, color }: { label: string; color: string }): React.ReactElement {
@@ -31,23 +63,24 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement {
-  // Story 3.4 (user correction 2026-04-23): during a drag of THIS pad,
-  // the popup must visually follow the cursor. The drag pipeline
-  // publishes live (x, z) on every pointermove via activeDragAnchor;
-  // we override the drei <Html> `position` while this pad owns the
-  // anchor. Falls back to persisted positionX/positionY at rest.
+export function InfoPopup({
+  todo,
+  focused,
+  onComplete,
+  onDelete,
+  onCommitColor,
+  onPreviewColor,
+  onCommitText,
+}: InfoPopupProps): React.ReactElement {
+  // Drag-follow: popup tracks the live drag position while this pad owns
+  // activeDragAnchor. Falls back to persisted positionX/positionY at rest.
   const dragAnchor = usePondStore((s) =>
     s.activeDragAnchor?.padId === todo.id ? s.activeDragAnchor : null,
   );
-  // Story 3.4 (user correction 2026-04-23): on drag-release,
-  // activeDragAnchor clears synchronously but the batch PATCH +
-  // refetch takes ~50-200ms to land new todo.positionX/Y. Between
-  // those two, the popup would flash back to the OLD persisted
-  // position for a frame. Hold the last-known drag position in
-  // state and keep using it until the persisted position catches up.
+  // Release-flash mitigation: hold the last-known drag position in state
+  // so the popup doesn't snap back to the stale persisted value for a
+  // frame while the refetch lands (~50-200ms).
   const [stickyPos, setStickyPos] = useState<{ x: number; z: number } | null>(null);
-  // Track the previous dragAnchor presence to detect release edge.
   const wasDraggingRef = useRef(false);
   useEffect(() => {
     if (dragAnchor) {
@@ -56,8 +89,6 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
       return;
     }
     if (wasDraggingRef.current && stickyPos) {
-      // Drag just released OR refetch landed. Clear sticky once the
-      // persisted position agrees with it (within sub-unit epsilon).
       const dx = Math.abs((todo.positionX ?? 0) - stickyPos.x);
       const dz = Math.abs((todo.positionY ?? 0) - stickyPos.z);
       if (dx < 0.1 && dz < 0.1) {
@@ -73,7 +104,52 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
     ? (effective as { x: number; z: number }).z
     : todo.positionY ?? 0;
 
-  const handleWheel = (e: React.WheelEvent): void => {
+  // Swatch sub-panel state (merged from ActionPopup, focused-only).
+  const [swatchOpen, setSwatchOpen] = useState(false);
+  const [previewColor, setPreviewColor] = useState<string | null>(null);
+  // Notify parent on preview change so pad can lerp the preview color.
+  useEffect(() => {
+    onPreviewColor?.(previewColor);
+  }, [previewColor, onPreviewColor]);
+  // Any close path (toggle, Escape, commit) clears lingering preview.
+  useEffect(() => {
+    if (!swatchOpen && previewColor !== null) {
+      setPreviewColor(null);
+    }
+  }, [swatchOpen, previewColor]);
+  const collapseSwatch = useCallback(() => {
+    setSwatchOpen(false);
+    setPreviewColor(null);
+  }, []);
+  // Focus loss collapses the swatch too — it's focused-mode-only UI.
+  useEffect(() => {
+    if (!focused && swatchOpen) collapseSwatch();
+  }, [focused, swatchOpen, collapseSwatch]);
+
+  // Edit-mode state. Edit happens INLINE in the popup (replaces the
+  // readonly text div with a textarea); the text region is
+  // user-resizable via a neon resize handle at its bottom edge.
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(todo.text);
+  const EDITOR_DEFAULT_HEIGHT = 180;
+  const EDITOR_MIN_HEIGHT = 80;
+  const EDITOR_MAX_HEIGHT = 480;
+  const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
+  const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
+  // Keep editText in sync with the incoming todo while NOT editing —
+  // once edit opens, the user's in-flight draft owns the field.
+  useEffect(() => {
+    if (!editing) setEditText(todo.text);
+  }, [todo.text, editing]);
+  // Focus loss collapses edit mode (draft discarded).
+  useEffect(() => {
+    if (!focused && editing) {
+      setEditing(false);
+      setEditorHeight(EDITOR_DEFAULT_HEIGHT);
+    }
+  }, [focused, editing]);
+
+  const handleWheel = useCallback((e: React.WheelEvent): void => {
     const canvas = document.querySelector('canvas');
     if (!canvas) return;
     canvas.dispatchEvent(
@@ -91,7 +167,7 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
         bubbles: true,
       }),
     );
-  };
+  }, []);
 
   const showUpdated = todo.updatedAt !== todo.createdAt;
 
@@ -129,6 +205,44 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
       }
     : {};
 
+  const commitEdit = (): void => {
+    const trimmed = editText.trim();
+    if (trimmed.length > 0 && trimmed !== todo.text) {
+      onCommitText?.(trimmed);
+    }
+    setEditing(false);
+    setEditorHeight(EDITOR_DEFAULT_HEIGHT);
+  };
+  const cancelEdit = (): void => {
+    setEditText(todo.text);
+    setEditing(false);
+    setEditorHeight(EDITOR_DEFAULT_HEIGHT);
+  };
+
+  // Resize handle on the bottom edge of the editor — user drags it to
+  // grow/shrink the scrollable region. Uses window-level pointermove
+  // so the drag survives the cursor leaving the handle.
+  const handleEditorResizeStart = (e: React.PointerEvent<HTMLDivElement>): void => {
+    e.stopPropagation();
+    e.preventDefault();
+    editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
+    const onMove = (ev: PointerEvent): void => {
+      const start = editorResizeRef.current;
+      if (!start) return;
+      const next = start.baseH + (ev.clientY - start.startY);
+      setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
+    };
+    const onUp = (): void => {
+      editorResizeRef.current = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+
   return (
     <Html
       position={[popupX, 0.4, popupZ]}
@@ -158,9 +272,66 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
           aria-live="polite"
           {...panelProps}
         >
-          <NeonScrollbar color="cyan" style={{ maxHeight: 180 }}>
-            <div className="info-popup__text">{todo.text}</div>
-          </NeonScrollbar>
+          {/* Text region. Readonly by default; clicking it in focused
+              mode switches to an inline, resizable textarea — NeonScrollbar
+              still owns the overflow chrome. The resize handle below the
+              editor lets the user drag to grow/shrink the region. */}
+          {editing ? (
+            <div className="info-popup__editor-wrap">
+              <NeonScrollbar color="cyan" style={{ maxHeight: editorHeight }}>
+                <textarea
+                  className="info-popup__editor-textarea"
+                  value={editText}
+                  autoFocus
+                  onChange={(e) => setEditText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      cancelEdit();
+                    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      commitEdit();
+                    }
+                  }}
+                />
+              </NeonScrollbar>
+              <div
+                className="info-popup__editor-resize"
+                onPointerDown={handleEditorResizeStart}
+                aria-label="Resize editor"
+              >
+                <span className="info-popup__editor-resize-grip" aria-hidden>
+                  ═══
+                </span>
+              </div>
+            </div>
+          ) : (
+            <NeonScrollbar color="cyan" style={{ maxHeight: 180 }}>
+              <div
+                className={
+                  'info-popup__text' +
+                  (focused && onCommitText ? ' info-popup__text--clickable' : '')
+                }
+                onClick={
+                  focused && onCommitText ? () => setEditing(true) : undefined
+                }
+                role={focused && onCommitText ? 'button' : undefined}
+                tabIndex={focused && onCommitText ? 0 : undefined}
+                onKeyDown={
+                  focused && onCommitText
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setEditing(true);
+                        }
+                      }
+                    : undefined
+                }
+              >
+                {todo.text}
+              </div>
+            </NeonScrollbar>
+          )}
           <div className="info-popup__divider" />
           <div className="info-popup__meta">
             <MetaRow label="Created">
@@ -185,6 +356,93 @@ export function InfoPopup({ todo, focused }: InfoPopupProps): React.ReactElement
               ({popupX.toFixed(2)}, {popupZ.toFixed(2)})
             </MetaRow>
           </div>
+
+          {/* Actions — focused mode only (merged from ActionPopup).
+              While editing the text, the action row shows Save / Cancel
+              instead of Complete / Delete / Set Color so the whole
+              edit interaction stays inside the same popup. */}
+          {focused && (
+            <>
+              <div className="info-popup__divider" />
+              <div className="info-popup__actions">
+                {editing ? (
+                  <>
+                    <button
+                      type="button"
+                      className="info-popup__button info-popup__button--complete"
+                      onClick={commitEdit}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="info-popup__button info-popup__button--delete"
+                      onClick={cancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {onComplete && (
+                      <button
+                        type="button"
+                        className="info-popup__button info-popup__button--complete"
+                        onClick={onComplete}
+                      >
+                        {todo.completed ? 'Uncomplete' : 'Complete'}
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        type="button"
+                        className="info-popup__button info-popup__button--delete"
+                        onClick={onDelete}
+                      >
+                        {todo.deleted ? 'Undelete' : 'Delete'}
+                      </button>
+                    )}
+                    {onCommitColor && (
+                      <button
+                        type="button"
+                        className="info-popup__button info-popup__button--set-color"
+                        onClick={() => setSwatchOpen((open) => !open)}
+                        aria-label="Set Color"
+                        aria-expanded={swatchOpen}
+                      >
+                        {SET_COLOR_LETTERS.map(({ ch, hue }, i) =>
+                          hue === null ? (
+                            <span key={i} aria-hidden>
+                              {' '}
+                            </span>
+                          ) : (
+                            <span
+                              key={i}
+                              style={{ color: hue, textShadow: `0 0 4px ${hue}` }}
+                              aria-hidden
+                            >
+                              {ch}
+                            </span>
+                          ),
+                        )}
+                      </button>
+                    )}
+                    {swatchOpen && onCommitColor && (
+                      <PopupColorSwatch
+                        committedColor={todo.color || '#00ff88'}
+                        onHover={setPreviewColor}
+                        onCommit={(color) => {
+                          onCommitColor(color);
+                          collapseSwatch();
+                        }}
+                        onCollapse={collapseSwatch}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </Html>

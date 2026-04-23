@@ -34,7 +34,10 @@
   padding: 10px;
   min-width: 240px;
   max-width: 320px;
-  max-height: 280px;
+  /* Merged-panel height budget: ~280 hover/info only, ~440 focused
+     (adds actions + optional swatch grid). The text region inside
+     stays bounded to 180 via NeonScrollbar. */
+  max-height: 440px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.82);
   border: 1px solid var(--neon-cyan);
@@ -61,6 +64,24 @@
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.info-popup__text--clickable {
+  cursor: none;
+  padding: 2px 4px;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.info-popup__text--clickable:hover {
+  border-color: rgba(0, 238, 255, 0.4);
+  background: rgba(0, 238, 255, 0.04);
+}
+
+.info-popup__text--clickable:focus-visible {
+  outline: 1px solid var(--neon-cyan);
+  outline-offset: 2px;
 }
 
 .info-popup__divider {
@@ -101,4 +122,121 @@
   letter-spacing: 0.08em;
   text-shadow: 0 0 3px currentColor;
   box-shadow: 0 0 4px currentColor;
+}
+
+/* ── Action region (focused mode only) — merged from ActionPopup. ── */
+.info-popup__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.info-popup__button {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: var(--neon-cyan);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  cursor: none;
+  /* Button labels should not be selectable — the global panel
+     `user-select: text` (needed so the todo text can be copied) would
+     otherwise turn every button-tap-with-drag into a text selection. */
+  user-select: none;
+  -webkit-user-select: none;
+  text-shadow: 0 0 4px currentColor;
+  transition: background-color 100ms ease, box-shadow 100ms ease, transform 100ms ease;
+}
+
+.info-popup__button:hover {
+  background: rgba(0, 238, 255, 0.12);
+  box-shadow: 0 0 10px currentColor, inset 0 0 6px currentColor;
+}
+
+.info-popup__button:active {
+  transform: scale(0.96);
+}
+
+.info-popup__button--complete { color: var(--neon-green); }
+
+.info-popup__button--delete { color: #ff1744; }
+.info-popup__button--delete:hover {
+  background: rgba(255, 23, 68, 0.14);
+}
+
+.info-popup__button--set-color {
+  color: var(--neon-cyan);
+  padding-left: 10px;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+
+/* Swatch grid styles live in PopupColorSwatch.css (imported directly
+   by that component). Class names keep the legacy
+   `action-popup__color-swatch*` prefix to avoid a gratuitous rename
+   churn in the swatch component itself. */
+
+/* ── Inline edit mode (replaces info-popup__text region) ─────── */
+.info-popup__editor-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-popup__editor-textarea {
+  width: 100%;
+  height: auto;
+  min-height: 80px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 238, 255, 0.5);
+  color: var(--neon-cyan);
+  text-shadow: 0 0 2px currentColor;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 8px;
+  outline: none;
+  /* User-resize happens via the neon handle below the textarea —
+     disable the native resize grip so the two don't fight. */
+  resize: none;
+  white-space: pre-wrap;
+  /* Let the textarea fill the NeonScrollbar's inner div. The
+     scroll chrome handles overflow at the wrapper level. */
+  overflow: hidden;
+  /* Firefly cursor stays in charge; don't reintroduce the I-beam. */
+  cursor: none;
+}
+
+.info-popup__editor-textarea:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 6px rgba(0, 238, 255, 0.5);
+}
+
+.info-popup__editor-resize {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 10px;
+  /* Firefly cursor stays — don't reintroduce the OS resize cursor. */
+  cursor: none;
+  border-top: 1px solid rgba(0, 238, 255, 0.25);
+  user-select: none;
+  color: rgba(0, 238, 255, 0.55);
+  text-shadow: 0 0 3px var(--neon-cyan);
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.info-popup__editor-resize:hover,
+.info-popup__editor-resize:active {
+  color: var(--neon-cyan);
+  background: rgba(0, 238, 255, 0.08);
+}
+
+.info-popup__editor-resize-grip {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  line-height: 1;
 }

@@ -144,4 +144,151 @@ describe('InfoPopup', () => {
       expect(container.textContent).toMatch(/\(1\.23, 5\.68\)/);
     });
   });
+
+  describe('merged actions (focused mode)', () => {
+    it('renders Complete / Delete / Set Color buttons when focused with callbacks', () => {
+      render(
+        <InfoPopup
+          todo={makeTodo()}
+          focused={true}
+          onComplete={() => {}}
+          onDelete={() => {}}
+          onCommitColor={() => {}}
+        />,
+      );
+      expect(screen.getByRole('button', { name: /^complete$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /set color/i })).toBeInTheDocument();
+    });
+
+    it('swaps labels to Uncomplete / Undelete for completed/deleted todos', () => {
+      render(
+        <InfoPopup
+          todo={makeTodo({ completed: true, deleted: true })}
+          focused={true}
+          onComplete={() => {}}
+          onDelete={() => {}}
+        />,
+      );
+      expect(screen.getByRole('button', { name: /uncomplete/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /undelete/i })).toBeInTheDocument();
+    });
+
+    it('does NOT render action buttons in hover mode', () => {
+      render(
+        <InfoPopup
+          todo={makeTodo()}
+          focused={false}
+          onComplete={() => {}}
+          onDelete={() => {}}
+          onCommitColor={() => {}}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /^complete$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^delete$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /set color/i })).toBeNull();
+    });
+
+    it('Complete click calls onComplete', () => {
+      const onComplete = vi.fn();
+      render(<InfoPopup todo={makeTodo()} focused={true} onComplete={onComplete} />);
+      fireEvent.click(screen.getByRole('button', { name: /^complete$/i }));
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it('Set Color toggle opens the swatch sub-panel', () => {
+      const { container } = render(
+        <InfoPopup todo={makeTodo()} focused={true} onCommitColor={() => {}} />,
+      );
+      // Swatch panel not visible initially.
+      expect(container.querySelector('.action-popup__color-swatches')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /set color/i }));
+      expect(container.querySelector('.action-popup__color-swatches')).not.toBeNull();
+    });
+  });
+
+  describe('edit mode', () => {
+    it('clicking the todo text in focused mode switches to a textarea', () => {
+      const { container } = render(
+        <InfoPopup todo={makeTodo({ text: 'orig' })} focused={true} onCommitText={() => {}} />,
+      );
+      const textDiv = container.querySelector('.info-popup__text--clickable');
+      expect(textDiv).not.toBeNull();
+      if (textDiv) fireEvent.click(textDiv);
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).not.toBeNull();
+    });
+
+    it('text is NOT clickable when onCommitText is omitted', () => {
+      const { container } = render(<InfoPopup todo={makeTodo()} focused={true} />);
+      expect(container.querySelector('.info-popup__text--clickable')).toBeNull();
+    });
+
+    it('text is NOT clickable in hover mode even if onCommitText given', () => {
+      const { container } = render(
+        <InfoPopup todo={makeTodo()} focused={false} onCommitText={() => {}} />,
+      );
+      expect(container.querySelector('.info-popup__text--clickable')).toBeNull();
+    });
+
+    it('Save commits trimmed text via onCommitText and exits edit mode', () => {
+      const onCommitText = vi.fn();
+      const { container } = render(
+        <InfoPopup todo={makeTodo({ text: 'orig' })} focused={true} onCommitText={onCommitText} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea');
+      expect(textarea).not.toBeNull();
+      if (textarea) {
+        fireEvent.change(textarea, { target: { value: '  new value  ' } });
+      }
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      expect(onCommitText).toHaveBeenCalledWith('new value');
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
+    });
+
+    it('Save is a no-op when the trimmed text matches the current value', () => {
+      const onCommitText = vi.fn();
+      const { container } = render(
+        <InfoPopup todo={makeTodo({ text: 'same' })} focused={true} onCommitText={onCommitText} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      // Don't change text; click Save.
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      expect(onCommitText).not.toHaveBeenCalled();
+    });
+
+    it('Cancel discards changes and exits edit mode', () => {
+      const onCommitText = vi.fn();
+      const { container } = render(
+        <InfoPopup todo={makeTodo({ text: 'orig' })} focused={true} onCommitText={onCommitText} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea');
+      if (textarea) fireEvent.change(textarea, { target: { value: 'changed' } });
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+      expect(onCommitText).not.toHaveBeenCalled();
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
+    });
+
+    it('edit mode renders a neon resize handle beneath the textarea', () => {
+      const { container } = render(
+        <InfoPopup todo={makeTodo()} focused={true} onCommitText={() => {}} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      expect(container.querySelector('.info-popup__editor-resize')).not.toBeNull();
+    });
+
+    it('losing focus exits edit mode (draft discarded)', () => {
+      const onCommitText = vi.fn();
+      const { container, rerender } = render(
+        <InfoPopup todo={makeTodo()} focused={true} onCommitText={onCommitText} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).not.toBeNull();
+      // Flip focused → false (popup closed / another pad focused).
+      rerender(<InfoPopup todo={makeTodo()} focused={false} onCommitText={onCommitText} />);
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
+      expect(onCommitText).not.toHaveBeenCalled();
+    });
+  });
 });

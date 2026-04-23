@@ -1,39 +1,36 @@
 import { useEffect } from 'react';
+import './PopupColorSwatch.css';
 
-// Story 4.1 — locked neon palette (12 hues in a 4-column grid). Arbitrary
-// hex picks would produce muddy pads that break the pond's visual
-// coherence; we trade off free-form color for the "neon aquarium"
-// aesthetic. All 12 hues are maximally saturated in sRGB — the
-// EffectComposer's Bloom pass at luminanceThreshold 0.2 picks them up
-// into a bright feathered glow, which is what "HDR" reads as at the
-// render stage even though the hex values themselves are LDR.
+// Locked neon palette (12 hues). Arbitrary hex picks would produce
+// muddy pads that break the pond's visual coherence; we trade off
+// free-form color for the "neon aquarium" aesthetic. All 12 hues are
+// maximally saturated in sRGB — the EffectComposer's Bloom pass at
+// luminanceThreshold 0.2 picks them up into a bright feathered glow.
 //
-// Ordered as a rainbow sweep (ROYGBIV + pink/magenta to close the
-// circle back to red). The 4-col × 3-row layout reads top-to-bottom:
-//   Row 1: red → orange → gold → yellow         (warm)
-//   Row 2: chartreuse → green → mint → cyan     (green/teal)
-//   Row 3: electric-blue → violet → magenta → hot-pink   (cool → pink)
-// Hues are monotonically ordered around the HSL wheel starting at red,
-// so adjacent swatches read as adjacent hues rather than a random
-// scatter. Extend in one place if Epic 4+ wants more colors (the CSS
-// max-width is tuned to exactly 4 columns).
+// Ordered as a continuous rainbow gradient starting at red and
+// wrapping backward through the warm-to-cool side of the HSL wheel:
+//   red → hot pink → magenta → violet → electric blue → cyan →
+//   lily → green → chartreuse → yellow → gold → orange
+// Pink sits immediately after red (both warm, HSL ~0°/328°), the
+// sweep descends through cool hues, and comes back up through green
+// and warms to close near orange. Adjacent swatches read as adjacent
+// hues rather than a random scatter.
 export const NEON_SWATCHES: ReadonlyArray<{ color: string; name: string }> = [
   { color: '#ff0040', name: 'neon red' },
-  { color: '#ff6600', name: 'neon orange' },
-  { color: '#ffd700', name: 'neon gold' },
-  { color: '#ffff00', name: 'neon yellow' },
-  { color: '#aaff00', name: 'neon chartreuse' },
-  { color: '#39ff14', name: 'neon green' },
+  { color: '#ff1493', name: 'neon hot pink' },
+  { color: '#ff00ff', name: 'neon magenta' },
+  { color: '#aa00ff', name: 'neon violet' },
+  { color: '#00aaff', name: 'neon electric blue' },
+  { color: '#00eeff', name: 'neon cyan' },
   // Original lily-pad default color — kept in the palette under its
   // own name so users can restore "the default" from the swatch grid
-  // without having to remember its hex. Sits between green and cyan
-  // in rainbow order (HSL ~152°).
+  // without having to remember its hex.
   { color: '#00ff88', name: 'neon lily' },
-  { color: '#00eeff', name: 'neon cyan' },
-  { color: '#00aaff', name: 'neon electric blue' },
-  { color: '#aa00ff', name: 'neon violet' },
-  { color: '#ff00ff', name: 'neon magenta' },
-  { color: '#ff1493', name: 'neon hot pink' },
+  { color: '#39ff14', name: 'neon green' },
+  { color: '#aaff00', name: 'neon chartreuse' },
+  { color: '#ffff00', name: 'neon yellow' },
+  { color: '#ffd700', name: 'neon gold' },
+  { color: '#ff6600', name: 'neon orange' },
 ];
 
 interface PopupColorSwatchProps {

@@ -15,7 +15,6 @@ import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
-import { ActionPopup } from '../ui/ActionPopup';
 import { InfoPopup } from '../ui/InfoPopup';
 
 // Milliseconds between consecutive pads entering the 'forming' phase on
@@ -225,30 +224,38 @@ export function PondScene() {
         />
       ))}
       {infoTodo && (
-        <InfoPopup todo={infoTodo} focused={activePopupTodoId === infoTodo.id} />
-      )}
-      {popupTodo && (
-        <ActionPopup
-          key={popupTodo.id}
-          todo={popupTodo}
-          onComplete={handleComplete}
-          onDelete={handleDelete}
-          // Story 4.1: commit fires the PATCH, ripples feedback at
-          // the pad's position, and closes the popup — same pattern
-          // as Complete/Delete. useUpdateTodo's onError/onSuccess
-          // drive the decay-on-failure / clear-on-success behavior.
-          onCommitColor={(color) => {
-            updateTodo.mutate({ id: popupTodo.id, color });
-            usePondStore
-              .getState()
-              .triggerRipple(popupTodo.positionX ?? 0, popupTodo.positionY ?? 0);
-            usePondStore.getState().closePopup();
-          }}
-          // Hover-preview — LilyPad subscribes to this via the
-          // colorPreviews store slice and lerps body + rim toward
-          // the previewed hex while the user hovers a swatch.
-          onPreviewColor={(color) =>
-            usePondStore.getState().setColorPreview(popupTodo.id, color)
+        <InfoPopup
+          key={infoTodo.id}
+          todo={infoTodo}
+          focused={activePopupTodoId === infoTodo.id}
+          // Focused-only callbacks. InfoPopup gates their rendering
+          // on `focused === true`, but we pass them unconditionally —
+          // hover-only mode simply never fires them.
+          onComplete={activePopupTodoId === infoTodo.id ? handleComplete : undefined}
+          onDelete={activePopupTodoId === infoTodo.id ? handleDelete : undefined}
+          onCommitColor={
+            activePopupTodoId === infoTodo.id
+              ? (color: string) => {
+                  updateTodo.mutate({ id: infoTodo.id, color });
+                  usePondStore
+                    .getState()
+                    .triggerRipple(infoTodo.positionX ?? 0, infoTodo.positionY ?? 0);
+                  usePondStore.getState().closePopup();
+                }
+              : undefined
+          }
+          onPreviewColor={
+            activePopupTodoId === infoTodo.id
+              ? (color: string | null) =>
+                  usePondStore.getState().setColorPreview(infoTodo.id, color)
+              : undefined
+          }
+          onCommitText={
+            activePopupTodoId === infoTodo.id
+              ? (text: string) => {
+                  updateTodo.mutate({ id: infoTodo.id, text });
+                }
+              : undefined
           }
         />
       )}
