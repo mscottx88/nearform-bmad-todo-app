@@ -1618,6 +1618,18 @@ export function LilyPad({
       const liveAnchor = usePondStore.getState().activeDragAnchor;
       const hadLiveAnchor = hadDragAnchorRef.current;
       hadDragAnchorRef.current = liveAnchor !== null;
+      // Clear the cached cascade target at the TOP of every resting
+      // tick. Engagement below re-sets it only if it actually fires
+      // this frame. Without this reset the target persists across
+      // whole drag sessions: a pad that was nudged by a prior drag
+      // (but didn't commit, per option-2 accumulate-and-keep) keeps
+      // publishing `posX + old_target` as its secondary anchor
+      // position indefinitely — a ghost anchor at wherever the
+      // previous cascade thought the pad was heading, silently
+      // pulling other pads in the wrong direction each subsequent
+      // drag. Ghosts persisted across visibility toggles, deletion
+      // flips, anything short of component unmount.
+      lastNudgeTargetRef.current = null;
       // Watchdog for the sticky-drag pin. If sticky has been held for
       // more than STICKY_MAX_MS, force-clear it. Guards against a
       // backend that returns a clamped / rounded position that never
@@ -1653,13 +1665,22 @@ export function LilyPad({
       // the batch payload, and the refetched posX all agree on the
       // mid-lerp value the pad was visibly occupying, so sticky
       // clears cleanly and there's no visible snap.
+      // Commit-threshold check uses MAGNITUDE so it's symmetric with
+      // the publish block below. Per-axis checks let a pad slip
+      // through with (0.29, 0.29) — no commit, nudge persists, but
+      // magnitude 0.41 > 0.3 still publishes a stale target into
+      // displacedPads forever, silently pushing other pads in the
+      // wrong direction.
+      const commitNudgeMag = Math.sqrt(
+        siblingNudgeRef.current.x * siblingNudgeRef.current.x +
+          siblingNudgeRef.current.z * siblingNudgeRef.current.z,
+      );
       if (
         hadLiveAnchor &&
         liveAnchor === null &&
         !isDraggingRef.current &&
         !stickyDragRef.current &&
-        (Math.abs(siblingNudgeRef.current.x) > 0.3 ||
-          Math.abs(siblingNudgeRef.current.z) > 0.3)
+        commitNudgeMag > 0.3
       ) {
         const commitX = posX + siblingNudgeRef.current.x;
         const commitZ = posZ + siblingNudgeRef.current.z;
