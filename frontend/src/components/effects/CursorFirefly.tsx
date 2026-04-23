@@ -40,15 +40,13 @@ function drawGrabHand(
   ctx.shadowColor = GRAB_COLOR;
 
   // Three digits splayed in a fan above the palm. User feedback
-  // 2026-04-23 (2nd round): "bigger + three fingers". Scale is
-  // ~1.8× the previous four-digit version so the hand reads clearly
-  // at a glance. Each digit is a stem ending in a bulbous toe-pad
-  // (frog fingertips) — cartoon frogs are typically drawn with
-  // three visible digits, matching the spec.
+  // 2026-04-23 (iter 3): "longer frog fingers, smaller palm size".
+  // Tips reach further (up to y=-26), palm base pulled in from
+  // y=+15 to y=+9, palm width shrunk from ±13 to ±9.
   const tips: Array<{ x: number; y: number }> = [
-    { x: -14, y: -10 },
-    { x: 0, y: -18 },
-    { x: 14, y: -10 },
+    { x: -14, y: -16 },
+    { x: 0, y: -26 },
+    { x: 14, y: -16 },
   ];
   const palmTop = -2;
 
@@ -56,31 +54,31 @@ function drawGrabHand(
   // tip, then scallops back down between tips. Drawn FIRST so the
   // digit strokes + toe pads sit on top.
   ctx.beginPath();
-  ctx.moveTo(-13, palmTop);
+  ctx.moveTo(-9, palmTop);
   for (let i = 0; i < tips.length; i++) {
     const tip = tips[i]!;
     ctx.lineTo(tip.x, tip.y);
     if (i < tips.length - 1) {
       const next = tips[i + 1]!;
       const midX = (tip.x + next.x) / 2;
-      const midY = Math.max(tip.y, next.y) + 6;
+      const midY = Math.max(tip.y, next.y) + 8;
       ctx.quadraticCurveTo(midX, midY, next.x, next.y);
     }
   }
-  ctx.lineTo(13, palmTop);
+  ctx.lineTo(9, palmTop);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // Palm: rounded base below the digit roots.
+  // Palm: rounded base below the digit roots — smaller than before.
   ctx.beginPath();
-  ctx.moveTo(-13, palmTop);
-  ctx.quadraticCurveTo(-15, palmTop + 11, -7, palmTop + 15);
-  ctx.lineTo(7, palmTop + 15);
-  ctx.quadraticCurveTo(15, palmTop + 11, 13, palmTop);
+  ctx.moveTo(-9, palmTop);
+  ctx.quadraticCurveTo(-10, palmTop + 7, -5, palmTop + 9);
+  ctx.lineTo(5, palmTop + 9);
+  ctx.quadraticCurveTo(10, palmTop + 7, 9, palmTop);
   ctx.stroke();
 
-  // Toe pads — bulbous tips. Filled with solid cyan (vs the faint
+  // Toe pads — bulbous tips. Filled with solid green (vs the faint
   // webbing fill) so they pop as sticky fingertips.
   ctx.fillStyle = GRAB_COLOR;
   for (const tip of tips) {
