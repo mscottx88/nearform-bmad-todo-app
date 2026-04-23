@@ -166,11 +166,14 @@ export function ClusterDragHandle({
       cumulativeDzRef.current += ddz;
       handleWorldPosRef.current = { ...M };
       onTranslate(cumulativeDxRef.current, cumulativeDzRef.current);
-      // Story 4.6 AC #24: camera follows the mouse during grip phase.
-      // The new centroid world-pos is the right follow target — it's
-      // where the cluster is being moved TO each frame. On pointerup
-      // the parent's onDragEnd clears followTarget.
-      usePondStore.getState().setFollowTarget({ worldX: newCx, worldZ: newCz });
+      // AC #24 camera-follow engagement DEFERRED — writing followTarget
+      // here triggers a runaway: PondCamera pans toward the centroid,
+      // which shifts the cursor's raycast world-point under the mouse,
+      // which shifts the centroid further, which pans more. The user
+      // reports the mouse "goes super fast off screen" as the feedback
+      // loop accelerates. Consistent with the pop-in/pop-out defer
+      // (commit 863acbd) — camera stays still during the drag; the
+      // cluster translates under the user's cursor instead.
     }
   };
 
