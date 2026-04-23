@@ -7,30 +7,31 @@ import './PopupColorSwatch.css';
 // maximally saturated in sRGB — the EffectComposer's Bloom pass at
 // luminanceThreshold 0.2 picks them up into a bright feathered glow.
 //
-// Ordered as a continuous rainbow gradient starting at red and
-// wrapping backward through the warm-to-cool side of the HSL wheel:
-//   red → hot pink → magenta → violet → electric blue → cyan →
-//   lily → green → chartreuse → yellow → gold → orange
-// Pink sits immediately after red (both warm, HSL ~0°/328°), the
-// sweep descends through cool hues, and comes back up through green
-// and warms to close near orange. Adjacent swatches read as adjacent
-// hues rather than a random scatter.
+// Ordered as ROYGBIV + line-of-purples. Pink is a non-spectral
+// colour — it has no natural position inside the rainbow — but on
+// a closed colour wheel the non-spectral arc runs from violet back
+// to red via magenta and pink. So the full forward sweep is:
+//   red → orange → gold → yellow → chartreuse → green → lily →
+//   cyan → electric blue → violet → magenta → hot pink (closes
+//   back toward red).
+// Adjacent swatches read as adjacent hues rather than a random
+// scatter.
 export const NEON_SWATCHES: ReadonlyArray<{ color: string; name: string }> = [
   { color: '#ff0040', name: 'neon red' },
-  { color: '#ff1493', name: 'neon hot pink' },
-  { color: '#ff00ff', name: 'neon magenta' },
-  { color: '#aa00ff', name: 'neon violet' },
-  { color: '#00aaff', name: 'neon electric blue' },
-  { color: '#00eeff', name: 'neon cyan' },
+  { color: '#ff6600', name: 'neon orange' },
+  { color: '#ffd700', name: 'neon gold' },
+  { color: '#ffff00', name: 'neon yellow' },
+  { color: '#aaff00', name: 'neon chartreuse' },
+  { color: '#39ff14', name: 'neon green' },
   // Original lily-pad default color — kept in the palette under its
   // own name so users can restore "the default" from the swatch grid
   // without having to remember its hex.
   { color: '#00ff88', name: 'neon lily' },
-  { color: '#39ff14', name: 'neon green' },
-  { color: '#aaff00', name: 'neon chartreuse' },
-  { color: '#ffff00', name: 'neon yellow' },
-  { color: '#ffd700', name: 'neon gold' },
-  { color: '#ff6600', name: 'neon orange' },
+  { color: '#00eeff', name: 'neon cyan' },
+  { color: '#00aaff', name: 'neon electric blue' },
+  { color: '#aa00ff', name: 'neon violet' },
+  { color: '#ff00ff', name: 'neon magenta' },
+  { color: '#ff1493', name: 'neon hot pink' },
 ];
 
 interface PopupColorSwatchProps {

@@ -156,21 +156,20 @@ describe('PopupColorSwatch (story 4.1)', () => {
     expect(onCollapse).not.toHaveBeenCalled();
   });
 
-  it('NEON_SWATCHES is the 12-hue rainbow-ordered palette (pink immediately after red, wraps backward through the cool side)', () => {
+  it('NEON_SWATCHES is the 12-hue rainbow-ordered palette (ROYGBIV + line-of-purples: pink closes the wheel after violet)', () => {
     expect(NEON_SWATCHES.map((s) => s.color)).toEqual([
-      // Warm start, pink adjacent to red per the 2026-04-23 reorder.
       '#ff0040', // neon red
-      '#ff1493', // neon hot pink
-      '#ff00ff', // neon magenta
-      '#aa00ff', // neon violet
-      '#00aaff', // neon electric blue
-      '#00eeff', // neon cyan
-      '#00ff88', // neon lily — pond's default lily-pad green
-      '#39ff14', // neon green
-      '#aaff00', // neon chartreuse
-      '#ffff00', // neon yellow
-      '#ffd700', // neon gold
       '#ff6600', // neon orange
+      '#ffd700', // neon gold
+      '#ffff00', // neon yellow
+      '#aaff00', // neon chartreuse
+      '#39ff14', // neon green
+      '#00ff88', // neon lily — pond's default lily-pad green
+      '#00eeff', // neon cyan
+      '#00aaff', // neon electric blue
+      '#aa00ff', // neon violet
+      '#ff00ff', // neon magenta
+      '#ff1493', // neon hot pink
     ]);
   });
 });
