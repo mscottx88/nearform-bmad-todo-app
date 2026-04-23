@@ -224,23 +224,14 @@ export function InfoPopup({
   };
 
   // Resize handle on the bottom edge of the editor — user drags it
-  // to grow/shrink the scrollable region. Uses setPointerCapture so
-  // the drag stays locked to the handle even when the cursor (and
-  // the handle itself, which moves as the panel reflows) can't
-  // perfectly track each other — gets rid of the "clunky" feel of
-  // window-level listeners lagging a fast drag. Also swaps the
-  // app-wide cursorMode to 'grabbing' during drag so the frog-hand
-  // glyph reads as "gripping" through the whole gesture.
+  // to grow/shrink the scrollable region. Window-level pointermove /
+  // pointerup (not setPointerCapture) because the latter proved
+  // unreliable across browsers in testing — the drag felt stuck or
+  // didn't travel beyond the handle's initial rect. Window listeners
+  // fire regardless of where the cursor ends up.
   const handleEditorResizeStart = (e: React.PointerEvent<HTMLDivElement>): void => {
     e.stopPropagation();
     e.preventDefault();
-    const handle = e.currentTarget;
-    try {
-      handle.setPointerCapture(e.pointerId);
-    } catch {
-      // jsdom / older browsers may not support setPointerCapture; the
-      // listeners below still fire via standard event propagation.
-    }
     editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
     usePondStore.getState().setCursorMode('grabbing');
     const onMove = (ev: PointerEvent): void => {
@@ -249,37 +240,39 @@ export function InfoPopup({
       const next = start.baseH + (ev.clientY - start.startY);
       setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
     };
-    const onUp = (ev: PointerEvent): void => {
+    const onUp = (): void => {
       editorResizeRef.current = null;
-      try {
-        handle.releasePointerCapture(ev.pointerId);
-      } catch {
-        // Ignore — releasePointerCapture may throw if never captured.
-      }
-      handle.removeEventListener('pointermove', onMove);
-      handle.removeEventListener('pointerup', onUp);
-      handle.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       // Revert to 'grab' on release — if the cursor is no longer
-      // over the handle, the subsequent pointerLeave on the handle
-      // will flip back to 'firefly'.
+      // over the handle, the handle's pointerLeave will flip back
+      // to 'firefly'.
       usePondStore.getState().setCursorMode('grab');
     };
-    handle.addEventListener('pointermove', onMove);
-    handle.addEventListener('pointerup', onUp);
-    handle.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
-  // Pointer hover handlers on the resize handle — mirror LilyPad's
-  // firefly ↔ grab swap so the frog hand appears as soon as the
-  // cursor enters the handle, not just during an active drag.
-  const handleEditorResizeEnter = (): void => {
+  // Shared cursor-mode helpers — used by the editor resize handle
+  // and both NeonScrollbar instances (read-only and edit) so the
+  // firefly → frog-hand swap fires consistently across every
+  // draggable affordance inside the popup.
+  const onDragAffordanceHover = useCallback((hovered: boolean): void => {
     const store = usePondStore.getState();
-    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
-  };
-  const handleEditorResizeLeave = (): void => {
+    if (hovered) {
+      if (store.cursorMode === 'firefly') store.setCursorMode('grab');
+    } else {
+      if (store.cursorMode === 'grab') store.setCursorMode('firefly');
+    }
+  }, []);
+  const onDragAffordanceDrag = useCallback((dragging: boolean): void => {
     const store = usePondStore.getState();
-    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
-  };
+    store.setCursorMode(dragging ? 'grabbing' : 'grab');
+  }, []);
+  const handleEditorResizeEnter = (): void => onDragAffordanceHover(true);
+  const handleEditorResizeLeave = (): void => onDragAffordanceHover(false);
 
   return (
     <Html
@@ -329,18 +322,8 @@ export function InfoPopup({
                 color="cyan"
                 className="info-popup__editor-textbox"
                 style={{ maxHeight: editorHeight }}
-                onThumbHover={(hovered) => {
-                  const store = usePondStore.getState();
-                  if (hovered) {
-                    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
-                  } else {
-                    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
-                  }
-                }}
-                onThumbDrag={(dragging) => {
-                  const store = usePondStore.getState();
-                  store.setCursorMode(dragging ? 'grabbing' : 'grab');
-                }}
+                onThumbHover={onDragAffordanceHover}
+                onThumbDrag={onDragAffordanceDrag}
               >
                 <textarea
                   className="info-popup__editor-textarea"
@@ -348,13 +331,38 @@ export function InfoPopup({
                   autoFocus
                   onChange={(e) => setEditText(e.target.value)}
                   onKeyDown={(e) => {
+                    // Keymap (user spec 2026-04-23):
+                    //   Escape        — cancel, discard draft
+                    //   Enter (plain) — save (commit trimmed text)
+                    //   Ctrl/⌘ + Enter — insert a newline at cursor
+                    //   Shift + Enter — also insert a newline (idiomatic)
                     if (e.key === 'Escape') {
                       e.stopPropagation();
                       cancelEdit();
-                    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      return;
+                    }
+                    if (e.key !== 'Enter') return;
+                    const wantsNewline = e.ctrlKey || e.metaKey || e.shiftKey;
+                    if (!wantsNewline) {
                       e.preventDefault();
                       commitEdit();
+                      return;
                     }
+                    // Ctrl / ⌘ + Enter — browsers default to a newline in
+                    // some UAs but not all; insert it manually so the
+                    // behaviour is consistent. Manual splice preserves
+                    // the selection range on replace.
+                    e.preventDefault();
+                    const target = e.currentTarget;
+                    const start = target.selectionStart;
+                    const end = target.selectionEnd;
+                    const next = editText.slice(0, start) + '\n' + editText.slice(end);
+                    setEditText(next);
+                    // Restore caret after React commits the controlled value.
+                    requestAnimationFrame(() => {
+                      target.selectionStart = start + 1;
+                      target.selectionEnd = start + 1;
+                    });
                   }}
                 />
               </NeonScrollbar>
@@ -371,7 +379,12 @@ export function InfoPopup({
               </div>
             </div>
           ) : (
-            <NeonScrollbar color="cyan" style={{ maxHeight: 180 }}>
+            <NeonScrollbar
+              color="cyan"
+              style={{ maxHeight: 180 }}
+              onThumbHover={onDragAffordanceHover}
+              onThumbDrag={onDragAffordanceDrag}
+            >
               <div
                 className={
                   'info-popup__text' +
@@ -423,87 +436,66 @@ export function InfoPopup({
           </div>
 
           {/* Actions — focused mode only (merged from ActionPopup).
-              While editing the text, the action row shows Save / Cancel
-              instead of Complete / Delete / Set Color so the whole
-              edit interaction stays inside the same popup. */}
-          {focused && (
+              Hidden while editing; the edit interaction is entirely
+              keyboard-driven (Enter saves, Escape cancels, Ctrl/⌘/
+              Shift + Enter inserts a newline). */}
+          {focused && !editing && (
             <>
               <div className="info-popup__divider" />
               <div className="info-popup__actions">
-                {editing ? (
-                  <>
-                    <button
-                      type="button"
-                      className="info-popup__button info-popup__button--complete"
-                      onClick={commitEdit}
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      className="info-popup__button info-popup__button--delete"
-                      onClick={cancelEdit}
-                    >
-                      Cancel
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {onComplete && (
-                      <button
-                        type="button"
-                        className="info-popup__button info-popup__button--complete"
-                        onClick={onComplete}
-                      >
-                        {todo.completed ? 'Uncomplete' : 'Complete'}
-                      </button>
+                {onComplete && (
+                  <button
+                    type="button"
+                    className="info-popup__button info-popup__button--complete"
+                    onClick={onComplete}
+                  >
+                    {todo.completed ? 'Uncomplete' : 'Complete'}
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="info-popup__button info-popup__button--delete"
+                    onClick={onDelete}
+                  >
+                    {todo.deleted ? 'Undelete' : 'Delete'}
+                  </button>
+                )}
+                {onCommitColor && (
+                  <button
+                    type="button"
+                    className="info-popup__button info-popup__button--set-color"
+                    onClick={() => setSwatchOpen((open) => !open)}
+                    aria-label="Set Color"
+                    aria-expanded={swatchOpen}
+                  >
+                    {SET_COLOR_LETTERS.map(({ ch, hue }, i) =>
+                      hue === null ? (
+                        <span key={i} aria-hidden>
+                          {' '}
+                        </span>
+                      ) : (
+                        <span
+                          key={i}
+                          style={{ color: hue, textShadow: `0 0 4px ${hue}` }}
+                          aria-hidden
+                        >
+                          {ch}
+                        </span>
+                      ),
                     )}
-                    {onDelete && (
-                      <button
-                        type="button"
-                        className="info-popup__button info-popup__button--delete"
-                        onClick={onDelete}
-                      >
-                        {todo.deleted ? 'Undelete' : 'Delete'}
-                      </button>
-                    )}
-                    {onCommitColor && (
-                      <button
-                        type="button"
-                        className="info-popup__button info-popup__button--set-color"
-                        onClick={() => setSwatchOpen((open) => !open)}
-                        aria-label="Set Color"
-                        aria-expanded={swatchOpen}
-                      >
-                        {SET_COLOR_LETTERS.map(({ ch, hue }, i) =>
-                          hue === null ? (
-                            <span key={i} aria-hidden>
-                              {' '}
-                            </span>
-                          ) : (
-                            <span
-                              key={i}
-                              style={{ color: hue, textShadow: `0 0 4px ${hue}` }}
-                              aria-hidden
-                            >
-                              {ch}
-                            </span>
-                          ),
-                        )}
-                      </button>
-                    )}
-                    {swatchOpen && onCommitColor && (
-                      <PopupColorSwatch
-                        committedColor={todo.color || '#00ff88'}
-                        onHover={setPreviewColor}
-                        onCommit={(color) => {
-                          onCommitColor(color);
-                          collapseSwatch();
-                        }}
-                        onCollapse={collapseSwatch}
-                      />
-                    )}
-                  </>
+                  </button>
+                )}
+                {swatchOpen && onCommitColor && (
+                  <PopupColorSwatch
+                    committedColor={todo.color || '#00ff88'}
+                    onHover={setPreviewColor}
+                    onCommit={(color) => {
+                      onCommitColor(color);
+                      collapseSwatch();
+                    }}
+                    onCollapse={collapseSwatch}
+                  />
                 )}
               </div>
             </>

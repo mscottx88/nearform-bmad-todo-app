@@ -230,7 +230,7 @@ describe('InfoPopup', () => {
       expect(container.querySelector('.info-popup__text--clickable')).toBeNull();
     });
 
-    it('Save commits trimmed text via onCommitText and exits edit mode', () => {
+    it('Enter commits trimmed text via onCommitText and exits edit mode', () => {
       const onCommitText = vi.fn();
       const { container } = render(
         <InfoPopup todo={makeTodo({ text: 'orig' })} focused={true} onCommitText={onCommitText} />,
@@ -238,36 +238,80 @@ describe('InfoPopup', () => {
       fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
       const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea');
       expect(textarea).not.toBeNull();
-      if (textarea) {
-        fireEvent.change(textarea, { target: { value: '  new value  ' } });
-      }
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      if (!textarea) return;
+      fireEvent.change(textarea, { target: { value: '  new value  ' } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
       expect(onCommitText).toHaveBeenCalledWith('new value');
       expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
     });
 
-    it('Save is a no-op when the trimmed text matches the current value', () => {
+    it('Enter is a no-op when the trimmed text matches the current value', () => {
       const onCommitText = vi.fn();
       const { container } = render(
         <InfoPopup todo={makeTodo({ text: 'same' })} focused={true} onCommitText={onCommitText} />,
       );
       fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
-      // Don't change text; click Save.
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea')!;
+      fireEvent.keyDown(textarea, { key: 'Enter' });
       expect(onCommitText).not.toHaveBeenCalled();
     });
 
-    it('Cancel discards changes and exits edit mode', () => {
+    it('Escape discards changes and exits edit mode', () => {
       const onCommitText = vi.fn();
       const { container } = render(
         <InfoPopup todo={makeTodo({ text: 'orig' })} focused={true} onCommitText={onCommitText} />,
       );
       fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
-      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea');
-      if (textarea) fireEvent.change(textarea, { target: { value: 'changed' } });
-      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea')!;
+      fireEvent.change(textarea, { target: { value: 'changed' } });
+      fireEvent.keyDown(textarea, { key: 'Escape' });
       expect(onCommitText).not.toHaveBeenCalled();
       expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
+    });
+
+    it('Ctrl+Enter inserts a newline at the cursor, not commit', () => {
+      const onCommitText = vi.fn();
+      const { container } = render(
+        <InfoPopup todo={makeTodo({ text: 'abc' })} focused={true} onCommitText={onCommitText} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea')!;
+      // Place caret at end.
+      textarea.selectionStart = textarea.value.length;
+      textarea.selectionEnd = textarea.value.length;
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+      expect(onCommitText).not.toHaveBeenCalled();
+      // Still in edit mode, value appended with a newline.
+      expect(container.querySelector('textarea.info-popup__editor-textarea')).not.toBeNull();
+      expect(
+        (container.querySelector<HTMLTextAreaElement>('textarea.info-popup__editor-textarea')!).value,
+      ).toBe('abc\n');
+    });
+
+    it('does NOT render Save or Cancel buttons in edit mode', () => {
+      const { container } = render(
+        <InfoPopup todo={makeTodo()} focused={true} onCommitText={() => {}} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      expect(screen.queryByRole('button', { name: /^save$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^cancel$/i })).toBeNull();
+    });
+
+    it('hides action buttons (Complete/Delete/Set Color) while editing', () => {
+      const { container } = render(
+        <InfoPopup
+          todo={makeTodo()}
+          focused={true}
+          onComplete={() => {}}
+          onDelete={() => {}}
+          onCommitColor={() => {}}
+          onCommitText={() => {}}
+        />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__text--clickable')!);
+      expect(screen.queryByRole('button', { name: /^complete$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^delete$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /set color/i })).toBeNull();
     });
 
     it('edit mode renders a neon resize handle beneath the textarea', () => {
