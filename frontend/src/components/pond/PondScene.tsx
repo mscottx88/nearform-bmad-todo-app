@@ -59,6 +59,9 @@ export function PondScene() {
   const completingTodos = usePondStore((s) => s.completingTodos);
   const deletingTodos = usePondStore((s) => s.deletingTodos);
   const selectedPadIds = usePondStore((s) => s.selectedPadIds);
+  // Story 4.6: subscribe so the ClusterHalo color prop picks up a
+  // swatch-hover preview live (matches the per-pad colorPreviews wire).
+  const groupColorPreviews = usePondStore((s) => s.groupColorPreviews);
   const [glError, setGlError] = useState<string | null>(null);
   const { data: todos = [], isLoading: isTodosLoading } = useTodos();
   const completeTodo = useCompleteTodo();
@@ -363,7 +366,11 @@ export function PondScene() {
         const memberPositions = renderTodos
           .filter((t) => t.groupId === gid)
           .map((t) => ({ x: t.positionX ?? 0, z: t.positionY ?? 0 }));
-        return <ClusterHalo key={gid} memberPositions={memberPositions} color={groups.get(gid)?.color ?? undefined} />;
+        // Story 4.6: preview takes precedence over committed color so
+        // the halo lerps live while the user hovers a swatch.
+        const haloColor =
+          groupColorPreviews.get(gid) ?? groups.get(gid)?.color ?? undefined;
+        return <ClusterHalo key={gid} memberPositions={memberPositions} color={haloColor} />;
       })}
       {/* Story 4.6 AC #12: floating cluster labels. One per group with a
           non-null label; each projects its centroid to screen each frame. */}
@@ -534,6 +541,15 @@ export function PondScene() {
                 },
               },
             );
+          }}
+          // Story 4.6: live halo preview mirrors the per-pad wire —
+          // ActionPopup pushes the hovered hex (or null on unhover /
+          // close) into groupColorPreviews so ClusterHalo renders it.
+          onPreviewGroupColor={(color) => {
+            if (!popupTodo.groupId) return;
+            usePondStore
+              .getState()
+              .setGroupColorPreview(popupTodo.groupId, color);
           }}
         />
       )}

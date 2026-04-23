@@ -60,6 +60,14 @@ interface ActionPopupProps {
   onSpreadGroup?: () => void;
   onSetLabel?: (label: string | null) => void;
   onCommitGroupColor?: (color: string) => void;
+  /**
+   * Story 4.6: called on hover/unhover of a Group Color swatch with
+   * the hex (or null). PondScene wires this to
+   * `usePondStore.setGroupColorPreview(groupId, color)` so ClusterHalo
+   * can lerp the ring color in real time while the user considers a
+   * pick — mirrors the per-pad color-preview contract.
+   */
+  onPreviewGroupColor?: (color: string | null) => void;
 }
 
 // Horizontal/vertical offset from the pad's projected screen position to the
@@ -83,12 +91,16 @@ export function ActionPopup({
   onSpreadGroup,
   onSetLabel,
   onCommitGroupColor,
+  onPreviewGroupColor,
 }: ActionPopupProps) {
   // Story 4.1: Set Color toggles an inline swatch sub-panel.
   // Only one swatch (pad or group) is open at a time.
   const [swatchOpen, setSwatchOpen] = useState(false);
   const [groupSwatchOpen, setGroupSwatchOpen] = useState(false);
   const [previewColor, setPreviewColor] = useState<string | null>(null);
+  // Story 4.6: transient preview for the Group Color swatch — parallel
+  // to previewColor for pads.
+  const [previewGroupColor, setPreviewGroupColor] = useState<string | null>(null);
   // Story 4.6: Label inline input toggle.
   const [labelOpen, setLabelOpen] = useState(false);
 
@@ -99,6 +111,12 @@ export function ActionPopup({
   useEffect(() => {
     onPreviewColor?.(previewColor);
   }, [previewColor, onPreviewColor]);
+
+  // Story 4.6: mirror onPreviewColor's effect for the group-color
+  // preview so ClusterHalo can lerp its ring color in real time.
+  useEffect(() => {
+    onPreviewGroupColor?.(previewGroupColor);
+  }, [previewGroupColor, onPreviewGroupColor]);
 
   // Story 4.1 CR-patch: whenever the sub-panel closes (via toggle,
   // Escape, or commit), clear any lingering hover preview in local
@@ -113,15 +131,27 @@ export function ActionPopup({
     }
   }, [swatchOpen, previewColor]);
 
+  // Story 4.6: same CR-patch pattern for the group-color preview —
+  // closing the group swatch (via toggle / Escape / commit) clears any
+  // lingering hover preview so the halo reverts cleanly.
+  useEffect(() => {
+    if (!groupSwatchOpen && previewGroupColor !== null) {
+      setPreviewGroupColor(null);
+    }
+  }, [groupSwatchOpen, previewGroupColor]);
+
   // Collapse pad-color swatch (Escape, commit, or second click).
   // Also clears the hover preview so LilyPad reverts immediately.
   const collapse = () => {
     setSwatchOpen(false);
     setPreviewColor(null);
   };
-  // Collapse group-color swatch (same pattern, no preview store needed
-  // — group color is not live-previewed on the halo).
-  const collapseGroup = () => setGroupSwatchOpen(false);
+  // Collapse group-color swatch — mirrors collapse() for pads. The
+  // preview-clearing effect above reverts the halo via the store.
+  const collapseGroup = () => {
+    setGroupSwatchOpen(false);
+    setPreviewGroupColor(null);
+  };
   // Drei <Html> with no `transform` renders a DOM overlay, positioning its
   // top-left at the projection of the given 3D point. The panel and callout
   // inside use absolute positioning relative to that anchor.
@@ -332,7 +362,7 @@ export function ActionPopup({
                 {groupSwatchOpen && (
                   <PopupColorSwatch
                     committedColor={groupColor || '#00eeff'}
-                    onHover={() => {}}
+                    onHover={setPreviewGroupColor}
                     onCommit={(color) => {
                       onCommitGroupColor?.(color);
                       collapseGroup();

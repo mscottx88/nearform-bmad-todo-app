@@ -108,6 +108,14 @@ interface PondState {
    * Session-only; not persisted.
    */
   colorPreviews: Map<string, string>;
+  /**
+   * Story 4.6: transient per-group color preview, mirroring the per-pad
+   * colorPreviews slice. Populated by ActionPopup's Group Color swatch
+   * hover; cleared on unhover / commit / popup close. ClusterHalo reads
+   * the previewed color in preference to the committed group color so
+   * the ring lerps toward the new hue live.
+   */
+  groupColorPreviews: Map<string, string>;
 
   // Story 3.1: camera-reset slices. `cameraResetRequestId` is a
   // monotonically-increasing counter — only a *change* is the signal.
@@ -284,6 +292,14 @@ interface PondState {
    */
   setColorPreview: (todoId: string, color: string | null) => void;
 
+  /**
+   * Story 4.6: set or clear the group-color preview for a group.
+   * Pass a hex string on swatch-hover, null on unhover / commit /
+   * popup close. Mirrors setColorPreview's semantics (no-op when
+   * already in target state) so rapid hover events don't churn.
+   */
+  setGroupColorPreview: (groupId: string, color: string | null) => void;
+
   // Story 5.3: search actions.
   /** Append a printable character to `searchQuery`. Sets `searchActive=true`. */
   appendSearchChar: (ch: string) => void;
@@ -413,6 +429,7 @@ export const usePondStore = create<PondState>((set, get) => ({
   deletingTodos: new Map(),
   errorTodos: new Map(),
   colorPreviews: new Map(),
+  groupColorPreviews: new Map(),
   cameraResetRequestId: 0,
   pendingCameraFit: null,
   searchQuery: '',
@@ -596,6 +613,23 @@ export const usePondStore = create<PondState>((set, get) => ({
       const next = new Map(current);
       next.set(todoId, color);
       set({ colorPreviews: next });
+    }
+  },
+
+  setGroupColorPreview: (groupId: string, color: string | null) => {
+    // Mirrors setColorPreview — identity-preserving no-op when the
+    // desired state is already in place.
+    const current = get().groupColorPreviews;
+    if (color === null) {
+      if (!current.has(groupId)) return;
+      const next = new Map(current);
+      next.delete(groupId);
+      set({ groupColorPreviews: next });
+    } else {
+      if (current.get(groupId) === color) return;
+      const next = new Map(current);
+      next.set(groupId, color);
+      set({ groupColorPreviews: next });
     }
   },
 
