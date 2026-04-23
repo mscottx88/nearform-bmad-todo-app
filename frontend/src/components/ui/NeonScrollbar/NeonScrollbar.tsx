@@ -191,16 +191,50 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
     // Scroll events stay immediate for smooth thumb tracking during scrolling.
     inner.addEventListener('scroll', updateThumbs, { passive: true });
 
+    // input events bubble up from <textarea> / <input> descendants when
+    // the user types. Without this listener, a textarea whose
+    // intrinsic height grows with content wouldn't re-trigger our
+    // ResizeObserver (which watches the inner div, not its
+    // descendants) or MutationObserver (which only sees childList
+    // changes, not attribute/content-driven resizes). Catching
+    // `input` here keeps thumb size and position proportional to
+    // total-vs-visible lines as the user types.
+    inner.addEventListener('input', scheduleUpdate);
+
     const ro = new ResizeObserver(scheduleUpdate);
     ro.observe(inner);
+    // Also observe every descendant (one-level deep is enough for
+    // our current use cases — textarea or nested panel). Re-attach
+    // if the descendant list changes via the MutationObserver below.
+    const observedChildren = new WeakSet<Element>();
+    const observeDescendants = (): void => {
+      inner.querySelectorAll('*').forEach((el) => {
+        if (!observedChildren.has(el)) {
+          ro.observe(el);
+          observedChildren.add(el);
+        }
+      });
+    };
+    observeDescendants();
 
-    const mo = new MutationObserver(scheduleUpdate);
-    mo.observe(inner, { childList: true, subtree: true });
+    const mo = new MutationObserver(() => {
+      observeDescendants();
+      scheduleUpdate();
+    });
+    mo.observe(inner, {
+      childList: true,
+      subtree: true,
+      // Catch attribute changes too (e.g. rows=, style= on a
+      // textarea) so the thumb recomputes when layout shifts.
+      attributes: true,
+      characterData: true,
+    });
 
     updateThumbs();
 
     return (): void => {
       inner.removeEventListener('scroll', updateThumbs);
+      inner.removeEventListener('input', scheduleUpdate);
       ro.disconnect();
       mo.disconnect();
       if (pendingRaf !== null) cancelAnimationFrame(pendingRaf);

@@ -184,13 +184,32 @@
   gap: 4px;
 }
 
+/* The visible "text box" is the NeonScrollbar outer wrapper. Its
+   border stays stationary while the textarea inside scrolls —
+   that's what the user sees as "the text scrolls, not the text box." */
+.info-popup__editor-textbox {
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 238, 255, 0.5);
+  border-radius: 2px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.info-popup__editor-textbox:focus-within {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 6px rgba(0, 238, 255, 0.5);
+}
+
 .info-popup__editor-textarea {
   width: 100%;
+  /* height: auto lets the textarea expand to its content height so
+     the NeonScrollbar inner can scroll it as a whole. Border lives
+     on the NeonScrollbar wrapper so the frame stays put while the
+     text underneath scrolls. */
   height: auto;
   min-height: 80px;
   box-sizing: border-box;
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(0, 238, 255, 0.5);
+  background: transparent;
+  border: none;
   color: var(--neon-cyan);
   text-shadow: 0 0 2px currentColor;
   font-family: var(--font-mono);
@@ -198,20 +217,11 @@
   line-height: 1.45;
   padding: 6px 8px;
   outline: none;
-  /* User-resize happens via the neon handle below the textarea —
-     disable the native resize grip so the two don't fight. */
   resize: none;
   white-space: pre-wrap;
-  /* Let the textarea fill the NeonScrollbar's inner div. The
-     scroll chrome handles overflow at the wrapper level. */
   overflow: hidden;
   /* Firefly cursor stays in charge; don't reintroduce the I-beam. */
   cursor: none;
-}
-
-.info-popup__editor-textarea:focus {
-  border-color: var(--neon-cyan);
-  box-shadow: 0 0 6px rgba(0, 238, 255, 0.5);
 }
 
 .info-popup__editor-resize {

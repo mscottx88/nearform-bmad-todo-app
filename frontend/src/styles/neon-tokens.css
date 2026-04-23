@@ -15,5 +15,10 @@
   --font-sans: 'Inter', sans-serif;
 
   /* Z-layers */
-  --z-cursor: 9999;
+  /* Cursor firefly/frog-hand canvas. Must sit above drei's <Html>
+     stacking range (default [16777271, 0]) so the custom cursor
+     stays visible when hovering over popups rendered through
+     <Html> portals. 2026-04-23: raised from 9999 after user
+     reported the frog hand disappearing inside InfoPopup. */
+  --z-cursor: 2147483647;
 }

@@ -293,7 +293,16 @@ export function InfoPopup({
               editor lets the user drag to grow/shrink the region. */}
           {editing ? (
             <div className="info-popup__editor-wrap">
-              <NeonScrollbar color="cyan" style={{ maxHeight: editorHeight }}>
+              {/* The text "box" is the NeonScrollbar outer wrapper —
+                  its border stays stationary while the textarea (no
+                  border) shifts vertically underneath as the user
+                  scrolls. `className` threads our editor-box style
+                  onto the scrollbar's outer wrapper. */}
+              <NeonScrollbar
+                color="cyan"
+                className="info-popup__editor-textbox"
+                style={{ maxHeight: editorHeight }}
+              >
                 <textarea
                   className="info-popup__editor-textarea"
                   value={editText}
