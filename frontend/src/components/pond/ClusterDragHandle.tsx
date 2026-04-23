@@ -222,7 +222,6 @@ export function ClusterDragHandle({
       const { sx: cx, sy: cy } = projectWorldToScreen(centroid, camera, size.width, size.height);
       const angleDeg = Math.atan2(sy - cy, sx - cx) * (180 / Math.PI);
       contentRef.current.style.transform = `rotate(${angleDeg}deg)`;
-      contentRef.current.style.cursor = phaseRef.current !== 'idle' ? 'grabbing' : 'grab';
     }
   });
 
@@ -233,16 +232,32 @@ export function ClusterDragHandle({
           ref={contentRef}
           style={{
             display: 'none',
+            // Solid neon-ringed disc with an outward chevron glyph.
+            // Previous 16px text + soft textShadow read as "barely
+            // noticeable" in the pond scene — this disc + bold glyph
+            // makes the affordance clearly visible at glance.
+            width: '36px',
+            height: '36px',
+            borderRadius: '50%',
+            background: 'rgba(0, 14, 22, 0.8)',
+            border: '2px solid #00eeff',
+            boxShadow:
+              '0 0 12px #00eeff, 0 0 24px rgba(0, 238, 255, 0.6), inset 0 0 8px rgba(0, 238, 255, 0.4)',
             color: '#00eeff',
-            fontSize: '16px',
+            fontSize: '22px',
             fontFamily: "'Share Tech Mono', monospace",
-            lineHeight: '1',
-            cursor: 'grab',
+            fontWeight: 'bold',
+            lineHeight: '32px',
+            textAlign: 'center',
+            textShadow: '0 0 6px #00eeff',
+            // cursor: 'none' so the global custom firefly cursor stays
+            // visible when hovering the handle. Previous 'grab' /
+            // 'grabbing' values overrode the root `cursor: none` and
+            // brought back the system cursor over the handle.
+            cursor: 'none',
             userSelect: 'none',
             pointerEvents: 'auto',
-            textShadow: '0 0 8px #00eeff',
-            letterSpacing: '-3px',
-            opacity: 0.9,
+            opacity: 1,
           }}
           onPointerDown={handlePointerDown}
           onPointerEnter={() => {
@@ -252,7 +267,7 @@ export function ClusterDragHandle({
             isHandleHoveredRef.current = false;
           }}
         >
-          ‹‹
+          ›
         </div>
       </Html>
     </group>
