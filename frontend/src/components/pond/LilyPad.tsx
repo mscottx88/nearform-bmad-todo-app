@@ -1614,51 +1614,44 @@ export function LilyPad({
           // siblings. Impact radius is NUDGE_RADIUS (2 ×
           // SELECTION_RING_OUTER) so the threshold sits right at the
           // visible halo-ring edge — no more overlap between a dragged
-          // pad and its neighbours. Reads from activeDragAnchor, which
-          // LilyPad writes on every pointermove during its own drag
-          // regardless of group membership. The nudge is additive to
-          // drift so idle movement still reads.
-          let nudgeX = 0;
-          let nudgeZ = 0;
+          // pad and its neighbours.
+          //
+          // Sibling-nudge model 2026-04-23 (option 2, accumulate-and-keep):
+          // The nudge is a PERSISTENT positional offset — once a pad has
+          // been shoved aside it stays there until either (a) the next
+          // drag pushes it further, or (b) drag-release commits a nudge
+          // above the commit threshold via PATCH (see the block above
+          // the drag/sticky IF). The nudge is NOT lerped back toward 0
+          // when the anchor leaves range; that spring-back was the
+          // previous model (option 1), and it felt like rubber bands
+          // rather than marbles on water.
+          //
+          // Engagement distance uses the pad's CURRENT displaced position
+          // (rest + existing nudge) rather than the rest slot, so a
+          // previously-pushed pad is still pushable when the dragged pad
+          // approaches its new location. When the anchor is out of range
+          // we simply don't touch siblingNudgeRef — it holds the last
+          // accumulated value.
           const anchor = usePondStore.getState().activeDragAnchor;
           if (anchor && anchor.padId !== todo.id) {
-            // Engage threshold based on anchor-to-REST distance: when
-            // the dragged pad's cursor is within NUDGE_RADIUS of this
-            // pad's slot, push this pad aside. Rest-based engagement
-            // keeps the nudge self-releasing — once the dragged pad
-            // moves far from this slot, the nudge decays to 0 and the
-            // pad returns home regardless of how far it was displaced.
-            const tdx = posX - anchor.x;
-            const tdz = posZ - anchor.z;
-            const dist = Math.sqrt(tdx * tdx + tdz * tdz);
-            if (dist < NUDGE_RADIUS) {
-              // Direction: from anchor TOWARD the sibling's currently
-              // displaced position (rest + existing nudge). Using the
-              // displaced position keeps the nudge MONOTONIC — once
-              // this pad has been pushed to one side, the dragged pad
-              // crossing its rest slot does NOT flip it to the
-              // opposite side. The previous formula used
-              // `(posX − anchor) / dist` which reversed sign when the
-              // anchor crossed posX, which read as a visible "swap"
-              // when two pads met at their midpoints (user report
-              // 2026-04-23).
-              const nudgedX = posX + siblingNudgeRef.current.x;
-              const nudgedZ = posZ + siblingNudgeRef.current.z;
-              const adx = nudgedX - anchor.x;
-              const adz = nudgedZ - anchor.z;
-              const adist = Math.sqrt(adx * adx + adz * adz);
+            const nudgedX = posX + siblingNudgeRef.current.x;
+            const nudgedZ = posZ + siblingNudgeRef.current.z;
+            const adx = nudgedX - anchor.x;
+            const adz = nudgedZ - anchor.z;
+            const adist = Math.sqrt(adx * adx + adz * adz);
+            if (adist < NUDGE_RADIUS) {
+              // Direction: anchor → displaced position (keeps the nudge
+              // monotonic across an anchor crossing — a dragged pad
+              // passing through the midpoint does NOT flip the sibling
+              // to the opposite side).
               let dirX: number;
               let dirZ: number;
               if (adist > 1e-4) {
                 dirX = adx / adist;
                 dirZ = adz / adist;
               } else {
-                // Nudged position lands exactly on the anchor. Prefer
-                // the existing nudge direction (preserves monotonicity
-                // across the exact crossing); if there is no existing
-                // nudge, fall back to a deterministic per-pad vector
-                // seeded by driftSeed so coincident pads still
-                // separate rather than silently overlapping.
+                // Exactly coincident: prefer existing nudge direction
+                // (monotonic through the crossing), else driftSeed.
                 const prevMag = Math.sqrt(
                   siblingNudgeRef.current.x * siblingNudgeRef.current.x +
                     siblingNudgeRef.current.z * siblingNudgeRef.current.z,
@@ -1672,33 +1665,25 @@ export function LilyPad({
                 }
               }
               // Target absolute position: anchor + dir × NUDGE_RADIUS.
-              // Target nudge = target_abs − rest. Equivalent to the
-              // previous `dir * (NUDGE_RADIUS − dist)` formulation when
-              // dir has the same sign, but derived from `anchor + dir·R`
-              // so it stays valid when `dir` comes from the displaced
-              // position rather than the rest slot.
-              nudgeX = anchor.x + dirX * NUDGE_RADIUS - posX;
-              nudgeZ = anchor.z + dirZ * NUDGE_RADIUS - posZ;
+              // Target nudge = target_abs − rest.
+              const targetNudgeX = anchor.x + dirX * NUDGE_RADIUS - posX;
+              const targetNudgeZ = anchor.z + dirZ * NUDGE_RADIUS - posZ;
+              // Lerp toward the target. 0.35 reaches 90% of the target
+              // in ~6 frames (~100ms at 60fps) — a firm slide, not a
+              // lazy drift. Only runs while actively engaged; when the
+              // anchor leaves range, the ref keeps its current value.
+              siblingNudgeRef.current.x = THREE.MathUtils.lerp(
+                siblingNudgeRef.current.x,
+                targetNudgeX,
+                0.35,
+              );
+              siblingNudgeRef.current.z = THREE.MathUtils.lerp(
+                siblingNudgeRef.current.z,
+                targetNudgeZ,
+                0.35,
+              );
             }
           }
-          // (Sibling-nudge commit-on-release moved above the drag/sticky
-          // branch — see the "Story 4.6 (user feedback 2026-04-23)"
-          // block near the top of the resting phase.)
-          // Smooth nudge changes — but fast enough that a mid-speed
-          // drag through another pad visibly displaces it before the
-          // anchor passes. 0.35 reaches 90% of a new target in ~6
-          // frames (~100ms at 60fps), which reads as a firm slide
-          // rather than a lazy drift.
-          siblingNudgeRef.current.x = THREE.MathUtils.lerp(
-            siblingNudgeRef.current.x,
-            nudgeX,
-            0.35,
-          );
-          siblingNudgeRef.current.z = THREE.MathUtils.lerp(
-            siblingNudgeRef.current.z,
-            nudgeZ,
-            0.35,
-          );
           group.position.x =
             posX +
             Math.sin(t * 0.3 + seed) * 0.08 * ramp +
