@@ -518,11 +518,20 @@ export function LilyPad({
   // Track "did activeDragAnchor exist on the previous frame" so we can
   // detect the null-transition at drag release and commit the nudge.
   const hadDragAnchorRef = useRef(false);
-  // (`lastNudgeTargetRef` removed 2026-04-23 — the snap-to-target
-  // approach traded a sticky-stuck bug for a visible one-frame jump
-  // at release. publish-current / commit-current (both reading
-  // siblingNudgeRef as-is) keeps dragPosRef, the batch payload, and
-  // the refetched posX aligned without introducing a snap.)
+  // Story 4.2 (re-added 2026-04-23): cached steady-state target the
+  // cascade engagement last computed. Used by the publish block
+  // below to emit the TARGET position (rather than the mid-lerp
+  // current position) as the secondary-anchor value. Publishing a
+  // stable target — rather than a moving current value — keeps
+  // downstream pads from chasing a wave that propagates out
+  // through the cascade each frame; without it, pads far from the
+  // dragger could still pick up a subtle nudge because every
+  // published value shifted on every pointer move.
+  //
+  // Pairs with the higher lerp rate (0.7): at 3 frames ~97%
+  // convergence, target and current are close enough that commit
+  // doesn't need an explicit snap.
+  const lastNudgeTargetRef = useRef<{ x: number; z: number } | null>(null);
   // (`isPublishedRef` removed 2026-04-23 — the local ref can desync
   // from the store's actual `displacedPads` contents, leaving stale
   // entries that nudge far-away pads. Both setDisplacedPad and
@@ -914,6 +923,7 @@ export function LilyPad({
           // user is placing this pad deliberately.
           dragStartStore.clearDisplacedPad(todo.id);
           siblingNudgeRef.current = { x: 0, z: 0 };
+          lastNudgeTargetRef.current = null;
         }
         // Convert client coords → canvas NDC → water-plane hit. If the
         // canvas rect has no area yet (mid-resize, offscreen, detached)
@@ -1657,6 +1667,10 @@ export function LilyPad({
         stickyDragRef.current = true;
         stickySetAtMsRef.current = performance.now();
         siblingNudgeRef.current = { x: 0, z: 0 };
+        // Clear cached target too — nudge is 0 now, so no cascade
+        // partner should pick up this pad's (stale) target as a
+        // secondary anchor for the next drag.
+        lastNudgeTargetRef.current = null;
         // Dragger already iterated displacedPads before clearing it
         // to build the batch; this clear is belt-and-suspenders.
         usePondStore.getState().clearDisplacedPad(todo.id);
@@ -1804,20 +1818,26 @@ export function LilyPad({
           });
           if (engaged) {
             // Target nudge = (current displaced + summed push) − rest.
-            // Lerp at 0.35 → ~90% convergence in 6 frames (~100ms at
-            // 60fps). Only runs while engaged; when no anchor is in
-            // range, siblingNudgeRef holds its last value.
+            // Cache for the publish block so secondary anchors radiate
+            // a STABLE steady-state position, not a moving mid-lerp
+            // value that would propagate a feedback wave out to
+            // pads well beyond NUDGE_RADIUS of the actual dragger.
             const targetNudgeX = nudgedX + pushX - posX;
             const targetNudgeZ = nudgedZ + pushZ - posZ;
+            lastNudgeTargetRef.current = { x: targetNudgeX, z: targetNudgeZ };
+            // Lerp at 0.7 → ~97% convergence in 3 frames (~50ms at
+            // 60fps). Fast enough that siblingNudgeRef effectively
+            // tracks the target, so commit can use the current value
+            // without a visible release snap.
             siblingNudgeRef.current.x = THREE.MathUtils.lerp(
               siblingNudgeRef.current.x,
               targetNudgeX,
-              0.35,
+              0.7,
             );
             siblingNudgeRef.current.z = THREE.MathUtils.lerp(
               siblingNudgeRef.current.z,
               targetNudgeZ,
-              0.35,
+              0.7,
             );
           }
 
@@ -1868,21 +1888,34 @@ export function LilyPad({
           siblingNudgeRef.current.z * siblingNudgeRef.current.z,
       );
       if (currentNudgeMag > DISPLACED_PUBLISH_THRESHOLD) {
-        // Publish the CURRENT displaced position (rest + current
-        // nudge ref, i.e. where the pad is visibly sitting this
-        // frame). Earlier we published the cascade's steady-state
-        // target instead, but that left siblings mid-lerp in the
-        // visual while the dragger's batch and each sibling's
-        // commit agreed on the target — meaning drag release ran
-        // through a commit-block "snap" that visibly teleported
-        // every mid-lerp sibling to its target in one frame. Now
-        // publish-current, commit-current, and the refetched posX
-        // all agree on the visible mid-lerp value. The trade is a
-        // slightly under-resolved cascade at release (pads may not
-        // have fully separated) — static overlap beats release jumps.
+        // Publish the steady-state TARGET position (rest + target
+        // nudge) when we have one cached; fall back to the current
+        // nudge otherwise (pad's nudge persists from option 2 but
+        // cascade hasn't engaged yet this session).
+        //
+        // Publishing a stable target keeps downstream pads from
+        // chasing a per-frame-moving secondary anchor. A moving
+        // anchor caused a visible "feedback wave" to radiate out
+        // through the cascade: a pad well beyond NUDGE_RADIUS of
+        // the actual dragger could pick up a subtle nudge because
+        // the published position of some intermediate pad was
+        // shifting every pointermove.
+        //
+        // Fast lerp (0.7) closes the gap between current and target
+        // in ~3 frames, so dragPosRef (commit-current), the
+        // dragger's batch payload (reads this published value), and
+        // the refetched posX all converge within the 0.05 sticky-
+        // clear tolerance — no release snap, no sticky-stuck.
+        const target = lastNudgeTargetRef.current;
+        const publishX = target
+          ? posX + target.x
+          : posX + siblingNudgeRef.current.x;
+        const publishZ = target
+          ? posZ + target.z
+          : posZ + siblingNudgeRef.current.z;
         usePondStore.getState().setDisplacedPad(todo.id, {
-          x: posX + siblingNudgeRef.current.x,
-          z: posZ + siblingNudgeRef.current.z,
+          x: publishX,
+          z: publishZ,
         });
       } else {
         usePondStore.getState().clearDisplacedPad(todo.id);
