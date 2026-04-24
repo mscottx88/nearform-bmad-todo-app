@@ -241,9 +241,13 @@
   cursor: none;
 }
 
-/* Neon thumb — top/height set by JS from scrollTop/scrollHeight. */
+/* Neon thumb — top/height/display set by syncThumb() via direct DOM
+   writes (not React style prop — that would be re-applied each render
+   and fight the JS). display:none here is the before-first-sync state
+   only; syncThumb clears it before the first paint (useLayoutEffect). */
 .info-popup__neon-thumb {
   position: absolute;
+  display: none;
   left: 3px;
   right: 3px;
   border-radius: 3px;

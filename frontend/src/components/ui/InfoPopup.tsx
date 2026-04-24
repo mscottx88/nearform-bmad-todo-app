@@ -146,20 +146,24 @@ export function InfoPopup({
   const MIN_THUMB_PX = 28;
   const THUMB_INSET = 3;
   // Direct DOM sync — no React state, no re-render latency.
-  // Mirrors NeonScrollbar's updateThumbs pattern exactly.
+  // The thumb is ALWAYS shown (like VS Code / Sublime Text) so the
+  // user sees the scrollbar chrome as soon as edit mode opens.
+  // When content fits the box:  thumb fills the track (ratio = 1)
+  //   → visual cue "more room below, keep typing".
+  // When content overflows:     thumb shrinks proportionally and
+  //   moves as the user scrolls → standard scrollbar behaviour.
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
     if (!ta || !thumb) return;
     const { scrollTop, scrollHeight, clientHeight } = ta;
-    if (scrollHeight <= clientHeight + 1) {
-      thumb.style.display = 'none';
-      return;
-    }
     const usable = editorHeight - THUMB_INSET * 2;
-    const thumbH = Math.max(MIN_THUMB_PX, (clientHeight / scrollHeight) * usable);
+    // Clamp ratio to [0, 1] so thumb never exceeds track.
+    const ratio = Math.min(1, clientHeight / Math.max(scrollHeight, 1));
+    const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
     const maxTop = usable - thumbH;
-    const scrollFrac = scrollTop / (scrollHeight - clientHeight);
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const scrollFrac = maxScroll > 0 ? scrollTop / maxScroll : 0;
     thumb.style.display = '';
     thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
     thumb.style.height = `${thumbH}px`;
@@ -477,15 +481,16 @@ export function InfoPopup({
                 />
                 {/* Neon scrollbar track — always rendered; thumb is
                     visible only when textarea overflows. */}
-                {/* Track + thumb. Thumb is ALWAYS in the DOM so
-                    thumbRef is never null. syncThumb sets
-                    display:none when no overflow, then restores
-                    display:'' + updates top/height on scroll. */}
+                {/* Track + thumb. Thumb is always in the DOM (no
+                    conditional) so thumbRef is never null.
+                    No `style` prop here — syncThumb owns display /
+                    top / height via direct DOM writes. A style prop
+                    would be re-applied by React on every re-render,
+                    overwriting the JS-managed state. */}
                 <div className="info-popup__neon-track">
                   <div
                     ref={thumbRef}
                     className="info-popup__neon-thumb"
-                    style={{ display: 'none' }}
                     onMouseDown={handleThumbDragStart}
                     onMouseEnter={() => onDragAffordanceHover(true)}
                     onMouseLeave={() => onDragAffordanceHover(false)}
