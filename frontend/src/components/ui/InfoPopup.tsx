@@ -4,6 +4,7 @@ import type { Todo } from '../../types';
 import { NeonScrollbar } from './NeonScrollbar';
 import { PopupColorSwatch } from './PopupColorSwatch';
 import { usePondStore } from '../../stores/usePondStore';
+import { useWorldStore } from '../../stores/useWorldStore';
 import { formatTimestamp, formatRelative } from '../../utils/formatTodoMeta';
 import './InfoPopup.css';
 
@@ -83,8 +84,18 @@ export function InfoPopup({
   // during drag. LilyPad clears hoveredTodoId on drag-start; the popup
   // fades out via the `dismissing` prop (PondScene-controlled) and can
   // reappear only after release via a fresh pointerEnter.
-  const popupX = todo.positionX ?? 0;
-  const popupZ = todo.positionY ?? 0;
+  // Story 4.9: popup anchor tracks the world store, not the todo
+  // prop. The prop lags the store between drag release and the React
+  // Query refetch (~50–200 ms), which used to flash the popup's
+  // callout line back to the pad's pre-drag position. Per-field
+  // selectors keep the re-render scope minimal (a re-render fires
+  // only when THIS todo's positionX or positionY changes).
+  const popupX = useWorldStore(
+    (s) => s.worldMetadata.get(todo.id)?.positionX ?? todo.positionX ?? 0,
+  );
+  const popupZ = useWorldStore(
+    (s) => s.worldMetadata.get(todo.id)?.positionY ?? todo.positionY ?? 0,
+  );
 
   // Swatch sub-panel state (merged from ActionPopup, focused-only).
   const [swatchOpen, setSwatchOpen] = useState(false);
