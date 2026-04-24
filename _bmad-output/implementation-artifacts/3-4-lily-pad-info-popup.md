@@ -1,25 +1,28 @@
-# Story 3.4: Lily Pad Info Popup (Hover-Preview + Focused-Interactive)
+# Story 3.4: Lily Pad Info Popup (Hover-Preview + Focused-Interactive + Inline Edit)
 
 Status: review
 
-> **Scope:** A second per-pad popup, sibling to the existing `ActionPopup`, that surfaces a todo's **metadata** (full text, timestamps, status flags, position) on hover and stays up while the pad is focused (popup-active). Anchored to the **LEFT** of the pad, mirroring `ActionPopup`'s upper-right anchor. Neon cyan chrome, same glow vocabulary as the rest of the UI. When focused, the panel is interactive to whatever degree the content requires — long text scrolls vertically, meta rows read like a table.
+> **Amended 2026-04-23** (during code review, decisions D1/D2/D3): the original "sibling of ActionPopup" model was superseded during implementation. InfoPopup absorbed ActionPopup entirely (one LEFT-anchored panel that hosts both metadata and actions); an inline edit mode was added; and `NeonScrollbar` gained a second API (overlay mode) so a textarea can own its native scroll while NeonScrollbar drives the thumb chrome. See the Scope and Acceptance Criteria below for the as-shipped behaviour, and Dev Agent Record Implementation Notes #5-#7 for the deviation rationale.
 >
-> **Why now:** The pad label already renders the todo's text at readable size post-focus, but there's no affordance for non-trivial details (long text that overflows, when it was created, its embedding status, soft-deletion metadata). Hover-preview feels right for this pond's "hover-to-focus" UX language (ux-design-specification.md §Design Philosophy: _"Hover a lily pad — it responds."_). The info popup completes that promise.
+> **Scope:** A per-pad popup that surfaces a todo's **metadata** (full text, timestamps, status flags, position, embedding state) on hover and stays up while the pad is focused (popup-active). In focused mode the same popup also hosts the actions that were previously in `ActionPopup` (Complete, Delete, Set Color) and an inline editor for the todo's text. Anchored to the **LEFT** of the pad. Neon cyan chrome, same glow vocabulary as the rest of the UI. Hover mode is read-only and non-interactive; focused mode is the interactive working surface for the pad.
+>
+> **Why now:** The pad label already renders the todo's text at readable size post-focus, but there's no affordance for non-trivial details (long text that overflows, when it was created, its embedding status, soft-deletion metadata). Hover-preview feels right for this pond's "hover-to-focus" UX language (ux-design-specification.md §Design Philosophy: _"Hover a lily pad — it responds."_). Consolidating the actions and inline edit into the same panel (rather than a separate ActionPopup on the opposite side) reduces split-attention during focused work and keeps every pad interaction in a single visual quadrant.
 >
 > **What ships:**
-> 1. **Port `NeonScrollbar`** — copy `NeonScrollbar.tsx` + `NeonScrollbar.css` verbatim from `c:/Users/michael/nearform/rag-csv-crew/frontend/src/components/NeonScrollbar/` into this repo at `frontend/src/components/ui/NeonScrollbar/`. Every scrollable region in this app — starting with the info popup's text area, and going forward for any future scrollable content — must use this component rather than raw `overflow: auto` + per-component scrollbar CSS. See **Task 3a** below.
-> 2. **New component** `frontend/src/components/ui/InfoPopup.tsx` + `InfoPopup.css`. Rendered via drei `<Html>` like `ActionPopup`, but anchored to the pad's **LEFT** (negative X offset, same −Y offset).
+> 1. **`NeonScrollbar` port + overlay API** — copy `NeonScrollbar.tsx` + `NeonScrollbar.css` from `c:/Users/michael/nearform/rag-csv-crew/frontend/src/components/NeonScrollbar/` into this repo at `frontend/src/components/ui/NeonScrollbar/`. The ported file then grows a second mode (`scrollElement?: HTMLElement | null`) so consumers that own their scrollable element natively (e.g. a `<textarea>`) can still have the neon thumb chrome overlaid. Every scrollable region in this app must use this component rather than raw `overflow: auto` + per-component scrollbar CSS. See **Task 3a** and Dev Notes §"Scrollbar convention".
+> 2. **New component `InfoPopup`** (`frontend/src/components/ui/InfoPopup.tsx` + `InfoPopup.css`). Rendered via drei `<Html>` and anchored to the pad's **LEFT** (negative X offset, negative Y offset). Absorbs ActionPopup's role — Complete/Delete/Set Color buttons and the color-swatch sub-panel now live inside InfoPopup in focused mode. `ActionPopup.{tsx,css,test.tsx}` are removed.
 > 3. **Store slice** `hoveredTodoId: string | null` + `setHoveredTodoId(id | null)` on `usePondStore`. Tracks the pad the cursor is currently over.
 > 4. **LilyPad hover wiring** — extend the existing `onPointerEnter` / `onPointerLeave` to additionally set/clear `hoveredTodoId`. Don't set on drag-in-progress or dissolving pads.
-> 5. **PondScene mount** — render `<InfoPopup>` when EITHER `hoveredTodoId === todo.id` OR `activePopupTodoId === todo.id`. Source the Todo from the same `renderTodos` list that drives `ActionPopup`.
-> 6. **Focused-mode interactivity** — when `activePopupTodoId === infoTodo.id`, panel gets `pointer-events: auto` and the text region is wrapped in `<NeonScrollbar color="cyan">` so overflow scrolls with the neon wireframe chrome. Pure hover is non-interactive (`pointer-events: none`) so moving onto the panel doesn't trap focus.
-> 7. **Content** — full text (wrapped, scrollable via NeonScrollbar), then a "meta rows" section: created / updated timestamps (localised, with relative hint), status badges (Completed / Deleted / Archived / Embedding), position `(x, z)`, rotation in degrees. All legible in the dense pond.
+> 5. **PondScene mount** — render `<InfoPopup>` when EITHER `hoveredTodoId === todo.id` OR `activePopupTodoId === todo.id`. Pass action callbacks (`onComplete`, `onDelete`, `onCommitColor`, `onPreviewColor`, `onCommitText`) only in focused mode.
+> 6. **Focused-mode interactivity** — when `activePopupTodoId === infoTodo.id`, panel gets `pointer-events: auto`; the text region is scrollable via `<NeonScrollbar color="cyan">` (wrap mode); action buttons appear below the meta block; the color-swatch sub-panel toggles from Set Color. Pure hover is non-interactive (`pointer-events: none`).
+> 7. **Inline edit mode** (focused-only) — clicking the text region swaps the readonly text for a `<textarea>` with the neon scrollbar chrome in overlay mode. Enter commits, Escape cancels, `Ctrl/⌘/Shift+Enter` inserts a newline, IME composition is respected, and a neon resize handle at the textarea's bottom edge lets the user grow the editor up to `max(480, window.innerHeight - 160)` px.
+> 8. **Content** — full text (wrapped, scrollable via NeonScrollbar), then a "meta rows" section: created / updated timestamps (localised, with relative hint), status badges (Active / Completed / Deleted / Archived / Embedding), position `(x, z)`. All legible in the dense pond.
 >
 > **Not in scope (defer):**
-> - **Edit-in-place.** The info popup is read-only. Text edits stay a future story.
 > - **Cross-pad comparisons / diff view.** One pad at a time.
-> - **Accessibility sweep** (ARIA live regions, focus-trap for scrollable content). Tracked under **4.4 Frontend A11y Sweep** which will also cover ActionPopup. This story lays down minimal `role="tooltip"` / `aria-describedby` hooks so 4.4 has something to build on.
-> - **Animations.** Use the existing `opacity` fade-in the ActionPopup uses; no bespoke motion here.
+> - **Conflict resolution for concurrent edits.** If the server's `todo.text` changes while the user is editing, commit is last-write-wins (no diff prompt). Revisit if concurrent editing becomes a real scenario.
+> - **Accessibility sweep** (ARIA live regions, focus-trap for scrollable content, `aria-describedby` hook-up). Tracked under **4.4 Frontend A11y Sweep**. This story lays down minimal `role="dialog"` / `role="tooltip"` / `aria-live` hooks so 4.4 has something to build on.
+> - **Animations.** Use a plain `opacity` transition; no bespoke motion here.
 
 ---
 
@@ -60,19 +63,19 @@ so that I can inspect todos — especially ones whose pad labels are too compres
 
 ### Focused mode (click-persistent, interactive)
 
-6. **Given** I click a lily pad (threshold ≤ 4 px so it's a click, not a drag — per 4.2 AC #3), **Then** the existing `ActionPopup` opens on the upper-right (unchanged) AND the `InfoPopup` stays open on the left, regardless of whether my cursor is still over the pad.
+6. **Given** I click a lily pad (threshold ≤ 4 px so it's a click, not a drag — per 4.2 AC #3), **Then** the `InfoPopup` opens on the left with (a) the meta block unchanged, (b) the **action buttons** (Complete / Delete / Set Color) rendered below a divider, and (c) the color-swatch sub-panel reachable via the Set Color toggle. The popup stays open regardless of whether my cursor is still over the pad.
 
-7. **Given** the popup is focused (`activePopupTodoId === todoId`), **Then** the panel's `pointer-events` flip from `none` to `auto` AND the content region becomes vertically scrollable (`overflow-y: auto`). Moving the cursor OFF the pad no longer hides the popup; it closes only via the `ActionPopup` close paths below.
+7. **Given** the popup is focused (`activePopupTodoId === todoId`), **Then** the panel's `pointer-events` flip from `none` to `auto` AND the content region becomes vertically scrollable. Moving the cursor OFF the pad no longer hides the popup; it closes only via the close paths in AC #9.
 
-8. **Given** the popup is focused and the todo text is longer than the scroll region's `max-height` (180 px for the text region, see Task 3), **When** I scroll the text (wheel over it, or drag the neon wireframe thumb), **Then** the text scrolls inside a `<NeonScrollbar color="cyan">` wrapper — the neon wireframe track + glowing thumb from `rag-csv-crew`, ported into this repo at Task 3a. Native browser scrollbars never appear anywhere (the global `::-webkit-scrollbar { display: none }` at [global.css:26-28](frontend/src/styles/global.css#L26-L28) stays in effect; NeonScrollbar provides its own DOM thumbs). OrbitControls zoom is NOT triggered by wheel over the panel (the panel's focused-mode wheel handler forwards to the canvas, same as ActionPopup's wheel path).
+8. **Given** the popup is focused and the todo text is longer than the scroll region's height, **When** I scroll the text (wheel over it, or drag the neon wireframe thumb), **Then** the text scrolls inside a `<NeonScrollbar color="cyan">` wrapper — the neon wireframe track + glowing thumb from `rag-csv-crew`, ported into this repo at Task 3a. Native browser scrollbars never appear anywhere (the global `::-webkit-scrollbar { display: none }` at [global.css:26-28](frontend/src/styles/global.css#L26-L28) stays in effect; NeonScrollbar provides its own DOM thumbs). OrbitControls zoom is NOT triggered by wheel over the panel.
 
-9. **Given** the popup is focused, **When** the user triggers any of the existing popup-close paths — Escape (via `useClosePopupOnEscape`), Complete/Delete buttons, color-commit, or clicking outside — **Then** `InfoPopup` hides alongside `ActionPopup`. They share `activePopupTodoId` as the single visibility signal in focused mode.
+9. **Given** the popup is focused, **When** the user triggers any of the popup-close paths — Escape (via `useClosePopupOnEscape`), Complete/Delete buttons, color-commit, or clicking outside — **Then** the `InfoPopup` hides. `activePopupTodoId` is the single visibility signal in focused mode; any pending edit-mode draft is discarded on close (see AC #17b).
 
 ### Positioning & aesthetic
 
-10. **Given** any render state, **Then** the info popup is anchored to the **LEFT** of the pad — panel `transform: translate(-INFO_PANEL_OFFSET_X, -INFO_PANEL_OFFSET_Y)` where offsets are tuned to mirror ActionPopup's upper-right placement without visually overlapping it (use `INFO_PANEL_OFFSET_X = 280` as a starting value to clear the pad's hover ring + a comfortable margin).
+10. **Given** any render state, **Then** the info popup is anchored to the **LEFT** of the pad — panel `transform: translate(-INFO_PANEL_OFFSET_X, -INFO_PANEL_OFFSET_Y)` where `INFO_PANEL_OFFSET_X = 280` clears the pad's hover ring + a comfortable margin. The callout SVG's `translate(-${INFO_PANEL_OFFSET_X}px, -100%)` is driven inline from the JSX so the JS constant is the single source of truth for the offset.
 
-11. **Given** the info popup and action popup are both visible simultaneously (focused mode), **Then** both are fully visible; neither clips the other. The pad glow + water halo remain between them, unobscured. A visual pairing of "details on the left, actions on the right" around the focused pad.
+11. **Given** the popup is focused with action buttons visible, **Then** the meta block (top) and action block (bottom) are separated by a thin neon-cyan divider. The panel has no fixed `max-height` — it grows with content (meta rows + text + actions + optional swatch sub-panel) and the text region inside owns its own scroll cap.
 
 12. **Given** any visibility state, **Then** the info popup uses exactly these neon tokens (matching the rest of the UI): panel background `rgba(0, 0, 0, 0.82)`, border `1px solid var(--neon-cyan)`, triple-layer box-shadow glow from ActionPopup.css:40-43, `font-family: var(--font-mono)`, per-text-row base color `var(--neon-cyan)`, status badges use their semantic neon (`--neon-green` active, `--neon-pink` deleted, `--neon-gold` archived, `--neon-orange` for embedding pending/failed).
 
@@ -88,14 +91,33 @@ so that I can inspect todos — especially ones whose pad labels are too compres
       - `COMPLETED` (neon green ring + filled green text) if `todo.completed`.
       - `DELETED` (neon pink) if `todo.deleted`.
       - `ARCHIVED` (neon gold) if `todo.archived`.
-    - `Embedding` — shown only when `embeddingStatus !== 'complete'`. Value is the raw string (`pending`, `failed`) in the corresponding neon color (orange for pending, pink for failed). Hides on `complete` to keep the panel quiet for the common case.
-    - `Position` — `(x, z)` rounded to two decimals.
+    - `Embedding` — shown only when `embeddingStatus !== 'complete'`. Rendered as a **pill badge** (`<StatusBadge>` — same component the Status row uses) with the uppercase status label (`PENDING` / `FAILED`) in the corresponding neon color (orange for pending, pink for failed). Hides on `complete` to keep the panel quiet for the common case.
+    - `Position` — `(x, z)` rounded to two decimals. Guarded with `Number.isFinite(...) ? .toFixed(2) : '—'` so a malformed drag anchor never renders `"NaN, NaN"`. During drag the row displays the live drag position (see Dev Agent Record IN #4); otherwise it reflects `todo.positionX / todo.positionY`.
 
 15. **Given** the todo's `text` field is longer than ~80 characters, **Then** the text wraps and, when focused, scrolls — not truncated with ellipsis. Hover-only mode may clip via the panel's max-height but the text shouldn't hard-truncate with "…".
 
+### Inline edit mode (focused-only)
+
+17. **Given** the popup is focused AND an `onCommitText` callback is wired by the parent, **When** I click the text region (or press Enter / Space while it has keyboard focus), **Then** the readonly text swaps to an inline `<textarea>` pre-populated with the todo's current text. The textarea auto-focuses and the cursor sits at the start of the content.
+    - **17a.** The editor region has a fixed starting height (`EDITOR_DEFAULT_HEIGHT = 180 px`) with a neon resize handle at its bottom edge. Dragging the handle grows/shrinks the region within `[EDITOR_MIN_HEIGHT = 80, max(480, window.innerHeight - 160)]` px. The upper bound re-evaluates on `window.resize` so a mid-edit viewport change keeps the handle reachable.
+    - **17b.** The popup losing focus (`focused` flips to `false`) discards any pending edit draft without committing. The editor also collapses to `EDITOR_DEFAULT_HEIGHT` so the next open starts fresh.
+
+18. **Given** I am editing, **When** I press a key, **Then** the keymap is:
+    - **Enter** (plain) — commit the edit. If the trimmed value differs from `todo.text`, call `onCommitText(trimmed)`; otherwise exit edit mode silently. Either way, close the editor.
+    - **Escape** — cancel: discard the draft, reset `editText` to `todo.text`, and close the editor.
+    - **Ctrl/Meta/Shift + Enter** — insert a newline at the caret/selection. Uses a functional `setEditText((prev) => ...)` + post-`requestAnimationFrame` caret restoration (guarded by `t.isConnected` so a mid-edit unmount can't touch a detached textarea).
+    - **Any Enter while `e.nativeEvent.isComposing || e.keyCode === 229`** — deferred entirely (the keystroke confirms an IME composition; it is not a commit and not a newline).
+    - Enter and Escape both call `stopPropagation()` so PondScene-level keymaps don't double-handle them.
+
+19. **Given** the trimmed editor value is empty / whitespace-only, **When** I press Enter, **Then** commit is a silent no-op: the editor closes, no callback fires, the pad's text is unchanged. Rationale: deleting a todo is an explicit Delete action, not an emergent side-effect of clearing text. (No visible "cannot be empty" feedback in this story — UX revisit is deferred.)
+
+20. **Given** the server's `todo.text` changes during an active edit (remote mutation, optimistic update from elsewhere), **Then** the editor's in-flight draft is the user's canonical value — the incoming change does not clobber the draft. On commit, the user's text wins (last-write-wins). Conflict detection + prompt is explicitly out of scope.
+
+21. **Given** I wheel-scroll over the popup while editing, **Then** the wheel event is always stopped at the panel — it never bubbles to the OrbitControls zoom handler, even at the textarea's scroll boundaries. (Readonly mode keeps the bubble-at-boundary behaviour so scrolling past the end of the text still moves the camera; edit mode does not.)
+
 ### Quality gate
 
-16. **Given** I run `npx vitest run` after this story, **Then** all existing tests plus new tests pass. New tests cover: (a) hover sets `hoveredTodoId`; (b) leave clears it (if still current); (c) drag-in-progress blocks hover publish; (d) dissolving-phase pad does not publish; (e) focused mode toggles panel `pointer-events`; (f) `Escape` hides both popups; (g) meta-rows render the expected labels/badges for representative Todo shapes (active, completed, deleted, archived, embedding-pending).
+22. **Given** I run `npx vitest run` after this story, **Then** all existing tests plus new tests pass. New tests cover: (a) hover sets `hoveredTodoId`; (b) leave clears it (if still current); (c) drag-in-progress blocks hover publish; (d) dissolving-phase pad does not publish; (e) focused mode toggles panel `pointer-events`; (f) `Escape` closes the popup; (g) meta-rows render the expected labels/badges for representative Todo shapes (active, completed, deleted, archived, embedding-pending); (h) action buttons appear only in focused mode; (i) text click opens the inline editor; (j) Enter commits, Escape cancels, Ctrl+Enter inserts newline; (k) empty-text commit is silent no-op; (l) focus loss discards the edit draft.
 
 ---
 
@@ -297,27 +319,44 @@ Hover mode is informational only — moving the cursor onto the panel would canc
 
 ### Scrollbar convention: always `<NeonScrollbar>`
 
-This app globally hides native scrollbars ([global.css:26-28](frontend/src/styles/global.css#L26-L28)). Any region that needs to scroll uses the ported `NeonScrollbar` component — never raw `overflow: auto` with `::-webkit-scrollbar` styling. Rationale:
+This app globally hides native scrollbars ([global.css:26-28](frontend/src/styles/global.css#L26-L28)). Any region that needs to scroll uses the ported `NeonScrollbar` component — never raw `overflow: auto` with `::-webkit-scrollbar` styling + bespoke thumb DOM. Rationale:
 
 - **Firefly cursor integration.** Native scrollbars capture input at the OS compositor level; the firefly-trail cursor goes blind the moment the user grabs a native thumb. NeonScrollbar uses DOM thumbs and fires standard `mousemove`, so the cursor keeps tracking during drag — critical for this app's custom-cursor aesthetic.
 - **One scrollbar vocabulary.** Neon wireframe track + glowing thumb, same palette variants (cyan / orange / gold / green / pink), same interaction idioms (click track to jump, drag thumb to scroll). Future scrollable regions (long text in a delete-confirmation dialog, a settings panel, a debug table) drop straight in without re-solving this.
-- **Keep the port verbatim.** The component lives at `frontend/src/components/ui/NeonScrollbar/` after Task 3a. Any bug fix or feature should land in the `rag-csv-crew` source first, then port here. That keeps the two repos one-to-one so future refactors aren't hindered by diverged copies.
+- **One-to-one with the upstream port.** The component at `frontend/src/components/ui/NeonScrollbar/` started as a verbatim port from `rag-csv-crew`. The local overlay-mode addition (see below) is documented here; any further changes should land upstream-first when possible so the two repos don't diverge.
 
-Usage pattern:
+**Two modes:**
 
-```tsx
-import { NeonScrollbar } from '../ui/NeonScrollbar';
+`NeonScrollbar` has two APIs, chosen by props:
 
-<NeonScrollbar color="cyan" style={{ maxHeight: 180 }}>
-  <div>{/* any content that might overflow */}</div>
-</NeonScrollbar>
-```
+1. **Wrap mode** (default) — pass `children`. NeonScrollbar renders an inner scrollable div containing them. Use this for regular DOM content:
 
-Pick a `color` that matches the surrounding chrome — cyan for the info popup (matches the popup's cyan border + glow), other variants for future contexts. The component accepts `innerClassName` / `innerStyle` if the scrollable inner element needs extra layout (see its `NeonScrollbarProps` docstring for the full surface).
+    ```tsx
+    <NeonScrollbar color="cyan" style={{ maxHeight: 180 }}>
+      <div>{/* any content that might overflow */}</div>
+    </NeonScrollbar>
+    ```
 
-### Positioning math: avoiding ActionPopup overlap
+2. **Overlay mode** — pass `scrollElement={someHTMLElementOrNull}`. NeonScrollbar renders only tracks + thumbs and drives them against the external element's `scrollTop` / `scrollHeight`. Use this when the scrollable is an element the consumer must own (e.g. a `<textarea>`, an `<input type="textarea">`, a pre-existing scroll container that can't be wrapped). Layout: wrap the owned scrollable + the `<NeonScrollbar scrollElement=...>` in a `position: relative` parent; NeonScrollbar applies `position: absolute; inset: 0` via its `.neon-scrollbar--overlay` modifier.
 
-`ActionPopup` sits at `translate(+80, -120)` from the pad anchor. `InfoPopup` at `translate(-280, -120)`. Even with moderate panel widths (up to ~260 px for the info popup, ~160 px for the action popup), there's a ≥ 200 px horizontal gap at screen center. If you later tune `INFO_PANEL_OFFSET_X` DOWN below 240, eyeball the focused state to confirm no overlap.
+    ```tsx
+    const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
+
+    <div style={{ position: 'relative', height: 200 }}>
+      <textarea ref={setTextareaEl} style={{ width: '100%', height: '100%', overflowY: 'auto' }} />
+      <NeonScrollbar scrollElement={textareaEl} color="cyan" />
+    </div>
+    ```
+
+    Pass the element as state (not `useRef.current`) so NeonScrollbar's effects re-run on mount — `useRef` mutations don't trigger re-renders and can leave the scrollbar stuck in a "no element" state when mounted inside a drei `<Html>` portal.
+
+Pick a `color` that matches the surrounding chrome — cyan for the info popup (matches the popup's cyan border + glow), other variants for future contexts. The component accepts `innerClassName` / `innerStyle` (wrap mode) / `onThumbHover` / `onThumbDrag` (both modes — used for firefly → frog-hand cursor swaps). See `NeonScrollbarProps` for the full surface.
+
+### Positioning math
+
+Per the D1 amendment, ActionPopup is gone — the merged InfoPopup is the only per-pad popup. The panel sits at `translate(-INFO_PANEL_OFFSET_X, -INFO_PANEL_OFFSET_Y)` from the pad anchor, where both constants live at the top of `InfoPopup.tsx`. The callout SVG's `translate(-INFO_PANEL_OFFSET_X px, -100%)` is driven inline from the JSX so the pixel offset is defined in exactly one place (previously the CSS had a hardcoded `translate(-280px, -100%)` that could drift out of sync — fixed during CR).
+
+Tuning guidance: `INFO_PANEL_OFFSET_X = 280` clears the pad's hover ring (radius ~80 px) plus a comfortable margin and reserves space for the panel itself (up to ~260 px wide with meta + actions). If you tune the offset DOWN below 240 or UP past the viewport, re-check that the focused popup still fits on-screen for pads near the viewport edges — there's no edge-flipping logic yet.
 
 ### Deferred items
 
@@ -346,6 +385,14 @@ Deviations from the original spec, all user-directed:
 
 4. **Position meta row reads the live value.** To stay consistent with the popup anchor, the "Position (x, z)" meta row also reads the sticky/drag position — so during a drag the displayed coords update live rather than lagging until the refetch.
 
+5. **ActionPopup merged into InfoPopup.** The original spec framed InfoPopup as a sibling of ActionPopup ("details left, actions right"). During implementation the user consolidated both into a single left-anchored panel: InfoPopup now contains the meta block, the text region, the action buttons (Complete / Delete / Set Color), and the color-swatch sub-panel. `ActionPopup.{tsx,css,test.tsx}` were deleted. Rationale: keeping the user's attention in a single visual quadrant during focused work, avoiding the split-screen read that required looking both sides of the pad simultaneously. Spec ACs #6, #11, and the "Positioning math" section were amended at code-review time to match shipped reality (decision D1).
+
+6. **Inline edit mode shipped despite "Not in scope".** The spec originally punted text editing to a future story; during implementation the user requested inline edit be added. The text region is clickable in focused mode (with `onCommitText` wired); click swaps to a `<textarea>` with Enter-to-save, Escape-to-cancel, `Ctrl/⌘/Shift+Enter` for newline, and IME-composition detection. A neon resize handle lets the user grow the editor up to `max(480, window.innerHeight - 160)` px. Empty/whitespace commit is a silent no-op (deleting a todo is an explicit action). Remote text changes during edit are overwritten on commit (last-write-wins, no conflict prompt). Spec "Not in scope" §1 was removed and new ACs #17–#21 added at code-review time (decision D2).
+
+7. **Bespoke edit-mode scrollbar replaced with NeonScrollbar overlay mode.** Edit mode initially shipped with a hand-rolled neon track + thumb inside InfoPopup because `NeonScrollbar`'s wrap-mode architecture (scrolls its own inner div) didn't fit a `<textarea>` whose content height belongs to the browser's internal scroll buffer. Eleven subsequent commits debugging that bespoke scrollbar (`67914ca` → `f5d5c3e`) surfaced the architecture mismatch as load-bearing. At code-review time the user asked for a proper refactor rather than a convention exception: `NeonScrollbar` gained a second API — `scrollElement?: HTMLElement | null` — that drives the thumb against an externally-owned scrollable. In overlay mode the component renders only tracks + thumbs and positions itself absolutely (`.neon-scrollbar--overlay` modifier). InfoPopup's edit mode now uses `<NeonScrollbar scrollElement={textareaEl} color="cyan" onThumbHover={...} onThumbDrag={...} />` and the bespoke code + `syncThumb` / `handleThumbDragStart` / `MIN_THUMB_PX` / `THUMB_INSET` / `thumbEl` state / `textareaRef` mirror are all gone. This also obviated CR patches P1 (thumb math), P2 (elementFromPoint null), P3 (thumb-drag listener leak), P11 (ref mutation during render), and P13 (duplicate comment) (decision D3).
+
+8. **CR patches 2026-04-23.** Inline patches applied during code review: 2 s safety timeout on `stickyPos` convergence (P4); `Number.isFinite` guard on Position render (P5); IME composition + functional `setEditText` + `isConnected`-guarded rAF in Ctrl+Enter newline (P6); `stopPropagation` on textarea Enter/Escape (P7); callout `translate` moved to inline JSX style (P9); `editorMaxHeight` state with `window.resize` listener (P12); dead `resizeHandleOverRef` removed (P14); `handleScrollableWheel` unconditionally stops during edit mode (P15, from D6); Embedding meta-row promoted to a pill badge via `StatusBadge` (P16, from D7); resize-handle listeners now tear down on unmount via `resizeTeardownRef` + cleanup effect (P3 resize-handle portion). Two patches left as `[OPEN]` in deferred-work.md: (P8) focus-loss leaves store preview stuck — requires PondScene change; (P10) `.action-popup__color-swatch*` BEM prefix kept on PopupColorSwatch to avoid churn.
+
 ### Debug Log
 
 No blocking issues encountered. Vitest stayed green throughout (330 tests passing after each checkpoint). TypeScript clean under `tsc --noEmit`.
@@ -368,23 +415,100 @@ No blocking issues encountered. Vitest stayed green throughout (330 tests passin
 ### File List
 
 **New files:**
-- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx` (verbatim port from rag-csv-crew)
-- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.css` (verbatim port from rag-csv-crew)
+- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx` (ported from rag-csv-crew; extended with overlay mode during CR — see IN #7)
+- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.css` (ported from rag-csv-crew; `.neon-scrollbar--overlay` modifier added during CR)
 - `frontend/src/components/ui/NeonScrollbar/index.ts`
-- `frontend/src/components/ui/InfoPopup.tsx`
+- `frontend/src/components/ui/InfoPopup.tsx` (hosts meta + text + actions + color swatch + inline editor)
 - `frontend/src/components/ui/InfoPopup.css`
 - `frontend/src/components/ui/InfoPopup.test.tsx`
 - `frontend/src/utils/formatTodoMeta.ts`
+- `docs/custom-scrollbar-and-cursor.md` — field notes on the custom-scrollbar and custom-cursor gotchas discovered during implementation
 
 **Modified files:**
 - `frontend/src/stores/usePondStore.ts` — added `hoveredTodoId: string | null` slice + `setHoveredTodoId` action with no-op identity guard
 - `frontend/src/stores/usePondStore.test.ts` — 4 new tests for `setHoveredTodoId`
 - `frontend/src/components/pond/LilyPad.tsx` — hover publish in `onPointerEnter` (with 5 guards), hover clear in `onPointerLeave` (with same-id race guard), unmount cleanup extension for `hoveredTodoId`. Drag-start hover-clear was added then reversed per user feedback — see Implementation Note 1.
 - `frontend/src/components/pond/LilyPad.test.tsx` — added mocks for `setHoveredTodoId`, `hoveredTodoId`, `activeDragAnchor` (mutable); 6 new hover tests
-- `frontend/src/components/pond/PondScene.tsx` — imported `InfoPopup`, selected `hoveredTodoId`, derived `infoTodo`, rendered `<InfoPopup>` block above `<ActionPopup>` block
-- `_bmad-output/implementation-artifacts/3-4-lily-pad-info-popup.md` — task/subtask checkboxes, Status → review, this Dev Agent Record
+- `frontend/src/components/pond/PondScene.tsx` — imported `InfoPopup`, selected `hoveredTodoId`, derived `infoTodo`, rendered `<InfoPopup>` for hover OR focused state (the old `<ActionPopup>` mount is gone per IN #5)
+- `frontend/src/components/ui/PopupColorSwatch.{tsx,css,test.tsx}` — now consumed by InfoPopup in focused mode; internal BEM prefix still `.action-popup__color-swatch*` per the deliberate-defer in `deferred-work.md`
+- `frontend/src/styles/neon-tokens.css` — minor token tweaks
+- `_bmad-output/implementation-artifacts/3-4-lily-pad-info-popup.md` — original task/subtask checkboxes, Status → review, this Dev Agent Record + CR-time amendments (Scope, ACs, Dev Notes, Review Findings, IN #5-#8)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — `3-4-lily-pad-info-popup: ready-for-dev → in-progress → review`
+- `_bmad-output/implementation-artifacts/deferred-work.md` — 12 entries added under "code review of story 3-4-lily-pad-info-popup — Group 1 / popup core (2026-04-23)"
+
+**Deleted files** (2026-04-23, per IN #5):
+- `frontend/src/components/ui/ActionPopup.tsx`
+- `frontend/src/components/ui/ActionPopup.css`
+- `frontend/src/components/ui/ActionPopup.test.tsx`
 
 ### Change Log
 
 - 2026-04-23 — Implemented hover-preview + focused-interactive info popup with NeonScrollbar chrome. Two user corrections landed during implementation: (a) popup must not be cleared when user drags the hovered pad, and (b) popup must visually follow the live drag position, with a sticky-position mitigation to prevent release flash while the refetch lands.
+- 2026-04-23 — ActionPopup merged into InfoPopup (IN #5). Inline edit mode added (IN #6). Bespoke edit-mode scrollbar replaced with NeonScrollbar overlay-mode API (IN #7, shipped during CR refactor). Eleven commits `e026c4c` → `f5d5c3e` landed these three deviations; the first seven commits in the range layered on the bespoke scrollbar before the CR refactor replaced it with the proper NeonScrollbar extension.
+- 2026-04-23 — Code review of Group 1 (popup core, 22 files / ~2139 diff lines) completed. 7 decisions resolved (batch-accepted all option-1 resolutions), 14 patches applied (2 deferred: P8 focus-loss preview leak, P10 PopupColorSwatch BEM rename). Spec amended post-review to reflect as-shipped behaviour: Scope rewritten, ACs #6/#9/#11/#14 amended, AC section "Inline edit mode" added (#17–#21), AC #22 test coverage expanded, Dev Notes §"Scrollbar convention" updated for overlay mode, §"Positioning math" retitled (ActionPopup gone). 337 frontend tests pass; `tsc --noEmit` clean. Groups 2–4 still pending review.
+
+---
+
+## Review Findings
+
+Code review of Group 1 (popup core: InfoPopup, ActionPopup deletion, PopupColorSwatch) — 2026-04-23.
+Layers run: Blind Hunter, Edge Case Hunter, Acceptance Auditor. All three returned findings; no layer failed.
+Groups 2–4 (NeonScrollbar port; LilyPad/PondScene/store wiring; docs + sprint) are pending separate review runs.
+
+### Decisions needed
+
+_Resolved 2026-04-23 via batch-accept (all "option 1") — see bracketed resolutions below._
+
+- [x] [Review][Decision] **ActionPopup merged into InfoPopup** — Spec (AC #6, #11 + Scope) describes InfoPopup as a **sibling** to ActionPopup: "details on the left, actions on the right". Diff deletes `ActionPopup.{tsx,css,test.tsx}` and folds Complete/Delete/Set-Color into `.info-popup__actions` inside InfoPopup. **[RESOLVED: accept merge; spec amendment needed to update AC #6/#11, Positioning Math §, Not-in-scope list, and add Implementation Note #5 to Dev Agent Record. Tracked as spec-amendment follow-up.]**
+- [x] [Review][Decision] **Edit-in-place shipped despite explicit "Not in scope"** — Spec §"Not in scope (defer)" §1 said "Edit-in-place. The info popup is read-only. Text edits stay a future story." Diff adds `onCommitText`, inline textarea, Enter-commit / Ctrl+Enter-newline / Esc-cancel, resizable editor, 9 tests. **[RESOLVED: promote edit-in-place into 3-4 scope; spec amendment needed to remove from "Not in scope", add ACs for whitespace handling (D4), remote-change conflict (D5), IME, and resize bounds. Tracked as spec-amendment follow-up.]**
+- [x] [Review][Decision] **Bespoke scrollbar in edit mode vs "always NeonScrollbar" convention** — Edit mode used hand-rolled `.info-popup__neon-track` / `.info-popup__neon-thumb` + custom `syncThumb`. **[RESOLVED via refactor, 2026-04-23: NeonScrollbar gained an `overlay` mode (new `scrollElement?: HTMLElement | null` prop) that drives the thumb against an externally-owned scrollable element. InfoPopup's edit mode now uses `<NeonScrollbar scrollElement={textareaEl} />` instead of the bespoke code. The spec's Dev Notes §"Scrollbar convention: always NeonScrollbar" is preserved intact — overlay mode is just a second NeonScrollbar API, not a convention exception. Spec amendment needed only for Dev Notes §"Scrollbar convention" to document the `scrollElement` prop and when to use wrap vs overlay; obviates Patches P1, P2, the thumb-drag portion of P3, P11, and P13.]**
+- [x] [Review][Decision] **Empty/whitespace-only text silently swallowed on commit** — `commitEdit` gates on `trimmed.length > 0` (`InfoPopup.tsx:1626-1632`). **[RESOLVED: accept silent-revert as UX; no code change. Add an AC line in D2's spec amendment documenting "empty text is a silent no-op; users delete pads via the Delete button, not by clearing text."]**
+- [x] [Review][Decision] **Incoming todo.text changes during edit silently dropped** — `InfoPopup.tsx:1529-1531`. **[RESOLVED: last-write-wins is intended; no code change. Add an AC line in D2's spec amendment documenting "remote text mutations during edit are overwritten on commit; conflict resolution is out of scope for 3-4."]**
+- [x] [Review][Decision] **Wheel over panel at scroll-end zooms camera during edit** — `handleScrollableWheel` (`InfoPopup.tsx:1566-1588`). **[RESOLVED: always stop wheel propagation during edit mode. See Patch P15 below.]**
+- [x] [Review][Decision] **"Embedding" meta row is plain span, others are pill badges** — `InfoPopup.tsx:1907-1909`. **[RESOLVED: promote Embedding to pill badge for visual parity. See Patch P16 below.]**
+
+### Patches
+
+All patches below were applied 2026-04-23. See the "NeonScrollbar refactor" note under Decision D3 above for obviated patches; remaining patches listed individually.
+
+- [x] [Review][Patch] **Thumb math: div-by-zero, NaN propagation, and boundary jitter** — OBVIATED by NeonScrollbar overlay refactor (bespoke `syncThumb` deleted)
+- [x] [Review][Patch] **`handleThumbDragStart` onUp: `el?.closest(...) !== null` evaluates true when `el` is null** — OBVIATED (handler deleted; NeonScrollbar's built-in drag handler doesn't share this bug)
+- [x] [Review][Patch] **Document mousemove/mouseup listener leak on unmount mid-drag** — `handleThumbDragStart` OBVIATED; `handleEditorResizeStart` now uses a ref + unmount-cleanup effect to tear down listeners, body.userSelect, and cursorMode on unmount [`InfoPopup.tsx` `resizeTeardownRef`]
+- [x] [Review][Patch] **`stickyPos` / `wasDraggingRef` never clear** — added 2 s safety timeout in the drag-anchor effect; proximity convergence still fires immediately, but the timeout ensures the popup can't be stranded on a stale anchor when the server clamps / rejects [`InfoPopup.tsx` drag-anchor effect]
+- [x] [Review][Patch] **Position meta row renders `"NaN, NaN"`** — guarded with `Number.isFinite(popupX) ? popupX.toFixed(2) : '—'` [`InfoPopup.tsx` Position MetaRow]
+- [x] [Review][Patch] **Ctrl/Meta/Shift+Enter newline-insert safety** — IME composition check added (`e.nativeEvent.isComposing || e.keyCode === 229`); `setEditText` switched to functional form; rAF guarded with `t.isConnected` [`InfoPopup.tsx` textarea onKeyDown]
+- [x] [Review][Patch] **Textarea `onKeyDown` now calls both `preventDefault` and `stopPropagation`** on Enter/Escape to prevent outer PondScene keymaps from firing [`InfoPopup.tsx` textarea onKeyDown]
+- [ ] [Review][Patch] **Focus-loss leaves store `previewColor` stuck** — DEFERRED: requires PondScene change (always pass `onPreviewColor`), not an InfoPopup-only fix. Re-classified to deferred-work; to be addressed in Group 3 review.
+- [x] [Review][Patch] **`.info-popup__callout` CSS hardcodes `translate(-280px, -100%)`** — moved to inline `style={{ transform: ... }}` in JSX driven by the `INFO_PANEL_OFFSET_X` constant; CSS now only sets `translateY(-100%)` as a baseline [`InfoPopup.tsx` callout SVG, `InfoPopup.css` `.info-popup__callout`]
+- [ ] [Review][Patch] **Test still queries legacy `.action-popup__color-swatches`** — DEFERRED: author explicitly chose not to rename to avoid churn (`InfoPopup.css:176-179` comment). The `.action-popup__*` classes are owned by `PopupColorSwatch.{tsx,css}` and a rename would touch ~14 occurrences across 4 files with no functional change. Left as `[OPEN]` for a future standalone cleanup.
+- [x] [Review][Patch] **`textareaRef.current = textareaEl` during render body** — OBVIATED by refactor (`textareaRef` mirror deleted; only `textareaEl` state remains, passed directly to `NeonScrollbar`)
+- [x] [Review][Patch] **`EDITOR_MAX_HEIGHT` captured at mount** — now state-backed with a `window.resize` listener; fallback kept for SSR / jsdom [`InfoPopup.tsx` `editorMaxHeight`]
+- [x] [Review][Patch] **Duplicate "Thumb sync using only values we KNOW…" comment block** — OBVIATED (deleted with `syncThumb`)
+- [x] [Review][Patch] **Dead state: `resizeHandleOverRef`** — deleted; the two handlers that mutated it now just call `onDragAffordanceHover` directly
+- [x] [Review][Patch] **D6 / P15: Wheel during edit mode always stops propagation** — `handleScrollableWheel` now unconditionally stops when a `.info-popup__editor-textarea` is present, regardless of boundary state; readonly mode keeps bubble-at-boundary [`InfoPopup.tsx` `handleScrollableWheel`]
+- [x] [Review][Patch] **D7 / P16: Embedding status promoted to pill badge** — now rendered via `<StatusBadge label={... .toUpperCase()} color={embeddingColor} />` for visual parity with the Status row [`InfoPopup.tsx` Embedding MetaRow]
+
+### Deferred (pre-existing or low-value-for-now)
+
+- [x] [Review][Defer] Magic `-2` border subtraction (`visibleHeight = editorHeight - 2`) [`InfoPopup.tsx:1493`] — deferred, minor
+- [x] [Review][Defer] Stale closure on `editorHeight` in `handleThumbDragStart` [`InfoPopup.tsx:1650`] — deferred, no practical repro
+- [x] [Review][Defer] `handleWheel` uses `document.querySelector('canvas')` unconditionally — latent if app ever mounts a second canvas [`InfoPopup.tsx:1541-1557`] — deferred, pre-existing from ActionPopup
+- [x] [Review][Defer] Hover-mode `onWheel` handler sits on the outer wrap; currently benign because `pointer-events: none`, but fragile [`InfoPopup.tsx:1566-1588`] — deferred, no current trigger
+- [x] [Review][Defer] `onPreviewColor` fires `null` on every parent re-render via deps [`InfoPopup.tsx:1427-1429`] — deferred, harmless spam
+- [x] [Review][Defer] Escape `stopPropagation` fragile if `onCommitText` undefined [`InfoPopup.tsx:1816`] — deferred, not currently reachable
+- [x] [Review][Defer] `useState(todo.text)` initial capture stale across pad key-swap edge [`InfoPopup.tsx:1449`] — deferred, one-frame flash at most
+- [x] [Review][Defer] `embeddingColor` binary fallthrough — new statuses silently render orange [`InfoPopup.tsx:1614-1615`] — deferred, needs enum decision
+- [x] [Review][Defer] Test "Enter is no-op when trimmed matches" doesn't assert edit-mode state [`InfoPopup.test.tsx` ~line 1220] — deferred, test improvement
+- [x] [Review][Defer] `aria-live="polite"` on `role="dialog"` unusual; `aria-describedby` missing [`InfoPopup.tsx:1788`] — deferred, tracked under story 4-4 Frontend A11y Sweep
+
+### Cross-group follow-ups
+
+The Acceptance Auditor flagged items that depend on other groups' diffs:
+
+- **Group 2** (NeonScrollbar port) — verify `frontend/src/components/ui/NeonScrollbar/*` is byte-for-byte from `rag-csv-crew` and `--neon-cyan` RGB matches `0, 238, 255`.
+- **Group 3** (LilyPad/PondScene/store) — verify PondScene wires all four callbacks (`onComplete`, `onDelete`, `onCommitColor`, `onCommitText`), verify close-paths collapse edit mode, verify `usePondStore.setHoveredTodoId` identity guard, verify drag-start reversal per Dev Agent Record IN #1.
+- **Group 4** (docs + sprint) — verify `docs/custom-scrollbar-and-cursor.md` documents the bespoke-scrollbar tension surfaced by Decision #3 above.
+
+### Dismissed (noise / intentional / documented)
+
+9 findings dismissed, among them: hover popup follows pad during drag (intentional per memory + Dev Agent Record IN #1-#3); Position meta row reads live value (documented in IN #4); statusBadges priority order (intentional); cosmetic/flex spacing notes; React typing nits; framework-managed ResizeObserver retention; contingent items that will resolve once the three big decisions above are made.
