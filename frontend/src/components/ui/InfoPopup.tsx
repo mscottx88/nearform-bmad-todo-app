@@ -149,32 +149,42 @@ export function InfoPopup({
   const resizeHandleOverRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // A <textarea> doesn't auto-grow with content — its height defaults
-  // to `rows` (2) regardless of CSS `height: auto`. Without this sync,
-  // the textarea stays at its min-height and NeonScrollbar never sees
-  // overflow, so no scroll chrome appears even when text spills far
-  // past the visible region. On every editText (and initial open) we
-  // reset height to 'auto' (clears any prior explicit height) then set
-  // it to scrollHeight — the intrinsic layout height of the content.
-  // useLayoutEffect so the measurement happens before paint and
-  // NeonScrollbar's ResizeObserver fires on the same frame.
+  // to `rows` (2) regardless of CSS `height: auto`. And even with
+  // auto-grow, a textarea sized strictly to its content would leave
+  // the resized edit box mostly empty and unclickable (the cursor
+  // can't land in whitespace below the textarea). Both problems are
+  // solved by sizing the textarea to `max(scrollHeight, inner viewport)`:
+  //   * short content → textarea fills the inner so the user can
+  //     click anywhere in the visible region to type more
+  //   * long content → textarea grows beyond the inner so overflow
+  //     triggers NeonScrollbar's thumb
+  // Deps include editorHeight so the textarea re-expands to fill
+  // whenever the user drags the resize handle.
   useLayoutEffect(() => {
     if (!editing) return;
     const ta = textareaRef.current;
     if (!ta) return;
+    const innerEl = ta.closest('.neon-scrollbar-inner');
     ta.style.height = 'auto';
-    ta.style.height = `${ta.scrollHeight}px`;
-    // Belt-and-suspenders: ResizeObserver on the textarea SHOULD
-    // already fire and trigger NeonScrollbar's updateThumbs, but
-    // in practice React's controlled-component value update and
-    // the style.height write can race the RAF-debounced observer.
-    // Dispatching a scroll event on the NeonScrollbar inner forces
-    // updateThumbs to run synchronously on this frame so the thumb
-    // appears the moment content overflows.
-    const inner = ta.closest('.neon-scrollbar-inner');
-    if (inner instanceof HTMLElement) {
-      inner.dispatchEvent(new Event('scroll'));
+    const contentH = ta.scrollHeight;
+    let viewportH = 0;
+    if (innerEl instanceof HTMLElement) {
+      // clientHeight includes padding; strip inner's padding-bottom
+      // (15 px) so the textarea stops just above the scroll-chrome
+      // reservation zone and doesn't push the scrollbar to appear
+      // for 15 px of padding-only overflow.
+      const style = getComputedStyle(innerEl);
+      const padBottom = parseFloat(style.paddingBottom) || 0;
+      viewportH = innerEl.clientHeight - padBottom;
     }
-  }, [editText, editing]);
+    ta.style.height = `${Math.max(contentH, viewportH)}px`;
+    // Force NeonScrollbar's updateThumbs to run on this frame so the
+    // thumb appears the moment content overflows (ResizeObserver +
+    // MutationObserver can race React's commit).
+    if (innerEl instanceof HTMLElement) {
+      innerEl.dispatchEvent(new Event('scroll'));
+    }
+  }, [editText, editing, editorHeight]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
   useEffect(() => {
