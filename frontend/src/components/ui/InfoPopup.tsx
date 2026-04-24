@@ -140,51 +140,45 @@ export function InfoPopup({
     typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 160) : 800;
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
-  // Tracks whether the cursor is currently over the resize handle.
-  // Used by the drag-release path to decide whether to revert
-  // cursorMode to 'grab' (cursor still over handle) or 'firefly'
-  // (cursor elsewhere — without this, letting go of the handle
-  // anywhere OTHER than over the handle would leave the frog-hand
-  // cursor stuck on screen until the user happens to hover a pad).
   const resizeHandleOverRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // A <textarea> doesn't auto-grow with content — its height defaults
-  // to `rows` (2) regardless of CSS `height: auto`. And even with
-  // auto-grow, a textarea sized strictly to its content would leave
-  // the resized edit box mostly empty and unclickable (the cursor
-  // can't land in whitespace below the textarea). Both problems are
-  // solved by sizing the textarea to `max(scrollHeight, inner viewport)`:
-  //   * short content → textarea fills the inner so the user can
-  //     click anywhere in the visible region to type more
-  //   * long content → textarea grows beyond the inner so overflow
-  //     triggers NeonScrollbar's thumb
-  // Deps include editorHeight so the textarea re-expands to fill
-  // whenever the user drags the resize handle.
-  useLayoutEffect(() => {
+  // Neon thumb state — tracks the textarea's own scrollTop so the
+  // overlay thumb repositions and resizes correctly as the user
+  // types or scrolls. Updated by a scroll listener on the textarea.
+  const [thumbInfo, setThumbInfo] = useState<{ top: number; height: number; visible: boolean }>({
+    top: 0, height: 0, visible: false,
+  });
+  const MIN_THUMB_PX = 28;
+  const TRACK_WIDTH = 15;
+  // Sync thumb to textarea scroll state. Called on every textarea
+  // scroll event and whenever editorHeight changes.
+  const syncThumb = useCallback((): void => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const { scrollTop, scrollHeight, clientHeight } = ta;
+    const usable = editorHeight - TRACK_WIDTH; // trackable range minus corner
+    if (scrollHeight <= clientHeight + 1) {
+      setThumbInfo({ top: 0, height: 0, visible: false });
+      return;
+    }
+    const ratio = clientHeight / scrollHeight;
+    const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
+    const maxTop = usable - thumbH;
+    const scrollFrac = scrollTop / (scrollHeight - clientHeight);
+    setThumbInfo({ top: scrollFrac * maxTop, height: thumbH, visible: true });
+  }, [editorHeight]);
+  useEffect(() => {
     if (!editing) return;
     const ta = textareaRef.current;
     if (!ta) return;
-    const innerEl = ta.closest('.neon-scrollbar-inner');
-    ta.style.height = 'auto';
-    const contentH = ta.scrollHeight;
-    let viewportH = 0;
-    if (innerEl instanceof HTMLElement) {
-      // clientHeight includes padding; strip inner's padding-bottom
-      // (15 px) so the textarea stops just above the scroll-chrome
-      // reservation zone and doesn't push the scrollbar to appear
-      // for 15 px of padding-only overflow.
-      const style = getComputedStyle(innerEl);
-      const padBottom = parseFloat(style.paddingBottom) || 0;
-      viewportH = innerEl.clientHeight - padBottom;
-    }
-    ta.style.height = `${Math.max(contentH, viewportH)}px`;
-    // Force NeonScrollbar's updateThumbs to run on this frame so the
-    // thumb appears the moment content overflows (ResizeObserver +
-    // MutationObserver can race React's commit).
-    if (innerEl instanceof HTMLElement) {
-      innerEl.dispatchEvent(new Event('scroll'));
-    }
-  }, [editText, editing, editorHeight]);
+    ta.addEventListener('scroll', syncThumb, { passive: true });
+    syncThumb();
+    return () => ta.removeEventListener('scroll', syncThumb);
+  }, [editing, syncThumb]);
+  // Re-sync whenever editText changes (content grows/shrinks).
+  useLayoutEffect(() => {
+    if (editing) syncThumb();
+  }, [editText, editing, syncThumb]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
   useEffect(() => {
@@ -289,6 +283,36 @@ export function InfoPopup({
     setEditing(false);
     setEditorHeight(EDITOR_DEFAULT_HEIGHT);
   };
+
+  // Neon thumb drag — scrolls the textarea on mousemove.
+  const handleThumbDragStart = useCallback((e: React.MouseEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ta = textareaRef.current;
+    if (!ta) return;
+    usePondStore.getState().setCursorMode('grabbing');
+    document.body.style.userSelect = 'none';
+    const startY = e.clientY;
+    const startScroll = ta.scrollTop;
+    const usable = editorHeight - TRACK_WIDTH;
+    const maxScroll = ta.scrollHeight - ta.clientHeight;
+    const onMove = (ev: MouseEvent): void => {
+      const delta = ev.clientY - startY;
+      const scrollDelta = (delta / usable) * maxScroll;
+      ta.scrollTop = Math.max(0, Math.min(maxScroll, startScroll + scrollDelta));
+    };
+    const onUp = (ev: MouseEvent): void => {
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const overDraggable = el?.closest('.info-popup__editor-resize') !== null
+        || el?.closest('.info-popup__neon-thumb') !== null;
+      usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [editorHeight]);
 
   // Resize handle drag — matches NeonScrollbar's thumb-drag pattern
   // (document-level mousemove / mouseup). Pointer events proved
@@ -415,72 +439,50 @@ export function InfoPopup({
               editor lets the user drag to grow/shrink the region. */}
           {editing ? (
             <div className="info-popup__editor-wrap" onWheel={handleScrollableWheel}>
-              {/* The text "box" is the NeonScrollbar outer wrapper —
-                  its border stays stationary while the textarea (no
-                  border) shifts vertically underneath as the user
-                  scrolls. `className` threads our editor-box style
-                  onto the scrollbar's outer wrapper. onThumbHover /
-                  onThumbDrag swap the custom firefly cursor to the
-                  frog-hand grab glyph while the user interacts with
-                  the scrollbar thumb, matching the affordance
-                  LilyPad uses on hover/drag. */}
-              {/* Explicit `height` (not `max-height`) so the
-                  NeonScrollbar inner's `height: 100%` resolves to a
-                  definite value. With only max-height set, the inner
-                  falls back to content-sized layout and its
-                  scrollHeight never exceeds its clientHeight — no
-                  overflow is detected, no thumb appears. Edit mode
-                  uses editorHeight as a fixed viewport; overflow
-                  above that size scrolls inside. */}
-              <NeonScrollbar
-                color="cyan"
+              {/* Direct textarea + inline neon scrollbar overlay.
+                  The textarea fills the box (height: editorHeight,
+                  overflow-y: auto) and scrolls natively. A neon
+                  track+thumb is absolutely positioned on the right,
+                  synced via the textarea's own scrollTop /
+                  scrollHeight — this avoids the NeonScrollbar
+                  architecture mismatch (it scrolls its own inner,
+                  not an external element). */}
+              <div
                 className="info-popup__editor-textbox"
                 style={{ height: editorHeight }}
-                onThumbHover={onDragAffordanceHover}
-                onThumbDrag={onDragAffordanceDrag}
               >
                 <textarea
                   ref={textareaRef}
                   className="info-popup__editor-textarea"
                   value={editText}
                   autoFocus
-                  onChange={(e) => setEditText(e.target.value)}
+                  onChange={(e) => { setEditText(e.target.value); }}
                   onKeyDown={(e) => {
-                    // Keymap (user spec 2026-04-23):
-                    //   Escape        — cancel, discard draft
-                    //   Enter (plain) — save (commit trimmed text)
-                    //   Ctrl/⌘ + Enter — insert a newline at cursor
-                    //   Shift + Enter — also insert a newline (idiomatic)
-                    if (e.key === 'Escape') {
-                      e.stopPropagation();
-                      cancelEdit();
-                      return;
-                    }
+                    if (e.key === 'Escape') { e.stopPropagation(); cancelEdit(); return; }
                     if (e.key !== 'Enter') return;
                     const wantsNewline = e.ctrlKey || e.metaKey || e.shiftKey;
-                    if (!wantsNewline) {
-                      e.preventDefault();
-                      commitEdit();
-                      return;
-                    }
-                    // Ctrl / ⌘ + Enter — browsers default to a newline in
-                    // some UAs but not all; insert it manually so the
-                    // behaviour is consistent. Manual splice preserves
-                    // the selection range on replace.
+                    if (!wantsNewline) { e.preventDefault(); commitEdit(); return; }
                     e.preventDefault();
-                    const target = e.currentTarget;
-                    const start = target.selectionStart;
-                    const end = target.selectionEnd;
-                    const next = editText.slice(0, start) + '\n' + editText.slice(end);
-                    setEditText(next);
-                    // Restore caret after React commits the controlled value.
-                    requestAnimationFrame(() => {
-                      target.selectionStart = start + 1;
-                      target.selectionEnd = start + 1;
-                    });
+                    const t = e.currentTarget;
+                    const s = t.selectionStart; const en = t.selectionEnd;
+                    setEditText(editText.slice(0, s) + '\n' + editText.slice(en));
+                    requestAnimationFrame(() => { t.selectionStart = t.selectionEnd = s + 1; });
                   }}
                 />
-              </NeonScrollbar>
+                {/* Neon scrollbar track — always rendered; thumb is
+                    visible only when textarea overflows. */}
+                <div className="info-popup__neon-track">
+                  {thumbInfo.visible && (
+                    <div
+                      className="info-popup__neon-thumb"
+                      style={{ top: thumbInfo.top, height: thumbInfo.height }}
+                      onMouseDown={handleThumbDragStart}
+                      onMouseEnter={() => onDragAffordanceHover(true)}
+                      onMouseLeave={() => onDragAffordanceHover(false)}
+                    />
+                  )}
+                </div>
+              </div>
               <div
                 className="info-popup__editor-resize"
                 onMouseDown={handleEditorResizeStart}

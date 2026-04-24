@@ -184,14 +184,17 @@
   gap: 4px;
 }
 
-/* The visible "text box" is the NeonScrollbar outer wrapper. Its
-   border stays stationary while the textarea inside scrolls —
-   that's what the user sees as "the text scrolls, not the text box." */
+/* Container div holding textarea + neon overlay. Height is set via
+   inline style (editorHeight). overflow:hidden keeps the container
+   clean; the textarea scrolls internally. */
 .info-popup__editor-textbox {
+  position: relative;
+  overflow: hidden;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(0, 238, 255, 0.5);
   border-radius: 2px;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  box-sizing: border-box;
+  transition: border-color 120ms ease;
 }
 
 .info-popup__editor-textbox:focus-within {
@@ -199,14 +202,12 @@
   box-shadow: 0 0 6px rgba(0, 238, 255, 0.5);
 }
 
+/* Textarea fills the container. Right padding reserves 15 px for the
+   neon track overlay. Scrolls natively (overflow-y: auto); the native
+   scrollbar is hidden — the neon overlay is the only chrome. */
 .info-popup__editor-textarea {
   width: 100%;
-  /* height: auto lets the textarea expand to its content height so
-     the NeonScrollbar inner can scroll it as a whole. Border lives
-     on the NeonScrollbar wrapper so the frame stays put while the
-     text underneath scrolls. */
-  height: auto;
-  min-height: 80px;
+  height: 100%;
   box-sizing: border-box;
   background: transparent;
   border: none;
@@ -215,13 +216,51 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
-  padding: 6px 8px;
+  padding: 6px 22px 6px 8px;   /* 22 px right = 15 track + 7 gap */
   outline: none;
   resize: none;
   white-space: pre-wrap;
-  overflow: hidden;
-  /* Firefly cursor stays in charge; don't reintroduce the I-beam. */
+  overflow-y: auto;
+  scrollbar-width: none;
   cursor: none;
+}
+
+.info-popup__editor-textarea::-webkit-scrollbar {
+  display: none;
+}
+
+/* Neon scrollbar track — 15 px strip on the right edge. */
+.info-popup__neon-track {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 15px;
+  background: rgba(0, 16, 20, 0.90);
+  border-left: 1px solid rgba(0, 238, 255, 0.35);
+}
+
+/* Neon thumb — top/height set by JS from scrollTop/scrollHeight. */
+.info-popup__neon-thumb {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border-radius: 3px;
+  cursor: none;
+  background: rgba(0, 238, 255, 0.10);
+  border: 1px solid rgba(0, 238, 255, 0.40);
+  box-shadow: 0 0 3px rgba(0, 238, 255, 0.25);
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.info-popup__neon-thumb:hover,
+.info-popup__neon-thumb:active {
+  background: rgba(0, 238, 255, 0.70);
+  border-color: rgba(0, 238, 255, 0.80);
+  box-shadow:
+    0 0 6px rgba(0, 238, 255, 0.55),
+    0 0 14px rgba(0, 238, 255, 0.25),
+    0 0 28px rgba(0, 238, 255, 0.25);
 }
 
 .info-popup__editor-resize {
