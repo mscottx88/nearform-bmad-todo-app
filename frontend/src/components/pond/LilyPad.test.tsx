@@ -462,6 +462,45 @@ describe('LilyPad', () => {
       const padMesh = container.querySelector('mesh');
       if (!padMesh) return;
       fireEvent.pointerLeave(padMesh);
+      // Stronger assertion: the setter must not fire AT ALL, not just
+      // "not with null" — a future regression calling it with a
+      // wrong-pad id should also fail this test.
+      expect(setHoveredTodoIdMock).not.toHaveBeenCalled();
+    });
+
+    // Story 3.4 (CR reversal 2026-04-23): drag-start clears hover so
+    // the info popup fades out. The pad no longer drags the popup
+    // along; the popup can reappear only after drag release + a
+    // fresh pointerEnter. These tests lock the reversal in.
+    it('drag-start clears hoveredTodoId when this pad owned the hover', () => {
+      hoverStateMock.current = '123';
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
+      // Cross the 4 px drag threshold to flip isDraggingRef.current → true
+      // inside the pad's pointermove window handler.
+      fireEvent.pointerMove(window, {
+        clientX: 20,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 1,
+      });
+      expect(setHoveredTodoIdMock).toHaveBeenCalledWith(null);
+    });
+
+    it('drag-start does NOT clear hover when a different pad owns it', () => {
+      hoverStateMock.current = 'other-pad';
+      const { container } = render(<LilyPad todo={mockTodo} />);
+      const padMesh = container.querySelector('mesh');
+      if (!padMesh) return;
+      fireEvent.pointerDown(padMesh, { clientX: 0, clientY: 0, pointerId: 1, buttons: 1 });
+      fireEvent.pointerMove(window, {
+        clientX: 20,
+        clientY: 0,
+        pointerId: 1,
+        buttons: 1,
+      });
       expect(setHoveredTodoIdMock).not.toHaveBeenCalledWith(null);
     });
 

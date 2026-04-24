@@ -126,6 +126,49 @@ export function PondScene() {
   const infoTodoId = activePopupTodoId ?? hoveredTodoId;
   const infoTodo = infoTodoId ? renderTodos.find((t) => t.id === infoTodoId) : undefined;
 
+  // Delayed-unmount bookkeeping for the InfoPopup fade-out animation.
+  // When `infoTodoId` transitions truthy → null (hover clears, drag
+  // starts, popup closes), we keep rendering the previous InfoPopup
+  // for `INFO_POPUP_EXIT_MS` so its CSS exit keyframe can run. During
+  // that window `dismissing` is true — the panel fades, pointer-events
+  // go to none, and React then unmounts.
+  const INFO_POPUP_EXIT_MS = 100;
+  const [displayedInfoTodoId, setDisplayedInfoTodoId] = useState<string | null>(null);
+  const [infoDismissing, setInfoDismissing] = useState(false);
+  useEffect(() => {
+    if (infoTodoId !== null) {
+      setDisplayedInfoTodoId(infoTodoId);
+      setInfoDismissing(false);
+      return;
+    }
+    if (displayedInfoTodoId === null) return;
+    setInfoDismissing(true);
+    const timer = window.setTimeout(() => {
+      setDisplayedInfoTodoId(null);
+      setInfoDismissing(false);
+    }, INFO_POPUP_EXIT_MS);
+    return () => { window.clearTimeout(timer); };
+  }, [infoTodoId, displayedInfoTodoId]);
+
+  // Zombie hoveredTodoId: the hovered pad fell out of `renderTodos`
+  // (visibility-filter toggle, completion between publish and render,
+  // soft-delete refetch race). Clear it so the store doesn't hold a
+  // stale id that blocks a future setHoveredTodoId(null) from the
+  // unmount-cleanup effect.
+  useEffect(() => {
+    if (hoveredTodoId && !renderTodos.some((t) => t.id === hoveredTodoId)) {
+      usePondStore.getState().setHoveredTodoId(null);
+    }
+  }, [hoveredTodoId, renderTodos]);
+
+  // Resolve the todo we're actually rendering. During the exit-fade
+  // the original infoTodo may have been removed from renderTodos
+  // already (e.g., the pad was deleted); fall back to the last-known
+  // display just long enough for the animation to finish.
+  const displayedInfoTodo = displayedInfoTodoId
+    ? renderTodos.find((t) => t.id === displayedInfoTodoId) ?? infoTodo
+    : undefined;
+
   const handleComplete = () => {
     if (!popupTodo) return;
     const store = usePondStore.getState();
@@ -223,37 +266,40 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
-      {infoTodo && (
+      {displayedInfoTodo && (
         <InfoPopup
-          key={infoTodo.id}
-          todo={infoTodo}
-          focused={activePopupTodoId === infoTodo.id}
-          // Focused-only callbacks. InfoPopup gates their rendering
-          // on `focused === true`, but we pass them unconditionally —
-          // hover-only mode simply never fires them.
-          onComplete={activePopupTodoId === infoTodo.id ? handleComplete : undefined}
-          onDelete={activePopupTodoId === infoTodo.id ? handleDelete : undefined}
+          key={displayedInfoTodo.id}
+          todo={displayedInfoTodo}
+          focused={activePopupTodoId === displayedInfoTodo.id}
+          dismissing={infoDismissing}
+          // Focused-only callbacks. InfoPopup gates firing on
+          // `focused === true` internally, but we pass them
+          // unconditionally — hover-only mode simply never fires them.
+          // `onPreviewColor` MUST be unconditional: InfoPopup's
+          // focus-loss cleanup calls `onPreviewColor(null)` to clear
+          // the store's previewColor entry, and we cannot reach that
+          // cleanup if the callback is `undefined` by the time focus
+          // transitions (CR Group 3 P8).
+          onComplete={activePopupTodoId === displayedInfoTodo.id ? handleComplete : undefined}
+          onDelete={activePopupTodoId === displayedInfoTodo.id ? handleDelete : undefined}
           onCommitColor={
-            activePopupTodoId === infoTodo.id
+            activePopupTodoId === displayedInfoTodo.id
               ? (color: string) => {
-                  updateTodo.mutate({ id: infoTodo.id, color });
+                  updateTodo.mutate({ id: displayedInfoTodo.id, color });
                   usePondStore
                     .getState()
-                    .triggerRipple(infoTodo.positionX ?? 0, infoTodo.positionY ?? 0);
+                    .triggerRipple(displayedInfoTodo.positionX ?? 0, displayedInfoTodo.positionY ?? 0);
                   usePondStore.getState().closePopup();
                 }
               : undefined
           }
-          onPreviewColor={
-            activePopupTodoId === infoTodo.id
-              ? (color: string | null) =>
-                  usePondStore.getState().setColorPreview(infoTodo.id, color)
-              : undefined
+          onPreviewColor={(color: string | null) =>
+            usePondStore.getState().setColorPreview(displayedInfoTodo.id, color)
           }
           onCommitText={
-            activePopupTodoId === infoTodo.id
+            activePopupTodoId === displayedInfoTodo.id
               ? (text: string) => {
-                  updateTodo.mutate({ id: infoTodo.id, text });
+                  updateTodo.mutate({ id: displayedInfoTodo.id, text });
                 }
               : undefined
           }

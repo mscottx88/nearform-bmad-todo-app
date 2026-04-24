@@ -967,11 +967,14 @@ export function LilyPad({
           dragStartStore.clearDisplacedPad(todo.id);
           siblingNudgeRef.current = { x: 0, z: 0 };
           lastNudgeTargetRef.current = null;
-          // Story 3.4 (user correction 2026-04-23): do NOT clear
-          // hoveredTodoId on drag-start — the pad is still under the
-          // cursor, so the info popup should follow it for the drag.
-          // The pointerEnter guard still blocks publishing NEW hover
-          // while a drag is active, which is enough.
+          // Story 3.4 (CR reversal 2026-04-23): clear hoveredTodoId on
+          // drag-start. The info popup fades out quickly and does NOT
+          // follow the pad through the drag. The pointerEnter guard
+          // blocks re-publication during the drag; the popup can
+          // reappear only after release + a fresh pointerEnter.
+          if (dragStartStore.hoveredTodoId === todo.id) {
+            dragStartStore.setHoveredTodoId(null);
+          }
         }
         // Convert client coords → canvas NDC → water-plane hit. If the
         // canvas rect has no area yet (mid-resize, offscreen, detached)
@@ -1086,21 +1089,11 @@ export function LilyPad({
         if (releaseStore.cursorMode === 'grabbing') {
           releaseStore.setCursorMode('grab');
         }
-        // Story 3.4 (user correction 2026-04-23): re-sync hoveredTodoId
-        // based on whether the cursor is still over this pad. During
-        // the drag we suppressed pointerLeave clears; at release we
-        // honour the last known pointerOver state. If the cursor left
-        // the pad mid-drag, clear; if still over, keep the popup.
-        if (!pointerOverRef.current) {
-          if (releaseStore.hoveredTodoId === todo.id) {
-            releaseStore.setHoveredTodoId(null);
-          }
-        } else {
-          // Still over this pad — make sure hoveredTodoId reflects us
-          // (cursor may not fire another pointerEnter if it never left).
-          if (releaseStore.hoveredTodoId !== todo.id) {
-            releaseStore.setHoveredTodoId(todo.id);
-          }
+        // Story 3.4 (CR reversal 2026-04-23): hover was cleared at
+        // drag-start; re-publish now if the cursor is still over
+        // this pad so the info popup slide-fades back in.
+        if (pointerOverRef.current && releaseStore.hoveredTodoId !== todo.id) {
+          releaseStore.setHoveredTodoId(todo.id);
         }
       };
 
@@ -2525,13 +2518,11 @@ export function LilyPad({
           if (state.cursorMode === 'firefly') {
             state.setCursorMode('grab');
           }
-          // Story 3.4: publish hover when the pad is resting and no
-          // drag is active (own or any other pad via activeDragAnchor).
-          // Special case: if we ARE currently dragging THIS pad and the
-          // cursor returned after an earlier overshoot-leave (hover not
-          // cleared because of the drag-leave guard below), re-assert
-          // this pad as the hover — re-entry during own drag should
-          // keep the popup locked to this pad.
+          // Story 3.4: publish hover only when the pad is resting AND
+          // no drag is active (own or any other pad's — via
+          // activeDragAnchor). During a drag the info popup stays
+          // hidden; it can reappear only after release via the
+          // onWindowUp re-sync above.
           if (
             phaseRef.current === 'resting' &&
             !isDraggingRef.current &&
@@ -2539,10 +2530,6 @@ export function LilyPad({
             !state.deletingTodos.has(todo.id) &&
             state.activeDragAnchor === null
           ) {
-            state.setHoveredTodoId(todo.id);
-          } else if (isDraggingRef.current) {
-            // Own drag in progress + cursor returned to this pad —
-            // lock the popup to us in case a prior race cleared it.
             state.setHoveredTodoId(todo.id);
           }
         }}
@@ -2554,20 +2541,12 @@ export function LilyPad({
           if (state.cursorMode === 'grab' && !isDraggingRef.current) {
             state.setCursorMode('firefly');
           }
-          // Story 3.4 (user correction 2026-04-23): during a drag of
-          // THIS pad, do NOT clear the hover when the cursor overshoots
-          // the mesh — the popup should stay visible until release.
-          // The drag's onWindowUp re-syncs based on pointerOverRef so
-          // if the user lifts off the pad, the popup clears then.
-          //
-          // Still clear in the non-dragging case (including "some other
-          // pad is being dragged" — whose own hover isn't relevant to
-          // us). The `=== todo.id` guard survives the event-order race
-          // where A.leave fires after B.enter.
-          if (
-            !isDraggingRef.current &&
-            usePondStore.getState().hoveredTodoId === todo.id
-          ) {
+          // Clear hover if and only if this pad still owns it. The
+          // `=== todo.id` guard survives the event-order race where
+          // A.leave fires after B.enter — if B already took ownership,
+          // our clear is skipped. Single snapshot used for both the
+          // read and the write.
+          if (state.hoveredTodoId === todo.id) {
             state.setHoveredTodoId(null);
           }
         }}

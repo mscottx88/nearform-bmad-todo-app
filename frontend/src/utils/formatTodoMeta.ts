@@ -1,6 +1,12 @@
-/** Format an ISO timestamp as "YYYY-MM-DD HH:mm" in local time. */
+/**
+ * Format an ISO timestamp as "YYYY-MM-DD HH:mm" in local time.
+ * Returns "—" for invalid input (missing, malformed, or NaN) so UI
+ * consumers can't accidentally render "NaN-NaN-NaN NaN:NaN".
+ */
 export function formatTimestamp(iso: string): string {
+  if (!iso) return '—';
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
   const pad = (n: number): string => String(n).padStart(2, '0');
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
@@ -8,11 +14,18 @@ export function formatTimestamp(iso: string): string {
   );
 }
 
-/** Return a relative-time hint string, snapshotted at call time (no live ticking). */
+/**
+ * Relative-time hint snapshotted at call time (no live ticking).
+ * Invalid input returns an empty string. Future timestamps (negative
+ * diff — clock skew between server and client) are normalized via
+ * `Math.abs` so they still read as a sensible amount of time rather
+ * than collapsing to "just now".
+ */
 export function formatRelative(iso: string): string {
-  const now = Date.now();
+  if (!iso) return '';
   const then = new Date(iso).getTime();
-  const diffMs = now - then;
+  if (Number.isNaN(then)) return '';
+  const diffMs = Math.abs(Date.now() - then);
   const diffMins = Math.floor(diffMs / 60_000);
   if (diffMins < 1) return '(just now)';
   if (diffMins < 60) return `(${diffMins}m ago)`;

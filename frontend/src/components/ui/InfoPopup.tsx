@@ -34,6 +34,12 @@ const SET_COLOR_LETTERS = makeRainbowLetters('Set Color');
 interface InfoPopupProps {
   todo: Todo;
   focused: boolean;
+  /**
+   * PondScene-controlled fade-out flag. When true, the panel runs the
+   * exit animation (opacity → 0). The parent keeps InfoPopup mounted
+   * for the animation duration before unmounting it. Defaults to false.
+   */
+  dismissing?: boolean;
   /** Fired when Complete/Uncomplete clicked. Only called in focused mode. */
   onComplete?: () => void;
   /** Fired when Delete/Undelete clicked. Only called in focused mode. */
@@ -66,53 +72,19 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 export function InfoPopup({
   todo,
   focused,
+  dismissing = false,
   onComplete,
   onDelete,
   onCommitColor,
   onPreviewColor,
   onCommitText,
 }: InfoPopupProps): React.ReactElement {
-  // Drag-follow: popup tracks the live drag position while this pad owns
-  // activeDragAnchor. Falls back to persisted positionX/positionY at rest.
-  const dragAnchor = usePondStore((s) =>
-    s.activeDragAnchor?.padId === todo.id ? s.activeDragAnchor : null,
-  );
-  // Release-flash mitigation: hold the last-known drag position in state
-  // so the popup doesn't snap back to the stale persisted value for a
-  // frame while the refetch lands (~50-200ms).
-  const [stickyPos, setStickyPos] = useState<{ x: number; z: number } | null>(null);
-  const wasDraggingRef = useRef(false);
-  useEffect(() => {
-    if (dragAnchor) {
-      wasDraggingRef.current = true;
-      setStickyPos({ x: dragAnchor.x, z: dragAnchor.z });
-      return;
-    }
-    if (wasDraggingRef.current && stickyPos) {
-      const dx = Math.abs((todo.positionX ?? 0) - stickyPos.x);
-      const dz = Math.abs((todo.positionY ?? 0) - stickyPos.z);
-      if (dx < 0.1 && dz < 0.1) {
-        wasDraggingRef.current = false;
-        setStickyPos(null);
-        return;
-      }
-      // Safety: if the server applied a clamp / rejection / collision
-      // response, the refetched position may never converge with the
-      // drag-end anchor. Clear after a bounded timeout so the popup
-      // doesn't get permanently stranded on a stale coordinate.
-      const timer = window.setTimeout(() => {
-        wasDraggingRef.current = false;
-        setStickyPos(null);
-      }, 2000);
-      return () => { window.clearTimeout(timer); };
-    }
-  }, [dragAnchor, stickyPos, todo.positionX, todo.positionY]);
-
-  const effective = dragAnchor ?? stickyPos;
-  const popupX = effective ? effective.x : todo.positionX ?? 0;
-  const popupZ = effective
-    ? (effective as { x: number; z: number }).z
-    : todo.positionY ?? 0;
+  // Story 3.4 (CR reversal 2026-04-23): popup does NOT follow the pad
+  // during drag. LilyPad clears hoveredTodoId on drag-start; the popup
+  // fades out via the `dismissing` prop (PondScene-controlled) and can
+  // reappear only after release via a fresh pointerEnter.
+  const popupX = todo.positionX ?? 0;
+  const popupZ = todo.positionY ?? 0;
 
   // Swatch sub-panel state (merged from ActionPopup, focused-only).
   const [swatchOpen, setSwatchOpen] = useState(false);
@@ -400,10 +372,17 @@ export function InfoPopup({
           />
         </svg>
         <div
-          className={`info-popup__panel info-popup__panel--${focused ? 'focused' : 'hover'}`}
-          style={{
-            transform: `translate(-${INFO_PANEL_OFFSET_X}px, -${INFO_PANEL_OFFSET_Y}px)`,
-          }}
+          className={
+            `info-popup__panel info-popup__panel--${focused ? 'focused' : 'hover'}` +
+            (dismissing ? ' info-popup__panel--dismissing' : '')
+          }
+          style={
+            {
+              '--info-offset-x': `${INFO_PANEL_OFFSET_X}px`,
+              '--info-offset-y': `${INFO_PANEL_OFFSET_Y}px`,
+              transform: `translate(calc(-1 * var(--info-offset-x)), calc(-1 * var(--info-offset-y)))`,
+            } as React.CSSProperties
+          }
           role={focused ? 'dialog' : 'tooltip'}
           aria-live="polite"
           {...panelProps}
