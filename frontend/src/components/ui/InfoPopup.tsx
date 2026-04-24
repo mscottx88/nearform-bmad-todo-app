@@ -150,22 +150,25 @@ export function InfoPopup({
   });
   const MIN_THUMB_PX = 28;
   const TRACK_WIDTH = 15;
+  const THUMB_INSET = 3; // px margin at top and bottom of thumb within track
   // Sync thumb to textarea scroll state. Called on every textarea
   // scroll event and whenever editorHeight changes.
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     if (!ta) return;
     const { scrollTop, scrollHeight, clientHeight } = ta;
-    const usable = editorHeight - TRACK_WIDTH; // trackable range minus corner
     if (scrollHeight <= clientHeight + 1) {
       setThumbInfo({ top: 0, height: 0, visible: false });
       return;
     }
+    // usable = track height minus equal top+bottom insets so thumb
+    // has the same margin at both ends (matches NeonScrollbar.tsx).
+    const usable = editorHeight - THUMB_INSET * 2;
     const ratio = clientHeight / scrollHeight;
     const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
     const maxTop = usable - thumbH;
     const scrollFrac = scrollTop / (scrollHeight - clientHeight);
-    setThumbInfo({ top: scrollFrac * maxTop, height: thumbH, visible: true });
+    setThumbInfo({ top: THUMB_INSET + scrollFrac * maxTop, height: thumbH, visible: true });
   }, [editorHeight]);
   useEffect(() => {
     if (!editing) return;
@@ -212,25 +215,33 @@ export function InfoPopup({
     );
   }, []);
 
-  // Wheel over a NeonScrollbar-wrapped region. If the inner scrollable
-  // element can consume the wheel in the gesture direction, stop
-  // propagation so the panel's handleWheel above (which re-fires the
-  // wheel onto the canvas for OrbitControls zoom) does NOT run — the
-  // text scrolls, camera stays put. If the inner can't consume (no
-  // overflow or already at an edge), let it bubble so zoom still
-  // works for non-scrollable popups / short todos.
+  // Wheel over a scrollable region. If the element can consume the
+  // gesture direction, stop propagation so the panel's handleWheel
+  // (which re-fires onto the canvas for OrbitControls zoom) does NOT
+  // run — text scrolls, camera stays put. Checks both:
+  //   - NeonScrollbar inner (readonly text region)
+  //   - textarea (edit-mode editor, scrolls natively via overflow-y:auto)
   const handleScrollableWheel = useCallback((e: React.WheelEvent<HTMLDivElement>): void => {
-    const inner = e.currentTarget.querySelector(
-      '.neon-scrollbar-inner',
-    ) as HTMLElement | null;
-    if (!inner) return;
-    const canScrollUp = inner.scrollTop > 0;
-    const canScrollDown =
-      inner.scrollTop < inner.scrollHeight - inner.clientHeight - 1;
     const wantsUp = e.deltaY < 0;
     const wantsDown = e.deltaY > 0;
-    if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
-      e.stopPropagation();
+    // Readonly NeonScrollbar inner.
+    const inner = e.currentTarget.querySelector('.neon-scrollbar-inner') as HTMLElement | null;
+    if (inner) {
+      const canScrollUp = inner.scrollTop > 0;
+      const canScrollDown = inner.scrollTop < inner.scrollHeight - inner.clientHeight - 1;
+      if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
+        e.stopPropagation();
+      }
+      return;
+    }
+    // Edit-mode textarea (scrolls its own content natively).
+    const ta = e.currentTarget.querySelector('.info-popup__editor-textarea') as HTMLTextAreaElement | null;
+    if (ta) {
+      const canScrollUp = ta.scrollTop > 0;
+      const canScrollDown = ta.scrollTop < ta.scrollHeight - ta.clientHeight - 1;
+      if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
+        e.stopPropagation();
+      }
     }
   }, []);
 

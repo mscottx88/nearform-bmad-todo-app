@@ -238,6 +238,7 @@
   width: 15px;
   background: rgba(0, 16, 20, 0.90);
   border-left: 1px solid rgba(0, 238, 255, 0.35);
+  cursor: none;
 }
 
 /* Neon thumb — top/height set by JS from scrollTop/scrollHeight. */
