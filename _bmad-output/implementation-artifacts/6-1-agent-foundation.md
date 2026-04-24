@@ -541,6 +541,31 @@ Wire the router into [backend/src/main.py](backend/src/main.py): `from src.api.a
 - [x] [Review][Defer] `get_session` returns an ORM `ChatSession` instance (public helper leaking the ORM across module boundaries) — refactor to `_get_session_row` + a public response-shape getter
 - [x] [Review][Defer] `list_messages` lacks pagination / cursor — add when chat histories grow beyond 200 messages
 
+### Review Findings (Group C — agent bounded context) — 2026-04-24
+
+- [x] [Review][Patch] Every agent tool now catches all exceptions and returns a JSON error string — satisfies the CrewAI `_run -> str` contract and stops raw tracebacks from aborting the whole crew when a service raises (`list_for_agent` ValueError on bad filter, `hybrid_search` ValueError on empty query, DB outage, etc.) [backend/src/agent/tools/*.py]
+- [x] [Review][Patch] `run_crew` exception handler moved into a `try/finally` so the terminal `None` sentinel is guaranteed even if the `except` branch itself raises — prevents `stream_sse` from blocking the HTTP worker indefinitely [backend/src/agent/crew_runner.py:37-86]
+- [x] [Review][Patch] `_llm_instance` singleton is now protected by a double-checked `threading.Lock` — two concurrent first requests can no longer both construct a `ChatAnthropic` client [backend/src/agent/llm.py:19-42]
+- [x] [Review][Patch] `_chunk_words` preserves line breaks — splits on `\n` first, then word-groups each line, emitting a `"\n"` chunk between lines so the SSE client can reconstruct paragraph structure (previously all whitespace collapsed) [backend/src/agent/crew_runner.py:14-32]
+- [x] [Review][Patch] Empty LLM response now surfaces as `agent_empty_response` error event instead of an empty-text `chunk` followed by `done` — frontend no longer renders a blank assistant bubble [backend/src/agent/crew_runner.py:56-65]
+- [x] [Review][Patch] `GetChatHistoryTool.session_id` is now injected at construction time from `SkillContext.session_id` — dropped from the `_run` signature entirely. Closes the horizontal cross-session data leak where prompt-injected user text could trick the LLM into fetching history for an arbitrary session UUID [backend/src/agent/tools/get_chat_history.py, backend/src/agent/skills/chat.py]
+- [x] [Review][Patch] `intent_classifier` uses a focused classifier-specific prompt instead of `BASE_SYSTEM_PROMPT`. The shared base prompt says "You have access to tools" — false for the classifier, which primed the LLM to hallucinate tool calls. Untrusted-data framing is preserved [backend/src/agent/skills/intent_classifier.py]
+
+- [x] [Review][Dismiss] Original P22 ("remove redundant concrete-tool `__init__` wrappers") was a false start — Pydantic regenerates `__init__` per BaseTool subclass from its declared fields (`name`, `description`), so the wrappers ARE necessary to forward `session_factory` through to `PooledTool.__init__`. Reverted; wrappers kept with a clarifying comment.
+
+- [x] [Review][Defer] No cancellation plumbing through `SkillContext` — `time.sleep` in the chunk loop can't be interrupted; the `threading.Event` created in `api/agent.py:cancel_chat` is never read inside the crew thread. Needs a `stop_event: threading.Event | None` field on `SkillContext` and a `time.sleep(...)` → `stop_event.wait(timeout=...)` swap.
+- [x] [Review][Defer] No authorisation / tenancy in tool calls — every tool fetches from the service without a user scope. Out of epic scope until auth lands.
+- [x] [Review][Defer] `verbose=False` hardcoded in every `Agent` / `Crew` constructor — no config knob for debugging.
+- [x] [Review][Defer] `get_llm_for_agent() -> Any` launders type information; SkillContext's `llm: Any` does the same. Tightening depends on LangChain's LLM-interface stability.
+- [x] [Review][Defer] `PooledTool.__init__` sets `_session_factory` AFTER `super().__init__(**kwargs)`; any future subclass validator that reads the attr before the super call sees it unset. Works today; add a `model_post_init` pattern if validators start needing it.
+- [x] [Review][Defer] `event_queue` is unbounded — a pathologically verbose LLM run can balloon memory before the SSE consumer drains it. Add a reasonable `maxsize` if memory ever becomes an issue.
+- [x] [Review][Defer] Intent classifier prompt-injection via `ctx.user_message` — the `!r` escaping is weak. Low blast radius today (2 skills, `"chat"` is the safe fallback), but add output validation / whitelist-check if more skills land and routing becomes adversarially interesting.
+- [x] [Review][Defer] `AGENT_CHUNK_DELAY_MS` is a module-level constant with no range validation — out-of-range values silently apply.
+- [x] [Review][Defer] `max_tokens=4096` is low for structured chat responses; tune once real usage patterns emerge.
+- [x] [Review][Defer] No hard cap on chunk count — a 100k-word LLM response still produces 100k queue events. Clamp total chunks (e.g. at 500) as a DoS guard.
+- [x] [Review][Defer] `stream_sse` uses `queue.get()` with no timeout — can hang if the producer thread dies BEFORE entering the `try:` block (e.g. interpreter-level failure). Add a watchdog timeout with a heartbeat pattern.
+- [x] [Review][Defer] `search_service.hybrid_search` doesn't accept a `limit` param; `SearchTodosTool` slices `response.results[:limit]` client-side. Push the cap into the service signature in a future story that owns `search_service`.
+
 ---
 
 ## Dev Notes

@@ -125,6 +125,7 @@ def _classify_intent(user_message: str, session_id: uuid.UUID) -> str:
     from src.agent.skills.intent_classifier import (  # noqa: PLC0415
         build as build_classifier,
     )
+
     # isort: skip_file is not applicable here; local imports are intentional
     # to avoid circular imports at module load time.
 

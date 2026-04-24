@@ -194,19 +194,33 @@ class TestGetChatHistoryTool:
         with patch(
             "src.agent.tools.get_chat_history.chat_service.list_messages",
             return_value=[msg],
-        ):
-            tool = GetChatHistoryTool(session_factory=factory)
-            result = tool._run(session_id=str(session_id), limit=10)
+        ) as mock_list:
+            # Story 6.1 CR P19: session_id is now injected at construction
+            # time, not taken as a tool arg.
+            tool = GetChatHistoryTool(session_factory=factory, session_id=session_id)
+            result = tool._run(limit=10)
 
         data = json.loads(result)
         assert len(data) == 1
         assert data[0]["role"] == "user"
         assert data[0]["content"] == "hello"
+        # Verify the injected session_id was used.
+        mock_list.assert_called_once_with(mock_session, session_id, limit=10)
 
-    def test_invalid_uuid(self) -> None:
+    def test_returns_error_on_service_failure(self) -> None:
+        # P15: any exception from the service layer becomes a JSON error
+        # string, satisfying the CrewAI `_run -> str` contract.
+        session_id = uuid.uuid4()
         mock_session = MagicMock()
         factory = _make_session_factory(mock_session)
-        tool = GetChatHistoryTool(session_factory=factory)
-        result = tool._run(session_id="bad-id")
+
+        with patch(
+            "src.agent.tools.get_chat_history.chat_service.list_messages",
+            side_effect=RuntimeError("db down"),
+        ):
+            tool = GetChatHistoryTool(session_factory=factory, session_id=session_id)
+            result = tool._run(limit=10)
+
         data = json.loads(result)
         assert "error" in data
+        assert "db down" in data["error"]

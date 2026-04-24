@@ -11,20 +11,44 @@ AGENT_CHUNK_DELAY_MS: int = 50
 
 
 def _chunk_words(text: str) -> list[str]:
-    """Split text into word groups of 2-5 words each."""
-    words = text.split()
+    """Split text into word groups of 2-5 words, preserving line breaks.
+
+    Story 6.1 CR P18: the previous implementation called `text.split()` /
+    `" ".join(group)` which discarded every whitespace run — code fences,
+    bullets, and paragraph breaks in LLM output collapsed to a single
+    line on the client. We now split on `\\n` first and emit each line
+    break as its own chunk so the SSE consumer can reconstruct paragraph
+    structure by concatenating the texts.
+    """
+    lines = text.split("\n")
     chunks: list[str] = []
-    idx = 0
-    while idx < len(words):
-        size = random.randint(2, 5)  # noqa: S311
-        group = words[idx : idx + size]
-        chunks.append(" ".join(group))
-        idx += size
+    for i, line in enumerate(lines):
+        words = line.split()
+        idx = 0
+        while idx < len(words):
+            size = random.randint(2, 5)  # noqa: S311
+            group = words[idx : idx + size]
+            chunks.append(" ".join(group))
+            idx += size
+        if i < len(lines) - 1:
+            chunks.append("\n")
     return chunks
 
 
 def run_crew(ctx: SkillContext, skill_name: str) -> None:
-    """Run the crew in a daemon thread, emitting SSE events via ctx.event_queue."""
+    """Run the crew in a daemon thread, emitting SSE events via ctx.event_queue.
+
+    Story 6.1 CR P16: the terminal `None` sentinel is now enqueued in a
+    `finally` block so it is guaranteed even if the `except` handler
+    itself raises (e.g. queue op fails, `str(exc)` raises on an exotic
+    exception). Without this, `stream_sse` would block forever on
+    `queue.get()` and hang the HTTP worker.
+
+    Story 6.1 CR P20: an empty LLM response now surfaces as an
+    `agent_empty_response` error event instead of emitting an empty-text
+    chunk followed by `done` (which the client would render as a blank
+    assistant bubble).
+    """
     q: queue.Queue[dict[str, Any] | None] = ctx.event_queue
     try:
         spec = SKILL_REGISTRY[skill_name]
@@ -40,26 +64,32 @@ def run_crew(ctx: SkillContext, skill_name: str) -> None:
 
         result = crew.kickoff()
         prose = str(result).strip()
-
         chunks = _chunk_words(prose)
         chunk_count = len(chunks)
 
         if chunk_count == 0:
-            q.put({"type": "chunk", "text": prose})
-        else:
-            # Cap total simulated typing at 3 seconds.
-            raw_delay_s = AGENT_CHUNK_DELAY_MS / 1000.0
-            if chunk_count * raw_delay_s > 3.0:
-                actual_delay_s = 3.0 / chunk_count
-            else:
-                actual_delay_s = raw_delay_s
+            q.put(
+                {
+                    "type": "error",
+                    "code": "agent_empty_response",
+                    "message": "Agent returned no content",
+                    "recoverable": True,
+                }
+            )
+            return
 
-            for chunk in chunks:
-                q.put({"type": "chunk", "text": chunk})
-                time.sleep(actual_delay_s)
+        # Cap total simulated typing at 3 seconds.
+        raw_delay_s = AGENT_CHUNK_DELAY_MS / 1000.0
+        if chunk_count * raw_delay_s > 3.0:
+            actual_delay_s = 3.0 / chunk_count
+        else:
+            actual_delay_s = raw_delay_s
+
+        for chunk in chunks:
+            q.put({"type": "chunk", "text": chunk})
+            time.sleep(actual_delay_s)
 
         q.put({"type": "done"})
-        q.put(None)
 
     except Exception as exc:  # noqa: BLE001
         q.put(
@@ -70,6 +100,7 @@ def run_crew(ctx: SkillContext, skill_name: str) -> None:
                 "recoverable": False,
             }
         )
+    finally:
         q.put(None)
 
 

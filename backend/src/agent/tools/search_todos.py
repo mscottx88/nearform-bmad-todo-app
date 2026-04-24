@@ -16,23 +16,33 @@ class SearchTodosTool(PooledTool):
         "limit: max results to return (default 10)."
     )
 
+    # Pydantic auto-generates a per-subclass __init__ from declared
+    # fields. Without this wrapper, callers cannot pass `session_factory`
+    # through to PooledTool's PrivateAttr-setter.
     def __init__(self, session_factory: Callable[[], Session], **kwargs: Any) -> None:
         super().__init__(session_factory=session_factory, **kwargs)
 
+    # Story 6.1 CR P15: broad try/except returning a JSON error string so
+    # the CrewAI `_run -> str` contract is always satisfied. Catches the
+    # ValueError raised by hybrid_search on empty/stopword queries and
+    # any DB-layer outage.
     def _run(self, text: str, limit: int = 10) -> str:
-        with self._session_factory() as session:
-            response = search_service.hybrid_search(session, query_text=text)
-        top = response.results[:limit]
-        return json.dumps(
-            [
-                {
-                    "id": str(r.todo.id),
-                    "text": r.todo.text,
-                    "done": r.todo.completed,
-                    "color": r.todo.color,
-                    "score": r.score,
-                    "created": r.todo.created_at.isoformat(),
-                }
-                for r in top
-            ]
-        )
+        try:
+            with self._session_factory() as session:
+                response = search_service.hybrid_search(session, query_text=text)
+            top = response.results[:limit]
+            return json.dumps(
+                [
+                    {
+                        "id": str(r.todo.id),
+                        "text": r.todo.text,
+                        "done": r.todo.completed,
+                        "color": r.todo.color,
+                        "score": r.score,
+                        "created": r.todo.created_at.isoformat(),
+                    }
+                    for r in top
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": str(exc)})

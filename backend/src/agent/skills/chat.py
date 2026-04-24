@@ -14,7 +14,12 @@ def build(ctx: SkillContext) -> Crew:
         ListTodosTool(session_factory=ctx.session_factory),
         GetTodoTool(session_factory=ctx.session_factory),
         SearchTodosTool(session_factory=ctx.session_factory),
-        GetChatHistoryTool(session_factory=ctx.session_factory),
+        # Story 6.1 CR P19: session_id is injected at construction time
+        # from ctx — the LLM can no longer fetch history for arbitrary
+        # sessions via a prompt-injected tool argument.
+        GetChatHistoryTool(
+            session_factory=ctx.session_factory, session_id=ctx.session_id
+        ),
     ]
 
     agent = build_base_agent(

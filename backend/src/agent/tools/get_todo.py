@@ -6,7 +6,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.agent.tools.base import PooledTool
-from src.exceptions import TodoNotFoundError
 from src.services import todo_service
 
 
@@ -14,10 +13,15 @@ class GetTodoTool(PooledTool):
     name: str = "get_todo"
     description: str = "Fetch a single todo by its UUID id."
 
+    # Pydantic auto-generates a per-subclass __init__ from declared
+    # fields (name, description). Without this wrapper, callers cannot
+    # pass `session_factory` through to PooledTool's PrivateAttr-setter.
     def __init__(self, session_factory: Callable[[], Session], **kwargs: Any) -> None:
         super().__init__(session_factory=session_factory, **kwargs)
 
-    def _run(self, id: str) -> str:
+    # Story 6.1 CR P15: broad try/except returning a JSON error string so
+    # the CrewAI `_run -> str` contract is always satisfied.
+    def _run(self, id: str) -> str:  # noqa: A002  (LLM-facing arg name)
         try:
             todo_id = uuid.UUID(id)
         except ValueError:
@@ -36,5 +40,5 @@ class GetTodoTool(PooledTool):
                     "created": todo.created_at.isoformat(),
                 }
             )
-        except TodoNotFoundError:
-            return json.dumps({"error": f"Todo {id!r} not found"})
+        except Exception as exc:  # noqa: BLE001
+            return json.dumps({"error": str(exc)})
