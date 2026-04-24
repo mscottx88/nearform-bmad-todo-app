@@ -241,13 +241,12 @@
   cursor: none;
 }
 
-/* Neon thumb — top/height/display set by syncThumb() via direct DOM
-   writes (not React style prop — that would be re-applied each render
-   and fight the JS). display:none here is the before-first-sync state
-   only; syncThumb clears it before the first paint (useLayoutEffect). */
+/* Neon thumb — display/top/height owned by syncThumb() via direct DOM
+   writes. No `display` here (would cascade and override 'block' set by
+   syncThumb). Initial rendered state has no height → invisible until
+   syncThumb fires in useLayoutEffect before the first paint. */
 .info-popup__neon-thumb {
   position: absolute;
-  display: none;
   left: 3px;
   right: 3px;
   border-radius: 3px;

@@ -164,7 +164,7 @@ export function InfoPopup({
     const maxTop = usable - thumbH;
     const maxScroll = Math.max(0, scrollHeight - clientHeight);
     const scrollFrac = maxScroll > 0 ? scrollTop / maxScroll : 0;
-    thumb.style.display = '';
+    thumb.style.display = 'block';
     thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
     thumb.style.height = `${thumbH}px`;
   }, [editorHeight]);
