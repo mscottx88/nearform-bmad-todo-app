@@ -89,23 +89,30 @@ export function MatchStatsPopup({ hit, faded = false }: MatchStatsPopupProps) {
   const poleHeight =
     MIN_POLE_HEIGHT + clampedScore * (MAX_POLE_HEIGHT - MIN_POLE_HEIGHT);
 
-  // Matches the CSS `--faded` opacity for visual parity between the 3D
-  // pole and the HTML chip.
-  const FADED_OPACITY = 0.15;
+  // Pole colouring
+  //
+  // The scene uses a Bloom post-process with `luminanceThreshold ≈ 0.2` —
+  // any pixel above that threshold blooms brightly. In the default state
+  // we rely on that: the cyan #00eeff pole (luminance ≈ 0.68 linear) is
+  // picked up by Bloom and glows like a neon tube.
+  //
+  // In the faded state, simply dropping `material.opacity` is NOT enough:
+  // the Bloom pass samples the raw material colour, not the composited
+  // alpha, so the pole keeps emitting a bright halo even at low opacity.
+  // The only way to make it visually recede is to swap the COLOUR for a
+  // dim cyan whose luminance sits below the Bloom threshold. `#003a40`
+  // (luminance ≈ 0.05 linear) stays a perceptible dark-cyan line but
+  // does not contribute to the bloom pass at all.
+  const POLE_COLOUR_BRIGHT = '#00eeff';
+  const POLE_COLOUR_FADED = '#003a40';
 
   return (
     <group>
-      {/* Pole — thin neon cylinder. `toneMapped={false}` preserves
-          full brightness so the Bloom post-process pipeline picks it
-          up as a glow source. When `faded`, the material drops to
-          transparent so the pole visually recedes alongside the chip. */}
       <mesh position={[0, poleHeight / 2, 0]}>
         <cylinderGeometry args={[0.018, 0.018, poleHeight, 8]} />
         <meshBasicMaterial
-          color="#00eeff"
-          toneMapped={false}
-          transparent={faded}
-          opacity={faded ? FADED_OPACITY : 1}
+          color={faded ? POLE_COLOUR_FADED : POLE_COLOUR_BRIGHT}
+          toneMapped={!faded}
         />
       </mesh>
 
