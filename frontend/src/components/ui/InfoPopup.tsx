@@ -143,7 +143,7 @@ export function InfoPopup({
   const resizeHandleOverRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
-  const MIN_THUMB_PX = 28;
+  const MIN_THUMB_PX = 40;  // raised from 28 — visible even in tall boxes
   const THUMB_INSET = 3;
   // Direct DOM sync — no React state, no re-render latency.
   // The thumb is ALWAYS shown (like VS Code / Sublime Text) so the
@@ -173,9 +173,21 @@ export function InfoPopup({
     const ta = textareaRef.current;
     if (!ta) return;
     ta.addEventListener('scroll', syncThumb, { passive: true });
+    // ResizeObserver fires once the browser has computed layout for the
+    // textarea (including when the drei <Html> portal positions itself
+    // on the first RAF after mount — useLayoutEffect fires too early
+    // for that, so clientHeight can be 0 on the first call).
+    const ro = new ResizeObserver(syncThumb);
+    ro.observe(ta);
+    // Belt-and-suspenders: a direct syncThumb in the same tick catches
+    // the case where the textarea already has its final size.
     syncThumb();
-    return () => ta.removeEventListener('scroll', syncThumb);
+    return () => {
+      ta.removeEventListener('scroll', syncThumb);
+      ro.disconnect();
+    };
   }, [editing, syncThumb]);
+  // Also sync whenever content changes (resize or typing).
   useLayoutEffect(() => {
     if (editing) syncThumb();
   }, [editText, editing, syncThumb]);
