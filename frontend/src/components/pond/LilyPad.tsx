@@ -2586,7 +2586,9 @@ export function LilyPad({
           `searchHit` becomes undefined when search clears (both clearSearch
           and backspace-to-empty reset `searchResults` to a new Map), so the
           component unmounts with no extra gating. */}
-      {searchHit && !completing && !deleting && <MatchStatsPopup hit={searchHit} />}
+      {searchHit && !completing && !deleting && (
+        <MatchStatsPopup hit={searchHit} faded={focused ?? false} />
+      )}
       {/* Completion creature — only visible during the emerge window of the
           `completing` phase. The component self-hides before/after via its
           useFrame; mounting while `completing` is present is enough. */}

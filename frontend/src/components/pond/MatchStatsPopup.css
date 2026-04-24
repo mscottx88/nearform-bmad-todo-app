@@ -8,6 +8,16 @@
   transform: translate(-50%, -100%);
   margin-bottom: 2px;
   pointer-events: none;
+  opacity: 1;
+  transition: opacity 200ms ease-out;
+}
+
+/* When the pad hosting this sign has an open popup AND is itself a
+   search match, drop the chip to very low opacity so it recedes behind
+   the active popup. The 3D pole's material.opacity is dropped to the
+   same value on the TSX side for visual parity. */
+.match-stats-popup__positioner--faded {
+  opacity: 0.15;
 }
 
 /* Floating, non-interactive match-stats popup that hovers above a lily pad

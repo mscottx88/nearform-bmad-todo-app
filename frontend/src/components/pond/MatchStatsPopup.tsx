@@ -70,6 +70,10 @@ const MATCH_ICON: Record<SearchMatchType, () => React.JSX.Element> = {
 
 interface MatchStatsPopupProps {
   hit: SearchHit;
+  // When true (the pad has an open popup AND it is a match), drop the
+  // pole + sign to very low opacity so they don't compete with the
+  // focused pad's action popup for attention.
+  faded?: boolean;
 }
 
 // Non-interactive "sign on a pole" above the lily pad. The 3D pole
@@ -79,20 +83,30 @@ interface MatchStatsPopupProps {
 //
 // `pointer-events: none` on both the drei wrapper and the inner panel,
 // so clicks pass through to the pad below.
-export function MatchStatsPopup({ hit }: MatchStatsPopupProps) {
+export function MatchStatsPopup({ hit, faded = false }: MatchStatsPopupProps) {
   const MatchIcon = MATCH_ICON[hit.matchType];
   const clampedScore = Math.max(0, Math.min(1, hit.score));
   const poleHeight =
     MIN_POLE_HEIGHT + clampedScore * (MAX_POLE_HEIGHT - MIN_POLE_HEIGHT);
 
+  // Matches the CSS `--faded` opacity for visual parity between the 3D
+  // pole and the HTML chip.
+  const FADED_OPACITY = 0.15;
+
   return (
     <group>
       {/* Pole — thin neon cylinder. `toneMapped={false}` preserves
           full brightness so the Bloom post-process pipeline picks it
-          up as a glow source. */}
+          up as a glow source. When `faded`, the material drops to
+          transparent so the pole visually recedes alongside the chip. */}
       <mesh position={[0, poleHeight / 2, 0]}>
         <cylinderGeometry args={[0.018, 0.018, poleHeight, 8]} />
-        <meshBasicMaterial color="#00eeff" toneMapped={false} />
+        <meshBasicMaterial
+          color="#00eeff"
+          toneMapped={false}
+          transparent={faded}
+          opacity={faded ? FADED_OPACITY : 1}
+        />
       </mesh>
 
       {/* Sign — HTML chip perched on top of the pole. The inner
@@ -102,7 +116,13 @@ export function MatchStatsPopup({ hit }: MatchStatsPopupProps) {
         position={[0, poleHeight, 0]}
         style={{ pointerEvents: 'none' }}
       >
-        <div className="match-stats-popup__positioner">
+        <div
+          className={
+            faded
+              ? 'match-stats-popup__positioner match-stats-popup__positioner--faded'
+              : 'match-stats-popup__positioner'
+          }
+        >
           <div
             className="match-stats-popup"
             role="status"
