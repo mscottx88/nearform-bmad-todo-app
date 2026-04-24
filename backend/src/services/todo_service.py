@@ -47,11 +47,17 @@ def list_todos(
     include_active: bool = True,
     include_completed: bool = False,
     include_deleted: bool = False,
+    limit: int | None = None,
 ) -> list[TodoResponse]:
     # Story 3.3: flag-driven visibility. Defaults preserve the pre-3.3
     # contract (active-only) so every caller that hasn't opted in sees
     # exactly the same pond. `archived` is never surfaced (out of scope
     # for 3.3 — see story Dev Notes § "Archived is still out of scope").
+    #
+    # Story 6.1 CR: optional `limit` pushes the cap to SQL so the agent
+    # tool (`list_for_agent`) no longer fetches every row then slices in
+    # Python. Existing non-agent callers pass no limit and keep the
+    # unbounded contract.
     clauses: list[ColumnElement[bool]] = []
     if include_active:
         clauses.append(
@@ -68,15 +74,17 @@ def list_todos(
         # All three flags off → "show nothing" is a valid state. Do NOT
         # coerce to active-only; the empty pond is the feature.
         return []
-    rows = (
+    query = (
         db.query(Todo)
         .filter(
             Todo.archived == False,  # noqa: E712
             or_(*clauses),
         )
         .order_by(Todo.created_at.desc())
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    rows = query.all()
     return [TodoResponse.model_validate(todo) for todo in rows]
 
 
@@ -84,22 +92,39 @@ def get_todo(db: Session, todo_id: uuid.UUID) -> Todo:
     return _get_active_todo(db, todo_id)
 
 
+_AGENT_FILTER_VALUES: frozenset[str] = frozenset({"active", "completed", "all"})
+_AGENT_LIST_HARD_CAP = 500
+_AGENT_LIST_MIN = 1
+
+
 def list_for_agent(
     db: Session,
-    filter: str = "active",
+    filter: str = "active",  # noqa: A002  (spec-mandated parameter name — AC 7)
     limit: int = 100,
 ) -> list[TodoResponse]:
-    """Return todos for agent tool use. filter: 'active' | 'completed' | 'all'."""
+    """Return todos for agent tool use. filter: 'active' | 'completed' | 'all'.
+
+    Story 6.1 CR: reject unknown filter values (was previously silently
+    empty — an LLM typo like `filter="pending"` would tell the agent
+    "no todos" instead of surfacing the mistake). Clamp `limit` from
+    both below (max 1, reject negative/zero) and above (hard cap 500).
+    Pushes the cap down to SQL via `list_todos(..., limit=effective)`
+    instead of slicing in Python after a full-table fetch.
+    """
+    if filter not in _AGENT_FILTER_VALUES:
+        raise ValueError(
+            f"filter must be one of {sorted(_AGENT_FILTER_VALUES)}; got {filter!r}",
+        )
+    effective_limit = max(_AGENT_LIST_MIN, min(limit, _AGENT_LIST_HARD_CAP))
     include_active = filter in ("active", "all")
     include_completed = filter in ("completed", "all")
-    rows = list_todos(
+    return list_todos(
         db,
         include_active=include_active,
         include_completed=include_completed,
         include_deleted=False,
+        limit=effective_limit,
     )
-    hard_cap = min(limit, 500)
-    return rows[:hard_cap]
 
 
 def update_todo(

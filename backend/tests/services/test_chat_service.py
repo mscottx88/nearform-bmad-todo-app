@@ -61,13 +61,17 @@ class TestChatService:
         assert updated.title == "What are my todos?"
 
     def test_auto_title_truncates_at_60_chars(self, db_session: Session) -> None:
+        # Story 6.1 CR P13: stored title must be at most 60 chars total,
+        # which means 57 chars of content + the 3-char ellipsis.
         session = chat_service.create_session(db_session)
         long_message = "x" * 70
         chat_service.create_message(
             db_session, session.id, role="user", content=long_message
         )
         updated = chat_service.get_session(db_session, session.id)
-        assert updated.title == "x" * 60 + "..."
+        assert updated.title == "x" * 57 + "..."
+        assert updated.title is not None
+        assert len(updated.title) == 60
 
     def test_auto_title_not_overwritten_on_second_message(
         self, db_session: Session

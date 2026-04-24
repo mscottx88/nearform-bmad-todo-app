@@ -518,6 +518,29 @@ Wire the router into [backend/src/main.py](backend/src/main.py): `from src.api.a
 - [x] [Review][Defer] No ordering tiebreaker for messages with identical `created_at` microsecond — deferred, same pattern as `todos`; add `seq bigserial` only if real ordering bugs appear
 - [x] [Review][Defer] `chat_sessions` has no owner / user FK — deferred, multi-tenancy out of epic scope
 
+### Review Findings (Group B — services, exceptions) — 2026-04-24
+
+- [x] [Review][Patch] `update_message` silently swallowed missing rows; now raises `ChatMessageNotFoundError` so stream-finalisation failures are observable [backend/src/services/chat_service.py:97-107]
+- [x] [Review][Patch] `list_for_agent` hard cap now pushed to SQL via `list_todos(..., limit=...)` instead of a Python slice after a full-table fetch [backend/src/services/todo_service.py]
+- [x] [Review][Patch] `list_for_agent` now rejects unknown `filter` values (raises `ValueError`) instead of silently returning `[]` on typos like `filter="pending"` [backend/src/services/todo_service.py]
+- [x] [Review][Patch] `list_for_agent` now clamps `limit` to `[1, 500]` so negative/zero values don't produce backwards-slice results [backend/src/services/todo_service.py]
+- [x] [Review][Patch] `list_messages` now clamps `limit` to `[1, 200]` — closes DoS surface where an LLM-driven tool could forward an unbounded `limit` [backend/src/services/chat_service.py]
+- [x] [Review][Patch] `create_message` now returns `ChatMessageResponse` (not ORM `ChatMessage`) — consistent with `create_session` and avoids lazy-load-after-session-close risks [backend/src/services/chat_service.py]
+- [x] [Review][Patch] Title ellipsis now reserves 3 chars for the "..." so the stored title is at most 60 chars (was 63 for 61-char content) [backend/src/services/chat_service.py]
+- [x] [Review][Patch] `update_message` now bumps the parent session's `updated_at` so stream completion moves the session in `list_sessions` ordering [backend/src/services/chat_service.py]
+
+- [x] [Review][Defer] Auto-title race on concurrent first user messages (both readers see `title IS NULL`, last writer wins) — needs `SELECT ... FOR UPDATE` or a `WHERE title IS NULL` guard on the `UPDATE`
+- [x] [Review][Defer] `update_message` has no optimistic concurrency — a late error-update can clobber a successful complete — add a version column or status-machine check if real races appear
+- [x] [Review][Defer] TOCTOU between `get_session` and the message insert: a concurrent `delete_session` between them yields a FK-failure 500; add FK-error handling or session-row lock if bugs surface
+- [x] [Review][Defer] `list_sessions` is unbounded (no pagination) — add offset/cursor when session count becomes a scaling concern
+- [x] [Review][Defer] Manual `datetime.now(UTC)` on `updated_at` competes with server-side `onupdate=func.now()` — clock-skew between app host and DB can reorder the sidebar; deliberate per Dev Notes
+- [x] [Review][Defer] `update_message` cannot explicitly clear `skill`/`error` back to NULL — `None` means "leave unchanged"; add an explicit sentinel or `Unset` type if a retry path needs to wipe a prior error
+- [x] [Review][Defer] `delete_session` CASCADE cost is unbounded — a 10 000-message session triggers a large single-transaction delete; chunk by time window if latency becomes a problem
+- [x] [Review][Defer] Title truncation breaks grapheme clusters / ZWJ emoji sequences — `content[:57]` cuts mid-sequence; a grapheme-aware truncation needs a 3rd-party library
+- [x] [Review][Defer] `db.flush()` before `db.commit()` removed as part of P12 simplification (was redundant — commit flushes implicitly)
+- [x] [Review][Defer] `get_session` returns an ORM `ChatSession` instance (public helper leaking the ORM across module boundaries) — refactor to `_get_session_row` + a public response-shape getter
+- [x] [Review][Defer] `list_messages` lacks pagination / cursor — add when chat histories grow beyond 200 messages
+
 ---
 
 ## Dev Notes

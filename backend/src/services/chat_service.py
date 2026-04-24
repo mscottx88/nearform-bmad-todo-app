@@ -3,12 +3,18 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from src.exceptions import ChatSessionNotFoundError
+from src.exceptions import ChatMessageNotFoundError, ChatSessionNotFoundError
 from src.models.chat_message import ChatMessage, ChatMessageStatus, ChatRole
 from src.models.chat_session import ChatSession
 from src.schemas.agent import ChatMessageResponse, ChatSessionResponse
 
 _TITLE_MAX_CHARS = 60
+# Story 6.1 CR P11: hard cap on the agent-tool side of `list_messages`.
+# The HTTP route doesn't pass `limit`, but `GetChatHistoryTool` forwards
+# an LLM-supplied value — without a ceiling a hallucinated `limit=1e7`
+# materialises the entire table and blows the agent's context window.
+_LIST_MESSAGES_HARD_CAP = 200
+_LIST_MESSAGES_MIN = 1
 
 
 def create_session(db: Session) -> ChatSessionResponse:
@@ -43,11 +49,12 @@ def list_messages(
     limit: int = 100,
 ) -> list[ChatMessageResponse]:
     get_session(db, session_id)
+    effective_limit = max(_LIST_MESSAGES_MIN, min(limit, _LIST_MESSAGES_HARD_CAP))
     rows = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session_id)
         .order_by(ChatMessage.created_at.asc())
-        .limit(limit)
+        .limit(effective_limit)
         .all()
     )
     return [ChatMessageResponse.model_validate(r) for r in rows]
@@ -61,14 +68,17 @@ def create_message(
     *,
     skill: str | None = None,
     status: ChatMessageStatus = "complete",
-) -> ChatMessage:
+) -> ChatMessageResponse:
     session_row = get_session(db, session_id)
 
+    # Story 6.1 CR P13: reserve 3 chars for the ellipsis so the STORED
+    # title is at most `_TITLE_MAX_CHARS` characters total (previously
+    # 61-char content produced a 63-char title).
     if role == "user" and session_row.title is None:
-        trimmed = content[:_TITLE_MAX_CHARS]
         if len(content) > _TITLE_MAX_CHARS:
-            trimmed += "..."
-        session_row.title = trimmed
+            session_row.title = content[: _TITLE_MAX_CHARS - 3] + "..."
+        else:
+            session_row.title = content
 
     message = ChatMessage(
         session_id=session_id,
@@ -79,10 +89,9 @@ def create_message(
     )
     db.add(message)
     session_row.updated_at = datetime.now(UTC)
-    db.flush()
     db.commit()
     db.refresh(message)
-    return message
+    return ChatMessageResponse.model_validate(message)
 
 
 def update_message(
@@ -94,13 +103,21 @@ def update_message(
     skill: str | None = None,
     error: str | None = None,
 ) -> None:
+    # Story 6.1 CR P7: raise on missing rows so the caller can't mistake
+    # "message was deleted between start-of-stream and finalisation" for
+    # "finalised successfully". Previously we silently `return`ed.
     row = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
-    if not row:
-        return
+    if row is None:
+        raise ChatMessageNotFoundError(str(message_id))
     row.content = content
     row.status = status
     if skill is not None:
         row.skill = skill
     if error is not None:
         row.error = error
+    # Story 6.1 CR P14: bump the parent session so `list_sessions`
+    # ordering reflects stream completion, not just the initial insert.
+    session_row = db.query(ChatSession).filter(ChatSession.id == row.session_id).first()
+    if session_row is not None:
+        session_row.updated_at = datetime.now(UTC)
     db.commit()
