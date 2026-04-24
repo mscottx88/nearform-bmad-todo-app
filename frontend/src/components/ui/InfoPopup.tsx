@@ -163,27 +163,33 @@ export function InfoPopup({
   //     reliable once the textarea has its value (React sets it before
   //     any effect runs).
   //   scrollOffset = ta.scrollTop — current scroll position.
-  const [debugInfo, setDebugInfo] = useState('');
+  // Thumb sync using only values we KNOW or can measure reliably:
+  //   visibleHeight = editorHeight - 2 (border) — always correct from
+  //     React state; never reads ta.clientHeight which is 0 until the
+  //     drei <Html> portal settles its layout.
+  //   textHeight = ta.scrollHeight — intrinsic content measurement.
+  //   scrollOffset = ta.scrollTop — current scroll position.
+  // Thumb is hidden entirely when content fits (no scroll needed).
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
-    if (!ta || !thumb) {
-      setDebugInfo(`refs null: ta=${!!ta} thumb=${!!thumb}`);
-      return;
-    }
+    if (!ta || !thumb) return;
     const visibleHeight = editorHeight - 2;
     const textHeight = ta.scrollHeight;
+    if (textHeight <= visibleHeight + 1) {
+      thumb.style.display = 'none';
+      return;
+    }
     const scrollOffset = ta.scrollTop;
     const usable = editorHeight - THUMB_INSET * 2;
-    const ratio = Math.min(1, visibleHeight / Math.max(textHeight, 1));
+    const ratio = visibleHeight / textHeight;
     const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
     const maxTop = usable - thumbH;
-    const maxScroll = Math.max(0, textHeight - visibleHeight);
-    const scrollFrac = maxScroll > 0 ? scrollOffset / maxScroll : 0;
+    const maxScroll = textHeight - visibleHeight;
+    const scrollFrac = scrollOffset / maxScroll;
     thumb.style.display = 'block';
     thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
     thumb.style.height = `${thumbH}px`;
-    setDebugInfo(`eH=${editorHeight} vis=${visibleHeight} txt=${textHeight} sT=${Math.round(scrollOffset)} h=${Math.round(thumbH)}`);
   }, [editorHeight]);
   useEffect(() => {
     if (!editing || !textareaEl || !thumbEl) return;
@@ -502,14 +508,15 @@ export function InfoPopup({
                     requestAnimationFrame(() => { t.selectionStart = t.selectionEnd = s + 1; });
                   }}
                 />
-                {/* Neon scrollbar track — always rendered; thumb is
-                    visible only when textarea overflows. */}
-                {/* Track + thumb. Thumb is always in the DOM (no
-                    conditional) so thumbRef is never null.
-                    No `style` prop here — syncThumb owns display /
-                    top / height via direct DOM writes. A style prop
-                    would be re-applied by React on every re-render,
-                    overwriting the JS-managed state. */}
+                {/* Neon scroll track + thumb. Track is always in the
+                    DOM; thumb's display / top / height are owned by
+                    syncThumb via direct DOM writes (no `style` prop —
+                    React would re-apply it on every render and fight
+                    the JS-managed state). setThumbEl is a callback
+                    ref backed by useState so the syncThumb effect
+                    fires once the element is actually mounted — the
+                    drei <Html> portal's insertion races React's
+                    useRef-commit timing otherwise. */}
                 <div className="info-popup__neon-track">
                   <div
                     ref={setThumbEl}
@@ -564,12 +571,6 @@ export function InfoPopup({
                 {todo.text}
               </div>
             </NeonScrollbar>
-            </div>
-          )}
-          {/* TEMP DEBUG — inside panel so it is not clipped */}
-          {editing && debugInfo && (
-            <div style={{ fontFamily: 'monospace', fontSize: '9px', color: '#ff0', background: '#000', padding: '2px 4px', lineHeight: 1.4, letterSpacing: 0 }}>
-              {debugInfo}
             </div>
           )}
           <div className="info-popup__divider" />
