@@ -140,6 +140,13 @@ export function InfoPopup({
     typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 160) : 800;
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
+  // Tracks whether the cursor is currently over the resize handle.
+  // Used by the drag-release path to decide whether to revert
+  // cursorMode to 'grab' (cursor still over handle) or 'firefly'
+  // (cursor elsewhere — without this, letting go of the handle
+  // anywhere OTHER than over the handle would leave the frog-hand
+  // cursor stuck on screen until the user happens to hover a pad).
+  const resizeHandleOverRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // A <textarea> doesn't auto-grow with content — its height defaults
   // to `rows` (2) regardless of CSS `height: auto`. Without this sync,
@@ -295,20 +302,25 @@ export function InfoPopup({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      // Revert to 'grab' on release — if the cursor is no longer
-      // over the handle, the handle's pointerLeave will flip back
-      // to 'firefly'.
-      usePondStore.getState().setCursorMode('grab');
+      // Revert the cursor glyph based on where the pointer landed
+      // at release. If the cursor is still over the handle, stay on
+      // 'grab' (hover affordance). If it moved off during the drag
+      // (handle-leave was suppressed because cursorMode was
+      // 'grabbing'), revert all the way to 'firefly' so the glyph
+      // isn't stuck on-screen until the user incidentally hovers a
+      // pad.
+      usePondStore
+        .getState()
+        .setCursorMode(resizeHandleOverRef.current ? 'grab' : 'firefly');
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
   };
 
-  // Shared cursor-mode helpers — used by the editor resize handle
-  // and both NeonScrollbar instances (read-only and edit) so the
-  // firefly → frog-hand swap fires consistently across every
-  // draggable affordance inside the popup.
+  // Shared cursor-mode helpers — used by both NeonScrollbar instances
+  // (read-only and edit) so the firefly → frog-hand swap fires
+  // consistently across every draggable affordance inside the popup.
   const onDragAffordanceHover = useCallback((hovered: boolean): void => {
     const store = usePondStore.getState();
     if (hovered) {
@@ -321,8 +333,17 @@ export function InfoPopup({
     const store = usePondStore.getState();
     store.setCursorMode(dragging ? 'grabbing' : 'grab');
   }, []);
-  const handleEditorResizeEnter = (): void => onDragAffordanceHover(true);
-  const handleEditorResizeLeave = (): void => onDragAffordanceHover(false);
+  // Resize-handle hover — same firefly↔grab swap as thumb hover, but
+  // also updates resizeHandleOverRef so the drag-release handler
+  // above can decide whether to revert to grab or firefly.
+  const handleEditorResizeEnter = (): void => {
+    resizeHandleOverRef.current = true;
+    onDragAffordanceHover(true);
+  };
+  const handleEditorResizeLeave = (): void => {
+    resizeHandleOverRef.current = false;
+    onDragAffordanceHover(false);
+  };
 
   return (
     <Html
