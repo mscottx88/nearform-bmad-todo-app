@@ -512,26 +512,65 @@ the way. See the superseded story file at
 `implementation-artifacts/4-6-lily-pad-clustering-and-groups.superseded.md`
 for the archived original scope.
 
-### Story 4.3: Position Persistence
+### Story 4.3: Position Persistence ~~(SUPERSEDED 2026-04-24 by Story 4.9)~~
+
+> **Superseded.** The reactive "drag → 2s debounce → PATCH" model specified here is partly delivered by Story 4.8 (batch-position endpoint) and is being replaced wholesale by **Story 4.9: In-Memory World State**, which treats the in-memory store as canonical and saves periodically + on exit. Kept here as a historical record of the original position-persistence intent. Do not implement this story — pick up 4.9.
+
+### Story 4.9: In-Memory World State (supersedes 4.3)
 
 As a user,
-I want my lily pad positions to persist across sessions,
-So that my pond looks the same when I return.
+I want the pond's dynamics to feel fluid with no jittering, and have my positions persist reliably across sessions,
+So that reordering pads, watching them drift on the water, and closing the tab all "just work" without the 2-second delay or the ref-sync glitches of the original model.
+
+As a developer,
+I want a single in-memory world-metadata store keyed by todo id that's canonical during the session, populated up-front on load, mutated directly by LilyPad interactions, and flushed periodically + on exit,
+So that LilyPad can drop ~15 per-instance refs (sticky, drag, nudge, sibling-rotation, etc.), Strict-Mode ref-mutation warnings disappear as a side effect, and position writes no longer race with prop-refetch cycles.
 
 **Acceptance Criteria:**
 
-**Given** I have repositioned pads by dragging them
-**When** I stop dragging and 2 seconds pass
-**Then** all changed positions are batch-saved via `PATCH /api/todos/positions`
-**And** the positions are debounced (not saved per frame during drag)
+**Given** the app mounts and the backend returns N todos
+**When** N is within the configurable cap (`MAX_LOADED_TODOS`, default 500)
+**Then** all N todos hydrate into an in-memory world-metadata map keyed by todo id, carrying `positionX`, `positionY`, `rotationY`, `driftSeed` (persisted fields) and `velocityX`, `velocityZ`, `lastUpdatedLocalMs`, `lastSavedAtMs` (transient/tracking fields)
 
-**Given** I close the browser tab
-**When** the beforeunload event fires
-**Then** any unsaved position changes are flushed to the backend
+**Given** the backend returns N todos and N > `MAX_LOADED_TODOS`
+**When** the pond hydrates
+**Then** the first `MAX_LOADED_TODOS` (in DB default order) load into the store and the overflow is deferred (future story), with a dev-console warning logged
+
+**Given** LilyPad needs to render at its current pond position
+**When** it reads the position
+**Then** it reads from the world-metadata store (via a selector), NOT from its `todo.positionX / todo.positionY` prop or a local ref
+
+**Given** the user drags a pad / the spread-out command repositions it / a cascade nudge displaces a sibling
+**When** any of those mutations occur
+**Then** they write to the world-metadata store immediately, set `lastUpdatedLocalMs = performance.now()`, and do NOT fire an individual `PATCH` — the entry becomes dirty (`lastUpdatedLocalMs > lastSavedAtMs`)
+
+**Given** dirty entries exist in the world-metadata store
+**When** `PERIODIC_SAVE_INTERVAL_MS` elapses (default 5 min)
+**Then** the app fires ONE `PATCH /api/todos/positions` with the full dirty set, and on success bumps each committed entry's `lastSavedAtMs`
+
+**Given** the user is about to close / refresh / navigate away from the tab
+**When** the `beforeunload` or `visibilitychange=hidden` event fires
+**Then** all dirty entries are flushed via `navigator.sendBeacon` (or `fetch` with `keepalive: true` as fallback) to `PATCH /api/todos/positions`
+
+**Given** a periodic save is in flight and the user edits positions mid-flight
+**When** the save resolves
+**Then** only the entries that were dirty AT THE TIME OF DISPATCH have their `lastSavedAtMs` bumped — entries mutated mid-flight stay dirty and are included in the next save
+
+**Given** the backend refetches todos after a text edit / color change / completion
+**When** the incoming Todo prop's `positionX/Y` differs from the world-metadata entry
+**Then** the store prefers in-memory IF the entry is dirty (user has unsaved moves); if the entry is clean, the incoming value updates the store (keeps the store in sync with server truth for pads we haven't moved)
+
+**Given** LilyPad previously held per-instance refs for drift/drag/sticky/nudge state
+**When** this story lands
+**Then** ~15 such refs are deleted or replaced by store selectors, and the `react-hooks/refs` lint no longer flags ref-mutation-during-render in PondScene or LilyPad
+
+**Given** any error during the periodic save
+**When** the `PATCH` fails
+**Then** dirty entries stay dirty (are retried next cycle), no modal error surfaces (background save), and the error is logged
 
 **Given** I reopen the app later
 **When** the pond loads
-**Then** all pads appear at their previously saved positions
+**Then** all pads appear at the positions saved by the most recent periodic save or exit flush
 
 ## Epic 5: Intelligent Search
 
