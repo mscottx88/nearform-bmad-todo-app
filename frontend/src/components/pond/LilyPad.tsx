@@ -494,14 +494,14 @@ export function LilyPad({
   // the lifespan of a pointerDown→pointerUp cycle. `isDraggingRef`
   // flips true only once the pointer has moved past
   // DRAG_THRESHOLD_PX — i.e., a "real" drag vs. a stationary click.
-  // `dragPosRef` holds the latest world-XZ from the water-plane
-  // raycast; useFrame reads it to imperatively place the pad each
-  // frame. Seeded to the pad's spawn position so the very-first-
-  // frame click-to-popup path has valid coords even if pointermove
-  // never fired.
+  //
+  // Story 4.9 (2026-04-24): `dragPosRef` and the sticky pair were
+  // deleted. The world store (`useWorldStore`) is now the canonical
+  // source of per-pad position; useFrame reads it imperatively, and
+  // drag-move / drag-release / cascade-commit / spread-arrive all
+  // write through `setPosition`.
   const isDraggingRef = useRef(false);
   const dragStartScreenRef = useRef<{ x: number; y: number } | null>(null);
-  const dragPosRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
   // Story 3.4 (user correction 2026-04-23): tracks whether the cursor
   // is currently over THIS pad's mesh. Updated on every
   // pointerEnter/Leave regardless of drag state. Read at drag-release
@@ -512,40 +512,33 @@ export function LilyPad({
   // (e.g. camera angle that never intersects y=0), preventing a no-op
   // or stale-seed position commit.
   const raycastSucceededRef = useRef(false);
-  // Story 4.2: "sticky drag" — after pointerUp the pad stays
-  // pinned at `dragPosRef` until the updated `todo.positionX/Y`
-  // arrives via React Query's refetch. Without this, the
-  // resting-branch drift uses the STALE posX/posZ for the frames
-  // between the PATCH firing and the refetched data arriving —
-  // the pad visually flashes back to its pre-drag position before
-  // jumping forward. Cleared by the useEffect below when posX/posZ
-  // catch up to the committed drag target (within the same
-  // arrival threshold used by the /spread-out lerp).
-  const stickyDragRef = useRef(false);
-  // Defensive backstop (2026-04-23): timestamp at which sticky was
-  // last set. The useFrame resting branch auto-clears sticky if it
-  // has been held for more than STICKY_MAX_MS — prevents a pad from
-  // freezing forever if the server returns a clamped / rounded
-  // position that never matches dragPosRef within the arrival
-  // threshold. The pad's visual would snap back to the server's
-  // value in that case, which is at worst a minor pop, far better
-  // than silently ignoring all subsequent drags.
-  const stickySetAtMsRef = useRef<number | null>(null);
+  // Story 4.9 (2026-04-24): `stickyDragRef` + `stickySetAtMsRef`
+  // deleted. Sticky was a release-flash mitigation that pinned the
+  // pad at its drag-end coords until React Query's refetch caught
+  // up. The world store now holds the drag-end position directly
+  // (and `mergeRefetch`'s dirty-protect rule keeps a stale refetch
+  // from stomping it), so sticky is no longer needed.
+  //
+  // Story 4.9 intentional deviations from AC #20 (siblingNudgeRef,
+  // lastNudgeTargetRef, siblingRotationRef, hadDragAnchorRef kept):
+  // these refs encode TRANSIENT per-pad physics (nudge accumulator +
+  // smoothed rotation during a sibling's drag + previous-frame anchor
+  // state for transition detection). They don't hold shared world-
+  // metadata, don't cause StrictMode warnings (all writes happen
+  // inside event handlers or useFrame, not render), and don't
+  // fragment the architecture the way dragPosRef + sticky did.
+  // Moving them into the world store would semantically abuse
+  // setVelocity (nudge is a displacement, not d/dt) and add cross-
+  // component coupling for no benefit.
+  //
   // Story 4.6 (retained): accumulated repulsion offset applied on top of
-  // rest position while ANOTHER pad is being dragged nearby. Story 4.2
-  // option-2 (2026-04-23): persists across anchor-out-of-range — the pad
-  // stays shoved until the next drag pushes it further or commit fires.
+  // rest position while ANOTHER pad is being dragged nearby.
   const siblingNudgeRef = useRef<{ x: number; z: number }>({ x: 0, z: 0 });
-  // 2026-04-23: live Y-rotation value for this pad. Seeded from
-  // `todo.rotationY` on mount; cascade engagement below lerps it
-  // toward the push direction (Math.atan2(pushZ, pushX)) so a pad
-  // being shoved visibly rotates to face away from its pusher. The
-  // lerped value is published in displacedPads and committed via
-  // the batch PATCH at drag release, then refetched back into
-  // `todo.rotationY` — the ref's seed next mount.
+  // Live Y-rotation value for this pad during cascade; lerps toward
+  // push direction.
   const siblingRotationRef = useRef(todo.rotationY);
-  // Track "did activeDragAnchor exist on the previous frame" so we can
-  // detect the null-transition at drag release and commit the nudge.
+  // Previous-frame drag-anchor presence — drives the commit-on-
+  // release detection in the cascade block below.
   const hadDragAnchorRef = useRef(false);
   // Story 4.2 (re-added 2026-04-23): cached steady-state target the
   // cascade engagement last computed. Used by the publish block
@@ -641,8 +634,14 @@ export function LilyPad({
     return 'active';
   }, [todo.deleted, todo.completed]);
 
-  const posX = todo.positionX ?? 0;
-  const posZ = todo.positionY ?? 0;
+  // Story 4.9: position reads come from the in-memory world store;
+  // the `todo` prop is only the fallback before hydration settles.
+  // `useWorldStore.getState()` is non-reactive on purpose — useFrame
+  // handles per-tick position updates imperatively, so the pad mesh
+  // does not need to re-render on every store mutation.
+  const worldEntryAtRender = useWorldStore.getState().worldMetadata.get(todo.id);
+  const posX = worldEntryAtRender?.positionX ?? todo.positionX ?? 0;
+  const posZ = worldEntryAtRender?.positionY ?? todo.positionY ?? 0;
   // Story 4.1: `effectiveColor` layers the hover-preview on top of the
   // committed color. Everything downstream (rim material, colorVec for
   // shader uniform lerps) reads from this, so preview and commit flow
@@ -704,48 +703,23 @@ export function LilyPad({
   // branch for consistency — any positional jitter smaller than
   // that reads as "caught up" and the resting-branch drift takes
   // over without a visible snap.
+  // Story 4.9 (2026-04-24): sticky-clear effect + STICKY_MAX_MS
+  // watchdog deleted. Sticky was bridging the ~50–200 ms gap between
+  // drag-release PATCH and React Query refetch; the world store now
+  // holds the authoritative drag-end position directly and
+  // `mergeRefetch`'s dirty-protect rule blocks a stale refetch from
+  // stomping it. On update-error, `mergeRefetch` will overwrite the
+  // dirty local value with the server's (pre-drag) truth as soon as
+  // the entry transitions to clean — same visual outcome as the old
+  // sticky-on-error clear, achieved by the merge-policy instead of a
+  // bespoke effect.
   useEffect(() => {
-    if (!stickyDragRef.current) return;
-    // If the update failed after the retry budget was exhausted, the
-    // server never received the new position — refetch will not match
-    // dragPosRef. Release sticky so the pad rejoins normal drift and
-    // the 2.6 decay visual is free to read, instead of pinning the pad
-    // at a position the backend knows nothing about. On next refetch
-    // the pad snaps to the server's truth, matching other update-error
-    // paths.
     if (errorEntry) {
-      stickyDragRef.current = false;
-      stickySetAtMsRef.current = null;
-      restStartTime.current = 0;
-      return;
-    }
-    const px = todo.positionX ?? 0;
-    const py = todo.positionY ?? 0;
-    const target = dragPosRef.current;
-    if (
-      Math.abs(px - target.x) < SPREAD_ARRIVE_THRESHOLD &&
-      Math.abs(py - target.z) < SPREAD_ARRIVE_THRESHOLD
-    ) {
-      stickyDragRef.current = false;
-      stickySetAtMsRef.current = null;
-      // Jitter-fix (2026-04-23): reset the resting-phase clock so the
-      // drift amplitude ramps from 0 over ~3s again. Without this, a
-      // pad that was pinned (sticky) through a drag would start
-      // drifting at FULL 0.08/0.06-unit amplitude the moment sticky
-      // cleared — several freshly-committed pads simultaneously
-      // resuming full-amplitude drift reads as collective jitter.
-      // Resetting restartTime reads as "these pads just landed and
-      // are still settling in" even though all the physics has
-      // already resolved.
+      // Reset the resting-phase drift clock on error so newly-failed
+      // pads don't resume at full drift amplitude mid-correction.
       restStartTime.current = 0;
     }
-  }, [todo.positionX, todo.positionY, errorEntry]);
-
-  // Defensive sticky-clear timeout. If a pad holds sticky for more
-  // than STICKY_MAX_MS the watchdog useFrame (below) force-clears it.
-  // Keeps this constant co-located with the ref declaration so the
-  // relationship is obvious.
-  const STICKY_MAX_MS = 5000;
+  }, [errorEntry]);
 
   // 2026-04-23: re-seed the cascade-rotation ref whenever the server-
   // stored rotation_y changes (after a drag-release batch PATCH +
@@ -899,15 +873,17 @@ export function LilyPad({
       // doesn't snap back to stale posX/posZ for a frame. The visible
       // pad position (group.position) already reflects drift / sticky /
       // prior-nudge offsets; falling back to posX/posZ only if the
-      // group hasn't rendered yet keeps the legacy behaviour on mount.
+      // Story 4.9: pointerdown seeds the world store with the pad's
+      // current visible position so the subsequent clean-click
+      // `openPopup` path has fresh coords. The old `dragPosRef` seed
+      // is gone — the store itself is the canonical position.
       const groupNow = groupRef.current;
-      // groupNow?.position is the Three.js group's live world XZ; falling
-      // back to posX/posZ if the ref is null (pre-mount) or if the test
-      // harness stubs the group without a .position vector.
       if (groupNow?.position) {
-        dragPosRef.current = { x: groupNow.position.x, z: groupNow.position.z };
-      } else {
-        dragPosRef.current = { x: posX, z: posZ };
+        useWorldStore.getState().setPosition(
+          todo.id,
+          groupNow.position.x,
+          groupNow.position.z,
+        );
       }
       activePointerIdRef.current = e.nativeEvent.pointerId;
 
@@ -991,15 +967,12 @@ export function LilyPad({
         if (dragRaycaster.ray.intersectPlane(WATER_PLANE, worldDragPoint)) {
           const newX = worldDragPoint.x;
           const newZ = worldDragPoint.z;
-          dragPosRef.current = { x: newX, z: newZ };
           raycastSucceededRef.current = true;
 
-          // Story 4.9: mirror the drag position into the world store
-          // so the periodic / exit save has canonical state. The
-          // existing batch-PATCH on release path (story 4-8) still
-          // fires for immediate feedback; this is an additive write
-          // until the follow-up LilyPad refactor makes the store
-          // authoritative for reads too.
+          // Story 4.9: the world store is the canonical source for
+          // the drag-live position. useFrame reads it imperatively
+          // every tick. The legacy `dragPosRef` write that used to
+          // sit here was deleted in the same story.
           useWorldStore.getState().setPosition(todo.id, newX, newZ);
 
           // Publish the drag anchor so every other pad's useFrame
@@ -1048,21 +1021,20 @@ export function LilyPad({
           // Story 4-8: batch drag-release PATCH. Collect every pad
           // that was cascade-displaced (published to displacedPads)
           // alongside this dragged pad, then fire ONE PATCH for the
-          // whole set. The sibling-nudge commit block in useFrame
-          // still resets its own local visual state (sticky,
-          // dragPosRef, nudgeRef) but no longer dispatches its own
-          // mutation — the dragger owns the write.
-          stickyDragRef.current = true;
-          stickySetAtMsRef.current = performance.now();
+          // whole set.
+          //
+          // Story 4.9: the position comes from the world store — it
+          // was written on the last drag-move frame via setPosition.
+          // Sticky flags are gone; the store's dirty-tracking + merge
+          // policy handles refetch reconciliation.
+          const dragEndEntry = useWorldStore.getState().worldMetadata.get(todo.id);
           const batch: UpdatePositionEntry[] = [];
           batch.push({
             id: todo.id,
-            positionX: dragPosRef.current.x,
-            positionY: dragPosRef.current.z,
+            positionX: dragEndEntry?.positionX ?? posX,
+            positionY: dragEndEntry?.positionY ?? posZ,
             // Dragger doesn't rotate during drag — pass its current
-            // rotation through unchanged so the backend's row keeps
-            // it. Reads from the todo prop (server truth) rather
-            // than siblingRotationRef which the drag bypasses.
+            // rotation through unchanged.
             rotationY: todo.rotationY,
           });
           releaseStore.displacedPads.forEach((pos, displacedId) => {
@@ -1729,37 +1701,22 @@ export function LilyPad({
       // the watchdog: the pad snaps to the server's actual position
       // after 5s, which is a far better failure mode than "pads stop
       // interacting."
-      if (
-        stickyDragRef.current &&
-        stickySetAtMsRef.current !== null &&
-        performance.now() - stickySetAtMsRef.current > STICKY_MAX_MS
-      ) {
-        stickyDragRef.current = false;
-        stickySetAtMsRef.current = null;
-        restStartTime.current = 0;
-      }
+      // Story 4.9 (2026-04-24): the sticky watchdog that used to live
+      // here has been removed alongside `stickyDragRef` / `stickySetAtMsRef`.
+      // The world store (useWorldStore) is the authoritative source of
+      // position; a failed PATCH leaves the store dirty until the next
+      // periodic save retries, and a successful refetch goes through
+      // `mergeRefetch`'s clean/dirty policy — no bespoke watchdog needed.
 
       // Story 4-8: sibling-nudge commit on drag-release — LOCAL ONLY.
       // The dragger's onWindowUp reads `displacedPads` and builds the
-      // single-batch PATCH; this block only pins the pad at its
-      // current displaced position via sticky + dragPosRef and zeros
-      // the nudge ref.
+      // single-batch PATCH; this block only commits the pad's final
+      // displaced position into the world store (via setPosition) and
+      // zeros the nudge ref.
       //
       // Commit captures siblingNudgeRef AS-IS (no snap-to-target).
-      // The old snap-to-target approach traded a sticky-stuck bug
-      // for a visible one-frame JUMP at release — every mid-lerp
-      // sibling teleported to its steady-state target in the commit
-      // frame, reading as jitter. With publish-current and
-      // commit-current (both already in place here), dragPosRef,
-      // the batch payload, and the refetched posX all agree on the
-      // mid-lerp value the pad was visibly occupying, so sticky
-      // clears cleanly and there's no visible snap.
       // Commit-threshold check uses MAGNITUDE so it's symmetric with
-      // the publish block below. Per-axis checks let a pad slip
-      // through with (0.29, 0.29) — no commit, nudge persists, but
-      // magnitude 0.41 > 0.3 still publishes a stale target into
-      // displacedPads forever, silently pushing other pads in the
-      // wrong direction.
+      // the publish block below.
       const commitNudgeMag = Math.sqrt(
         siblingNudgeRef.current.x * siblingNudgeRef.current.x +
           siblingNudgeRef.current.z * siblingNudgeRef.current.z,
@@ -1768,19 +1725,14 @@ export function LilyPad({
         hadLiveAnchor &&
         liveAnchor === null &&
         !isDraggingRef.current &&
-        !stickyDragRef.current &&
         commitNudgeMag > 0.3
       ) {
         const commitX = posX + siblingNudgeRef.current.x;
         const commitZ = posZ + siblingNudgeRef.current.z;
-        dragPosRef.current = { x: commitX, z: commitZ };
-        // Story 4.9: mirror the cascade nudge commit into the world
-        // store so periodic / exit save can persist it even when the
-        // dragger's batch PATCH misses this sibling (< publish
-        // threshold, or batch failed).
+        // Story 4.9: cascade nudge commit writes to the world store;
+        // sticky flags are gone. The store's dirty-tracking drives
+        // the periodic save.
         useWorldStore.getState().setPosition(todo.id, commitX, commitZ);
-        stickyDragRef.current = true;
-        stickySetAtMsRef.current = performance.now();
         siblingNudgeRef.current = { x: 0, z: 0 };
         // Clear cached target too — nudge is 0 now, so no cascade
         // partner should pick up this pad's (stale) target as a
@@ -1802,9 +1754,15 @@ export function LilyPad({
       //     SPREAD_ARRIVE_THRESHOLD) fire PATCH and clear the
       //     target — see AC #8.
       //   Neither: fall back to the pre-4.2 sinusoidal drift.
-      if (isDraggingRef.current || stickyDragRef.current) {
-        group.position.x = dragPosRef.current.x;
-        group.position.z = dragPosRef.current.z;
+      if (isDraggingRef.current) {
+        // Story 4.9: read the live drag position from the world store
+        // imperatively. `setPosition` writes land here via drag-move
+        // each frame; no intermediate `dragPosRef` needed.
+        const liveEntry = useWorldStore.getState().worldMetadata.get(todo.id);
+        if (liveEntry) {
+          group.position.x = liveEntry.positionX;
+          group.position.z = liveEntry.positionY;
+        }
       } else {
         const spreadTarget =
           usePondStore.getState().padTargetPositions.get(todo.id);
@@ -1830,19 +1788,12 @@ export function LilyPad({
             // Story 4.2 flash-fix (parity with drag release): pin
             // the pad at `spreadTarget` until the refetched todo
             // arrives with the new position. Without this, the
-            // resting-branch drift below would use the stale
-            // posX/posZ for the handful of frames between the
-            // PATCH firing and React Query invalidating +
-            // refetching, visibly flashing the pad back to its
-            // pre-spread position. Reuses the same dragPosRef +
-            // stickyDragRef pair the drag pipeline uses — the
-            // cleanup effect clears the flag when posX/posZ
-            // arrives matching the target.
-            dragPosRef.current = { x: spreadTarget.x, z: spreadTarget.z };
-            // Story 4.9: world store mirror (see drag-move site above).
+            // Story 4.9: spread arrival commits the target into the
+            // world store. The store IS now what the resting-branch
+            // drift reads (via posX/posZ falling back through the
+            // store), so there's no flash risk from stale props —
+            // the sticky mechanism the old code relied on is gone.
             useWorldStore.getState().setPosition(todo.id, spreadTarget.x, spreadTarget.z);
-            stickyDragRef.current = true;
-            stickySetAtMsRef.current = performance.now();
             // Story 4-8: use the batch endpoint for consistency even
             // on a single-pad arrival. Spread arrivals stagger across
             // frames so they don't aggregate — each pad fires its own
