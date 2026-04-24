@@ -497,6 +497,27 @@ Wire the router into [backend/src/main.py](backend/src/main.py): `from src.api.a
   `_clean_db` fixture's delete loop so test isolation is maintained. Add imports for the new
   models. ChatMessage must be deleted before ChatSession (FK constraint).
 
+### Review Findings (Group A — schema, models, schemas) — 2026-04-24
+
+- [x] [Review][Patch] `ChatMessageResponse.metadata` alias direction is inverted; spec recipe is `metadata_: ... = Field(alias="metadata")` so `from_attributes` reads the ORM `metadata_` attribute correctly [backend/src/schemas/agent.py:21-25]
+- [x] [Review][Patch] Type `role` and `status` as `Mapped[Literal[...]]` so typos fail at static-analysis / Pydantic, not at the DB CHECK constraint [backend/src/models/chat_message.py:18-19, 26-30]
+- [x] [Review][Patch] Add `max_length=50` (or similar cap) to `ChatRequestContext.todo_ids` to close the unbounded-list DoS surface [backend/src/schemas/agent.py:32]
+- [x] [Review][Patch] Add a non-whitespace validator to `ChatRequest.content` (reuse `_not_whitespace_only` from `schemas/todo.py`) — `min_length=1` admits a single space [backend/src/schemas/agent.py:37]
+- [x] [Review][Patch] Add `max_length=64` to `ChatRequest.skill` so 65+ char values fail Pydantic validation, not at DB insert [backend/src/schemas/agent.py:37]
+- [x] [Review][Patch] Add explicit `nullable=False` on the model `created_at`/`updated_at` columns for parity with migration and with `todo.py` style [backend/src/models/chat_message.py:45-47, backend/src/models/chat_session.py:19-25]
+
+- [x] [Review][Defer] `ChatMessage.metadata` attribute collides with `Base.metadata`; writing `ChatMessage.metadata` returns the global MetaData registry — silent footgun [backend/src/models/chat_message.py:37-42] — deferred, mitigated by always using `metadata_` Python attr
+- [x] [Review][Defer] `ChatSession.updated_at` won't auto-bump on child `chat_messages` insert; mitigated at service layer by manual assignment per Dev Notes [backend/src/models/chat_session.py:19-26] — deferred, service-layer mitigation accepted; DB trigger is belt-and-braces for later
+- [x] [Review][Defer] `downgrade()` does not drop the `vector` extension while `upgrade()` creates it — deferred, pre-existing asymmetry from prior 0001_schema
+- [x] [Review][Defer] `ChatRequest.content max_length=4000` vs DB column `Text` unbounded — deferred, asymmetric by design (assistant responses can be long)
+- [x] [Review][Defer] `display_metadata` JSONB unbounded with no size guard [backend/src/models/todo.py:81-85] — deferred, validation belongs to Story 6.6 which writes the field
+- [x] [Review][Defer] `chat_sessions` has no soft-delete column while `todos` does — deferred, AC 2 explicitly specifies hard-delete with CASCADE
+- [x] [Review][Defer] `gen_random_uuid()` requires `pgcrypto` on PG<13 (only `vector` extension is ensured) — deferred, pre-existing pattern
+- [x] [Review][Defer] Upgrade not idempotent (`CREATE INDEX ix_todos_embedding` lacks `IF NOT EXISTS`) [backend/migrations/versions/0001_schema.py:59] — deferred, Alembic version-table is the normal partial-state guard
+- [x] [Review][Defer] No cross-column CHECK enforcing `(status='failed') = (error IS NOT NULL)` — deferred, add later if production bugs surface
+- [x] [Review][Defer] No ordering tiebreaker for messages with identical `created_at` microsecond — deferred, same pattern as `todos`; add `seq bigserial` only if real ordering bugs appear
+- [x] [Review][Defer] `chat_sessions` has no owner / user FK — deferred, multi-tenancy out of epic scope
+
 ---
 
 ## Dev Notes

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from src.exceptions import ChatSessionNotFoundError
-from src.models.chat_message import ChatMessage
+from src.models.chat_message import ChatMessage, ChatMessageStatus, ChatRole
 from src.models.chat_session import ChatSession
 from src.schemas.agent import ChatMessageResponse, ChatSessionResponse
 
@@ -56,11 +56,11 @@ def list_messages(
 def create_message(
     db: Session,
     session_id: uuid.UUID,
-    role: str,
+    role: ChatRole,
     content: str,
     *,
     skill: str | None = None,
-    status: str = "complete",
+    status: ChatMessageStatus = "complete",
 ) -> ChatMessage:
     session_row = get_session(db, session_id)
 
@@ -90,7 +90,7 @@ def update_message(
     message_id: uuid.UUID,
     *,
     content: str,
-    status: str,
+    status: ChatMessageStatus,
     skill: str | None = None,
     error: str | None = None,
 ) -> None:
