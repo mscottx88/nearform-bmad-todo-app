@@ -368,10 +368,18 @@ export function InfoPopup({
                   frog-hand grab glyph while the user interacts with
                   the scrollbar thumb, matching the affordance
                   LilyPad uses on hover/drag. */}
+              {/* Explicit `height` (not `max-height`) so the
+                  NeonScrollbar inner's `height: 100%` resolves to a
+                  definite value. With only max-height set, the inner
+                  falls back to content-sized layout and its
+                  scrollHeight never exceeds its clientHeight — no
+                  overflow is detected, no thumb appears. Edit mode
+                  uses editorHeight as a fixed viewport; overflow
+                  above that size scrolls inside. */}
               <NeonScrollbar
                 color="cyan"
                 className="info-popup__editor-textbox"
-                style={{ maxHeight: editorHeight }}
+                style={{ height: editorHeight }}
                 onThumbHover={onDragAffordanceHover}
                 onThumbDrag={onDragAffordanceDrag}
               >
