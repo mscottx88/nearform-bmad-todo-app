@@ -153,7 +153,7 @@ export function InfoPopup({
   const thumbRef = useRef<HTMLDivElement | null>(null);
   textareaRef.current = textareaEl;
   thumbRef.current = thumbEl;
-  const MIN_THUMB_PX = 40;  // raised from 28 — visible even in tall boxes
+  const MIN_THUMB_PX = 8;
   const THUMB_INSET = 3;
   // Thumb sync using only values we KNOW or can measure reliably:
   //   visibleHeight = editorHeight - 2 (border) — always correct from
