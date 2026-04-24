@@ -323,7 +323,7 @@ This app globally hides native scrollbars ([global.css:26-28](frontend/src/style
 
 - **Firefly cursor integration.** Native scrollbars capture input at the OS compositor level; the firefly-trail cursor goes blind the moment the user grabs a native thumb. NeonScrollbar uses DOM thumbs and fires standard `mousemove`, so the cursor keeps tracking during drag — critical for this app's custom-cursor aesthetic.
 - **One scrollbar vocabulary.** Neon wireframe track + glowing thumb, same palette variants (cyan / orange / gold / green / pink), same interaction idioms (click track to jump, drag thumb to scroll). Future scrollable regions (long text in a delete-confirmation dialog, a settings panel, a debug table) drop straight in without re-solving this.
-- **One-to-one with the upstream port.** The component at `frontend/src/components/ui/NeonScrollbar/` started as a verbatim port from `rag-csv-crew`. The local overlay-mode addition (see below) is documented here; any further changes should land upstream-first when possible so the two repos don't diverge.
+- **Local fork; no upstream-sync contract.** The component at `frontend/src/components/ui/NeonScrollbar/` began life as a port from `rag-csv-crew` but is now a local fork with app-specific features (`onThumbHover` / `onThumbDrag` callbacks for firefly-cursor swaps, `.nsb-thumb { cursor: none }` override, `input` listener + descendant-tree `ResizeObserver` + broadened `MutationObserver`, plus the overlay mode documented below). Evolve the component in-place here; there is no contract to re-sync with the upstream source.
 
 **Two modes:**
 
@@ -512,3 +512,55 @@ The Acceptance Auditor flagged items that depend on other groups' diffs:
 ### Dismissed (noise / intentional / documented)
 
 9 findings dismissed, among them: hover popup follows pad during drag (intentional per memory + Dev Agent Record IN #1-#3); Position meta row reads live value (documented in IN #4); statusBadges priority order (intentional); cosmetic/flex spacing notes; React typing nits; framework-managed ResizeObserver retention; contingent items that will resolve once the three big decisions above are made.
+
+---
+
+## Review Findings — Group 2 (NeonScrollbar port + overlay extension)
+
+Code review of Group 2 (704 diff lines: initial port in `e9ab75c` + overlay extension in `fff503f`) — 2026-04-23.
+Layers run: Port-Diff Auditor (compared local to `c:/Users/michael/nearform/rag-csv-crew/frontend/src/components/NeonScrollbar/`), Edge Case Hunter (overlay mode), Acceptance Auditor (amended spec).
+
+### Decisions needed — Group 2
+
+- [x] [Review][Decision] **Port-verbatim rule vs local-only extensions** — **[RESOLVED 2026-04-23: option (c). Accepted the local fork as canonical. Dev Notes §"Scrollbar convention" bullet "One-to-one with the upstream port" rewritten as "Local fork; no upstream-sync contract" — lists the app-specific features explicitly (firefly/frog-hand callbacks, `cursor: none` override, `input` + descendant-RO + broader MO, overlay mode) so future readers know what's local vs what's generic. No backport to `rag-csv-crew` required.]** The port-diff auditor found 5 local drifts from upstream, 4 of which predate the overlay-mode refactor (they were already in the initial `e9ab75c` port):
+    1. **`onThumbHover` / `onThumbDrag` prop API** — app-specific callbacks used for firefly-cursor / frog-hand swapping. Upstream has no such props. Local JSDoc explicitly says "the rag-csv-crew source does not use this and can safely omit."
+    2. **Descendant-tree `ResizeObserver` + extended `MutationObserver`** — local observes `inner.querySelectorAll('*')` with a `WeakSet` + re-attaches via MO, and broadens MO config to include `attributes: true, characterData: true`. Upstream observes only `inner` with `childList + subtree`.
+    3. **`input` event listener on the scrollable** — local fires `scheduleUpdate` on bubbled `input` events. Upstream has no such listener.
+    4. **`.nsb-thumb { cursor: none }`** (local) vs `cursor: pointer` (upstream) — local app-specific to prevent the OS arrow from stealing the neon-cursor aesthetic. 4-line inline comment justifies it.
+    5. **`onMouseUp(e: MouseEvent)` signature widened** — follow-on from (1); upstream uses the no-arg form.
+
+    The spec's Dev Notes §"Scrollbar convention" currently claims "One-to-one with the upstream port" and "any further changes should land upstream-first when possible so the two repos don't diverge." That claim is already false. Resolution options:
+    - **(a) Backport the 4 pre-existing drifts to `rag-csv-crew`** so the two repos genuinely re-sync, then keep the overlay-mode extension as the sole local divergence (and optionally backport that too).
+    - **(b) Document an explicit divergence waiver** in the convention note — list each drift, why it's local-only, and the forward plan.
+    - **(c) Drop the port-verbatim claim entirely** — accept the local fork as canonical, remove references to upstream from the convention, and stop worrying about sync.
+
+### Patches — Group 2
+
+All 6 patches applied 2026-04-23. Tests: 337 frontend tests pass; `tsc --noEmit` clean.
+
+- [x] [Review][Patch] **[HIGH] Drag-state cleanup leaks on `scrollElement` swap mid-drag** — applied: both vertical and horizontal drag effects now check `isDragging` in teardown and, if true, restore `document.body.style.userSelect = ''`, clear `isDraggingVirtualRef`, and fire `onThumbDrag?.(false)` so the consumer's cursor mode returns from `'grabbing'` to `'firefly'` / `'grab'` [`NeonScrollbar.tsx` vertical + horizontal drag effects]
+- [x] [Review][Patch] **[MED] MutationObserver redundant + fires on every keystroke** — applied: both the descendant-tree ResizeObserver and the MutationObserver are now skipped entirely when `inner instanceof HTMLTextAreaElement || HTMLInputElement` (the `input` listener handles content changes on form controls). For non-form-control `inner`, the MO's `attributeFilter: ['style', 'class', 'rows', 'cols']` restricts firings to layout-relevant attributes and prevents `value=` churn. [`NeonScrollbar.tsx` main layout effect]
+- [x] [Review][Patch] **[MED] Silent drop when both `children` and `scrollElement` are provided** — applied: dev-mode `useEffect` fires a one-shot `console.warn` on mount if both are set. JSDoc on both props now documents the mutual exclusion. [`NeonScrollbar.tsx` Dev-mode invariant-check effect]
+- [x] [Review][Patch] **[MED] `onVirtualYNavigate` + `scrollElement` combo has undefined semantics** — applied: same dev-mode warn fires when `scrollElement !== undefined && (virtualYTotal ?? 0) > 0`. JSDoc on `virtualYTotal` / `virtualYStart` / `virtualYLoadedCount` / `onVirtualYNavigate` now marks them as wrap-mode-only. [`NeonScrollbar.tsx` Dev-mode invariant-check effect]
+- [x] [Review][Patch] **[LOW] JSDoc nuance: `scrollElement={null}` activates overlay mode** — applied: JSDoc on `scrollElement` now explicitly documents that `null` == "overlay, no target yet; effects will re-run when an element arrives." Omit the prop entirely (leave `undefined`) for wrap mode. [`NeonScrollbar.tsx` props]
+- [x] [Review][Patch] **[LOW] `scrollRef` silently ignored in overlay mode** — applied: JSDoc on `scrollRef` now marks it as "Wrap-mode only" and notes that it's "silently ignored in overlay mode (the consumer already owns `scrollElement`)." [`NeonScrollbar.tsx` props]
+
+### Deferred — Group 2
+
+- [x] [Review][Defer] [MED] `overflow: visible` + `position: absolute; inset: 0` in overlay mode lets tracks misalign when the consumer's scrollElement has padding + different `box-sizing` than the offsetParent. No current consumer hits this. [NeonScrollbar.css:overlay] — deferred, layout-sensitive edge case, no repro
+- [x] [Review][Defer] [MED] `scrollElement` prop identity changes tear down + rebuild all listeners — fine with state-backed refs (current consumer pattern), but a consumer passing `ref.current` directly would thrash on every render. Document the footgun. — deferred, documented behaviour
+- [x] [Review][Defer] [MED] `textareaEl` briefly refers to a detached textarea between JSX unmount and the `setTextareaEl(null)` callback — one-frame thumb position jump at edit-close. Cosmetic. — deferred, 1-frame visual
+- [x] [Review][Defer] [LOW] `body.userSelect` race between NeonScrollbar thumb drag and InfoPopup resize drag unmount — covered by Patch P1 above but in the resize-handle path (Group 1 territory); deferred as it's contingent on P1
+- [x] [Review][Defer] [LOW] `scrollElement` → `undefined` transition loses scroll position (overlay → wrap migration is unusual and not a current consumer pattern)
+- [x] [Review][Defer] [LOW] `ResizeObserver` / `MutationObserver` SSR safety — jsdom has both; no current SSR target. Add `typeof X !== 'undefined'` guards when SSR becomes a real scenario.
+- [x] [Review][Defer] [LOW] `onTrackYClick` uses `e.target === thumbY` strict equality; fragile if future changes nest anything inside the thumb. Currently the thumb has no children, so this is latent.
+- [x] [Review][Defer] [LOW] Descendant-RO walk is dead code when `scrollElement` is a form control — perf waste, not a correctness issue.
+- [x] [Review][Defer] [LOW] Cosmetic blink: overlay outer renders absolutely-positioned tracks while `scrollElement === null` (before state settles). Empty tracks show for one paint cycle. — deferred, cosmetic.
+
+### Cross-group follow-ups
+
+- **Backport decision (D1 above) touches Group 4** — if we choose option (a) or (b), `docs/custom-scrollbar-and-cursor.md` should document the upstream-sync policy.
+
+### Dismissed — Group 2
+
+4 findings dismissed: `[SEEN-IN-GROUP-1]` wheel-over-resize-handle behaviour (Edge #11 — out of scope for Group 2); `onMouseUp` signature widening (Port-Diff [LOW] — contingent on D1); overlay-vs-wrap discriminated union as a "MUST" (Auditor [LOW] — matches Patch P3 above, not separately listed); LOW auditor finding that `scrollRef` is silently ignored (merged into Patch P6 above).

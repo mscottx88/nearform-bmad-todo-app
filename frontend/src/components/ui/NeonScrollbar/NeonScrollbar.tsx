@@ -32,22 +32,43 @@ interface NeonScrollbarProps {
   innerClassName?: string;
   /** Inline styles on the inner div (e.g. overflowX:'hidden'). */
   innerStyle?: React.CSSProperties;
-  /** Forward the inner element to this ref for external scroll control (wrap mode). */
+  /**
+   * Wrap-mode only: forward the inner scrollable div to this ref for
+   * external scroll control. Silently ignored in overlay mode (the
+   * consumer already owns `scrollElement` and doesn't need a second
+   * handle to the same thing).
+   */
   scrollRef?: { current: HTMLDivElement | null };
   /**
    * Overlay mode: drive the thumbs against an externally-owned scrollable
-   * element (e.g. a textarea). When set, the component skips the inner
-   * wrapping div and positions the outer absolutely over the consumer's
-   * layout. `children` is ignored in this mode.
+   * element (e.g. a textarea). When the prop is passed at all — even as
+   * `null` — the component is in overlay mode: it skips the inner wrapping
+   * div, ignores `children`, and positions the outer absolutely over the
+   * consumer's layout via the `.neon-scrollbar--overlay` modifier.
+   *
+   * `null` is the expected initial value when using the recommended
+   * state-backed callback-ref pattern (`useState<HTMLElement | null>(null)`
+   * + `ref={setEl}`) — the effects early-return until the ref callback
+   * delivers the real element and re-runs them.
+   *
+   * Omit this prop entirely (leave `undefined`) to use wrap mode with
+   * `children`.
    */
   scrollElement?: HTMLElement | null;
-  /** Total items in virtual content (enables virtual Y-thumb sizing). */
+  /**
+   * Wrap-mode only: total items in virtual content (enables virtual
+   * Y-thumb sizing). Mixing this with `scrollElement` is undefined
+   * behaviour — virtual Y math assumes a DataTable-like DOM where
+   * `scrollTop` maps to row index, which doesn't hold for textareas
+   * or other externally-owned scrollables. A dev-mode warning fires
+   * if both are provided.
+   */
   virtualYTotal?: number;
-  /** 0-based index of first loaded item in DOM. */
+  /** 0-based index of first loaded item in DOM. Wrap-mode only. */
   virtualYStart?: number;
-  /** Number of loaded items currently in DOM. */
+  /** Number of loaded items currently in DOM. Wrap-mode only. */
   virtualYLoadedCount?: number;
-  /** Called on track click / drag-release with target 0-based item index. */
+  /** Called on track click / drag-release with target 0-based item index. Wrap-mode only. */
   onVirtualYNavigate?: (targetRow: number) => void;
   /**
    * Fired when the thumb enters or leaves hover state. Consumers in
@@ -121,6 +142,22 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
     },
     [scrollRef],
   );
+
+  // ── Dev-mode invariant checks for mutually-exclusive prop modes ──────────
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+    if (scrollElement !== undefined && children !== undefined) {
+      console.warn(
+        '[NeonScrollbar] `scrollElement` (overlay mode) and `children` (wrap mode) are mutually exclusive; `children` is ignored in overlay mode. Drop one of them to silence this warning.',
+      );
+    }
+    if (scrollElement !== undefined && (virtualYTotal ?? 0) > 0) {
+      console.warn(
+        '[NeonScrollbar] `virtualYTotal` is a wrap-mode-only feature — mixing it with `scrollElement` (overlay mode) produces undefined thumb math. Pick one.',
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-only check
+  }, []);
 
   // ── Update thumb positions and visibility ────────────────────────────────
   // useLayoutEffect runs before paint so thumbs are correctly sized on first render
@@ -237,9 +274,15 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
 
     const ro = new ResizeObserver(scheduleUpdate);
     ro.observe(inner);
-    // Also observe every descendant (one-level deep is enough for
-    // our current use cases — textarea or nested panel). Re-attach
-    // if the descendant list changes via the MutationObserver below.
+
+    // Form controls (textarea, input) have no user-facing DOM children,
+    // so the descendant-RO walk and character/subtree MO would be
+    // dead code on them. The `input` listener above already catches
+    // content changes on these elements — skip the expensive observers
+    // entirely.
+    const isFormControl =
+      inner instanceof HTMLTextAreaElement || inner instanceof HTMLInputElement;
+    let mo: MutationObserver | null = null;
     const observedChildren = new WeakSet<Element>();
     const observeDescendants = (): void => {
       inner.querySelectorAll('*').forEach((el) => {
@@ -249,20 +292,27 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
         }
       });
     };
-    observeDescendants();
-
-    const mo = new MutationObserver(() => {
+    if (!isFormControl) {
+      // Observe every descendant (one-level deep is enough for our
+      // current wrap-mode use cases — nested panels, dynamic content).
+      // Re-attach if the descendant list changes via the MO below.
       observeDescendants();
-      scheduleUpdate();
-    });
-    mo.observe(inner, {
-      childList: true,
-      subtree: true,
-      // Catch attribute changes too (e.g. rows=, style= on a
-      // textarea) so the thumb recomputes when layout shifts.
-      attributes: true,
-      characterData: true,
-    });
+
+      mo = new MutationObserver(() => {
+        observeDescendants();
+        scheduleUpdate();
+      });
+      mo.observe(inner, {
+        childList: true,
+        subtree: true,
+        // Catch layout-relevant attribute changes only — narrow
+        // `attributeFilter` avoids firing on React's per-keystroke
+        // `value=` rewrites (which the `input` listener already
+        // handles downstream) and on unrelated data-* attributes.
+        attributes: true,
+        attributeFilter: ['style', 'class', 'rows', 'cols'],
+      });
+    }
 
     updateThumbs();
 
@@ -270,7 +320,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       inner.removeEventListener('scroll', updateThumbs);
       inner.removeEventListener('input', scheduleUpdate);
       ro.disconnect();
-      mo.disconnect();
+      mo?.disconnect();
       if (pendingRaf !== null) cancelAnimationFrame(pendingRaf);
     };
   }, [scrollElement]);
@@ -365,6 +415,16 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       thumbY.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      // Teardown during an active drag (e.g. scrollElement swap,
+      // parent unmount) would otherwise leak document.body.userSelect,
+      // the 'grabbing' cursor the consumer set via onThumbDrag, and
+      // the isDraggingVirtualRef flag that gates thumb auto-sync.
+      if (isDragging) {
+        isDragging = false;
+        document.body.style.userSelect = '';
+        isDraggingVirtualRef.current = false;
+        onThumbDragRef.current?.(false);
+      }
     };
   }, [scrollElement]);
 
@@ -416,6 +476,13 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       thumbX.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      // Mid-drag teardown: restore document.body.userSelect so a
+      // scrollElement swap / parent unmount during an X-drag can't
+      // leave the page with text-selection disabled.
+      if (isDragging) {
+        isDragging = false;
+        document.body.style.userSelect = '';
+      }
     };
   }, [scrollElement]);
 
