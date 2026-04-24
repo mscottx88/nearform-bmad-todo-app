@@ -156,6 +156,17 @@ export function InfoPopup({
     if (!ta) return;
     ta.style.height = 'auto';
     ta.style.height = `${ta.scrollHeight}px`;
+    // Belt-and-suspenders: ResizeObserver on the textarea SHOULD
+    // already fire and trigger NeonScrollbar's updateThumbs, but
+    // in practice React's controlled-component value update and
+    // the style.height write can race the RAF-debounced observer.
+    // Dispatching a scroll event on the NeonScrollbar inner forces
+    // updateThumbs to run synchronously on this frame so the thumb
+    // appears the moment content overflows.
+    const inner = ta.closest('.neon-scrollbar-inner');
+    if (inner instanceof HTMLElement) {
+      inner.dispatchEvent(new Event('scroll'));
+    }
   }, [editText, editing]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
@@ -188,6 +199,28 @@ export function InfoPopup({
         bubbles: true,
       }),
     );
+  }, []);
+
+  // Wheel over a NeonScrollbar-wrapped region. If the inner scrollable
+  // element can consume the wheel in the gesture direction, stop
+  // propagation so the panel's handleWheel above (which re-fires the
+  // wheel onto the canvas for OrbitControls zoom) does NOT run — the
+  // text scrolls, camera stays put. If the inner can't consume (no
+  // overflow or already at an edge), let it bubble so zoom still
+  // works for non-scrollable popups / short todos.
+  const handleScrollableWheel = useCallback((e: React.WheelEvent<HTMLDivElement>): void => {
+    const inner = e.currentTarget.querySelector(
+      '.neon-scrollbar-inner',
+    ) as HTMLElement | null;
+    if (!inner) return;
+    const canScrollUp = inner.scrollTop > 0;
+    const canScrollDown =
+      inner.scrollTop < inner.scrollHeight - inner.clientHeight - 1;
+    const wantsUp = e.deltaY < 0;
+    const wantsDown = e.deltaY > 0;
+    if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
+      e.stopPropagation();
+    }
   }, []);
 
   const showUpdated = todo.updatedAt !== todo.createdAt;
@@ -325,7 +358,7 @@ export function InfoPopup({
               still owns the overflow chrome. The resize handle below the
               editor lets the user drag to grow/shrink the region. */}
           {editing ? (
-            <div className="info-popup__editor-wrap">
+            <div className="info-popup__editor-wrap" onWheel={handleScrollableWheel}>
               {/* The text "box" is the NeonScrollbar outer wrapper —
                   its border stays stationary while the textarea (no
                   border) shifts vertically underneath as the user
@@ -397,6 +430,7 @@ export function InfoPopup({
               </div>
             </div>
           ) : (
+            <div onWheel={handleScrollableWheel}>
             <NeonScrollbar
               color="cyan"
               style={{ maxHeight: 180 }}
@@ -427,6 +461,7 @@ export function InfoPopup({
                 {todo.text}
               </div>
             </NeonScrollbar>
+            </div>
           )}
           <div className="info-popup__divider" />
           <div className="info-popup__meta">
