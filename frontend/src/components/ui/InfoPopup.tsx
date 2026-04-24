@@ -145,25 +145,27 @@ export function InfoPopup({
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const MIN_THUMB_PX = 40;  // raised from 28 — visible even in tall boxes
   const THUMB_INSET = 3;
-  // Direct DOM sync — no React state, no re-render latency.
-  // The thumb is ALWAYS shown (like VS Code / Sublime Text) so the
-  // user sees the scrollbar chrome as soon as edit mode opens.
-  // When content fits the box:  thumb fills the track (ratio = 1)
-  //   → visual cue "more room below, keep typing".
-  // When content overflows:     thumb shrinks proportionally and
-  //   moves as the user scrolls → standard scrollbar behaviour.
+  // Thumb sync using only values we KNOW or can measure reliably:
+  //   visibleHeight = editorHeight - 2 (border) — always correct from
+  //     React state; never reads ta.clientHeight which is 0 until the
+  //     drei <Html> portal settles its layout.
+  //   textHeight = ta.scrollHeight — intrinsic content measurement;
+  //     reliable once the textarea has its value (React sets it before
+  //     any effect runs).
+  //   scrollOffset = ta.scrollTop — current scroll position.
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
     if (!ta || !thumb) return;
-    const { scrollTop, scrollHeight, clientHeight } = ta;
+    const visibleHeight = editorHeight - 2; // 2 = top + bottom border
+    const textHeight = ta.scrollHeight;
+    const scrollOffset = ta.scrollTop;
     const usable = editorHeight - THUMB_INSET * 2;
-    // Clamp ratio to [0, 1] so thumb never exceeds track.
-    const ratio = Math.min(1, clientHeight / Math.max(scrollHeight, 1));
+    const ratio = Math.min(1, visibleHeight / Math.max(textHeight, 1));
     const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
     const maxTop = usable - thumbH;
-    const maxScroll = Math.max(0, scrollHeight - clientHeight);
-    const scrollFrac = maxScroll > 0 ? scrollTop / maxScroll : 0;
+    const maxScroll = Math.max(0, textHeight - visibleHeight);
+    const scrollFrac = maxScroll > 0 ? scrollOffset / maxScroll : 0;
     thumb.style.display = 'block';
     thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
     thumb.style.height = `${thumbH}px`;
