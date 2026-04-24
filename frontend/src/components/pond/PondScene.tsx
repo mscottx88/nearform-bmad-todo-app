@@ -308,9 +308,13 @@ export function PondScene() {
             activePopupTodoId === displayedInfoTodo.id
               ? (color: string) => {
                   updateTodo.mutate({ id: displayedInfoTodo.id, color });
+                  const wEntry = useWorldStore.getState().worldMetadata.get(displayedInfoTodo.id);
                   usePondStore
                     .getState()
-                    .triggerRipple(displayedInfoTodo.positionX ?? 0, displayedInfoTodo.positionY ?? 0);
+                    .triggerRipple(
+                      wEntry?.positionX ?? displayedInfoTodo.positionX ?? 0,
+                      wEntry?.positionY ?? displayedInfoTodo.positionY ?? 0,
+                    );
                   usePondStore.getState().closePopup();
                 }
               : undefined

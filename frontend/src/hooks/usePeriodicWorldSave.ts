@@ -95,7 +95,10 @@ export function sendExitPayload(payload: { positions: BeaconSaveEntry[] }): bool
   const body = JSON.stringify(payload);
 
   if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-    return navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+    if (navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) {
+      return true;
+    }
+    // sendBeacon returned false (browser quota / refusal) — fall through to fetch.
   }
 
   if (typeof fetch !== 'function') return false;
@@ -143,7 +146,7 @@ export function usePeriodicWorldSave(options: PeriodicWorldSaveOptions = {}): vo
       } catch (err) {
         // Silent — this is a background save. Entries stay dirty and
         // retry on the next cycle.
-        console.error('[useWorldStore] periodic save failed', err);
+        console.error('[world-state] periodic save failed', err);
       } finally {
         inFlightRef.current = false;
       }

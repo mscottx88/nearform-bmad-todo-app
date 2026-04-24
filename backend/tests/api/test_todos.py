@@ -305,14 +305,15 @@ def test_update_positions_post_beacon_alias(client: TestClient) -> None:
             ]
         },
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert len(body) == 2
-    assert body[0]["id"] == id_a
-    assert body[0]["position_x"] == 3.5
-    assert body[0]["position_y"] == 4.5
-    assert body[1]["id"] == id_b
-    assert body[1]["position_x"] == -2.0
+    assert response.status_code == 204
+    assert response.content == b""
+    # Verify positions were actually persisted (fire-and-forget gives no body).
+    todos = client.get("/api/todos").json()
+    a = next(t for t in todos if t["id"] == id_a)
+    b = next(t for t in todos if t["id"] == id_b)
+    assert a["position_x"] == 3.5
+    assert a["position_y"] == 4.5
+    assert b["position_x"] == -2.0
 
 
 def test_update_todo_not_found(client: TestClient) -> None:

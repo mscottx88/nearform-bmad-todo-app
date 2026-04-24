@@ -150,7 +150,7 @@ function mutateEntry(
     ...base,
     ...patch,
     lastUpdatedLocalMs: stampTime
-      ? monotonicStamp(base.lastSavedAtMs)
+      ? monotonicStamp(Math.max(base.lastSavedAtMs, base.lastUpdatedLocalMs))
       : base.lastUpdatedLocalMs,
   });
   return next;
@@ -180,9 +180,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     const now = performance.now();
     const current = get().worldMetadata;
     const next = new Map<string, WorldEntry>();
-    const incomingIds = new Set<string>();
     for (const todo of todos) {
-      incomingIds.add(todo.id);
       const existing = current.get(todo.id);
       if (existing === undefined) {
         // New id: hydrate fresh.
@@ -209,9 +207,6 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     }
     // Entries absent from the refetch are removed.
     set({ worldMetadata: next });
-    // Warning suppressed: removal is expected on soft-delete /
-    // completion. No console noise.
-    void incomingIds;
   },
 
   setPosition: (id, x, z) => {

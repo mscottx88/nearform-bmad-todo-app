@@ -1,6 +1,6 @@
 # Story 4.9: In-Memory World State
 
-Status: review
+Status: done
 
 > **Supersedes Story 4.3 (Position Persistence).** Created 2026-04-24 from user direction ("Can we simplify all the state management especially around position and refs?"). The original 4.3 model — "drag → 2 s debounce → PATCH" — was partly delivered by Story 4.8 (batch-position endpoint) and is being replaced wholesale here with an in-memory-canonical world-metadata store + periodic save + exit flush.
 >
@@ -292,6 +292,34 @@ Claude Opus 4.7 (1M context) — 2026-04-24.
 11. **Release-PATCH path still fires.** Story 4.8's `updatePositions.mutate(...)` on drag release is still the immediate-feedback path. Its payload now reads from the store (`useWorldStore.getState().worldMetadata.get(todo.id)?.positionX`) rather than the deleted `dragPosRef`. The periodic save runs in parallel and re-PATCHes the same position — one extra round-trip every 5 minutes per dragged pad, harmless. Collapsing the release PATCH into the periodic save would add cross-story coupling and delay persistence; keeping them separate is the conservative call.
 
 12. **StrictMode verification is best-effort.** Vitest's test harness doesn't always trigger `react-hooks/refs` warnings that StrictMode surfaces in the browser. 382 tests pass, `tsc --noEmit` is clean, and the remaining refs (kept per IN #8) are only written inside event handlers / useFrame — none are touched during render. Recommend a local `<StrictMode>` smoke test in the browser before marking the story fully `done`.
+
+### Review Findings (2026-04-24)
+
+#### decision_needed
+- [x] [Review][Decision] D1: Should `mergeRefetch` enforce `MAX_LOADED_TODOS`? → **Resolved: cap applies to initial hydration only.** `mergeRefetch` loads all returned items without a cap. No code change.
+- [x] [Review][Decision] D2: Accept AC #20 ref deviations or enforce the spec? → **Resolved: deviation accepted as intentional.** `hadDragAnchorRef`, `siblingNudgeRef`, `lastNudgeTargetRef`, `siblingRotationRef` remain with documented rationale. No code change.
+- [x] [Review][Decision] D3: `POST /positions` response shape → **Resolved: return `204 No Content`.** Promoted to patch P8 below.
+
+#### patch
+- [ ] [Review][Patch] P1: `monotonicStamp` uses wrong baseline — `monotonicStamp(base.lastSavedAtMs)` should be `monotonicStamp(base.lastUpdatedLocalMs)`; on a rapid second mutation of an already-dirty entry two calls can receive the same `performance.now()` value, meaning the second mutation's stamp equals `dispatchMs` and `applySaveCommit` falsely marks the post-dispatch mutation as clean [useWorldStore.ts — `mutateEntry`]
+- [ ] [Review][Patch] P2: Remove dead `incomingIds` variable from `mergeRefetch` — the `Set` is populated then immediately `void`'d; pruning of absent entries happens implicitly (the `next` map is built from scratch) [useWorldStore.ts — `mergeRefetch`]
+- [ ] [Review][Patch] P3: `sendBeacon` returns `false` → exit payload dropped silently — `sendExitPayload` returns `navigator.sendBeacon(...)` directly; a `false` return (payload too large) exits without falling through to the `fetch({ method: 'PATCH', keepalive: true })` fallback required by AC #18. Also add the corresponding test (AC #26j) [usePeriodicWorldSave.ts + usePeriodicWorldSave.test.ts]
+- [ ] [Review][Patch] P4: `console.error` prefix mismatch — logs `'[useWorldStore] periodic save failed'` but AC #15 specifies `'[world-state] periodic save failed'`; the test uses `stringContaining('periodic save failed')` so the mismatch is masked [usePeriodicWorldSave.ts:146 + usePeriodicWorldSave.test.ts]
+- [ ] [Review][Patch] P5: `onCommitColor` ripple trigger uses stale prop position — `PondScene.tsx` fires `triggerRipple(displayedInfoTodo.positionX ?? 0, displayedInfoTodo.positionY ?? 0)`, not updated in this story; should read from `useWorldStore.getState()` consistent with the InfoPopup and callout-line fixes [PondScene.tsx — `onCommitColor` callback]
+- [ ] [Review][Patch] P6: `beforeunload` and `visibilitychange` event-listener wiring is untested — `sendExitPayload` is tested in isolation but the listeners registered in `usePeriodicWorldSave` that invoke it are never exercised by any test, violating AC #26h and #26i [usePeriodicWorldSave.test.ts]
+- [ ] [Review][Patch] P7: `pointerdown` `setPosition` seed writes drift-animated position — `groupNow.position.x/z` includes drift + nudge offsets at the moment of click; writing this to the store dirties the entry on every clean click and would cause the server to persist a slightly drift-offset rest position on the next periodic save [LilyPad.tsx — `handlePadPointerDown`]
+
+#### defer
+- [ ] [Review][Patch] P8: `POST /positions` beacon alias should return `204 No Content` — `sendBeacon` discards the response; returning the full `list[TodoResponse]` serializes up to 500 objects on every tab-close for nothing; also change `response_model` accordingly [backend/src/api/todos.py — `update_positions_beacon`]
+
+- [x] [Review][Defer] No circuit-breaker or bounded retry on periodic save failure — store entries retry forever on persistent outage with no backoff or user signal; AC #15 only requires retry, not bounded retry [usePeriodicWorldSave.ts] — deferred, out of story scope
+- [x] [Review][Defer] `mergeRefetch` dirty-branch silently ignores server position corrections — intentional by design ("in-memory position wins until flushed"); server position corrections for dirty entries are blocked until the next successful periodic save [useWorldStore.ts — `mergeRefetch`] — deferred, intentional design
+- [x] [Review][Defer] Cascade nudge rotation not dirty-tracked — `siblingRotationRef` accumulates rotations but `setRotation` is never called during cascade; the accumulated rotation is not persisted in the periodic PATCH. Resolution depends on D2 (if refs stay, this is acceptable; if refs go, a `setRotation` call needs wiring) [LilyPad.tsx — useFrame cascade block] — deferred, conditional on D2
+- [x] [Review][Defer] AC #26 test (f) uses 1s interval override instead of 5-minute advance — the test passes `intervalMs: 1000` and advances 1000ms; functionally equivalent with fake timers but does not verify the `PERIODIC_SAVE_INTERVAL_MS` constant value itself [usePeriodicWorldSave.test.ts] — deferred, acceptable shortcut
+- [x] [Review][Defer] `renderTodos` completing/deleting extras have no store entry after they are removed from the server response — LilyPad falls back to `todo.positionX/Y`; benign in practice (pad is dissolving in place, position does not change during dissolve) — deferred, pre-existing / acceptable
+- [x] [Review][Defer] `liveEntry` undefined during mid-drag deletion (pad deleted by another client while being dragged) — `group.position` stops updating; mesh freezes at its last position, then unmounts on the next refetch — deferred, acceptable rare edge case
+
+---
 
 ### Completion Checklist
 

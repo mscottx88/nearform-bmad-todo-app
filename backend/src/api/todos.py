@@ -65,13 +65,13 @@ def update_positions(
 # is the fallback for environments without sendBeacon support.
 @router.post(
     "/positions",
-    response_model=list[TodoResponse],
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 def update_positions_beacon(
     data: TodoPositionsUpdate,
     db: Session = Depends(get_db),
-) -> list[TodoResponse]:
-    return todo_service.update_positions(db, data.positions)
+) -> None:
+    todo_service.update_positions(db, data.positions)
 
 
 @router.patch(

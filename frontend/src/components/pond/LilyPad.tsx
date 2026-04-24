@@ -867,24 +867,6 @@ export function LilyPad({
       dragStartScreenRef.current = { x: e.clientX, y: e.clientY };
       isDraggingRef.current = false;
       raycastSucceededRef.current = false;
-      // Seed dragPosRef with the pad's current visible position so a
-      // sub-threshold release (click) has valid coords, and so a rapid
-      // drag-after-drag (while sticky is still waiting for a refetch)
-      // doesn't snap back to stale posX/posZ for a frame. The visible
-      // pad position (group.position) already reflects drift / sticky /
-      // prior-nudge offsets; falling back to posX/posZ only if the
-      // Story 4.9: pointerdown seeds the world store with the pad's
-      // current visible position so the subsequent clean-click
-      // `openPopup` path has fresh coords. The old `dragPosRef` seed
-      // is gone — the store itself is the canonical position.
-      const groupNow = groupRef.current;
-      if (groupNow?.position) {
-        useWorldStore.getState().setPosition(
-          todo.id,
-          groupNow.position.x,
-          groupNow.position.z,
-        );
-      }
       activePointerIdRef.current = e.nativeEvent.pointerId;
 
       const onWindowMove = (ev: PointerEvent) => {

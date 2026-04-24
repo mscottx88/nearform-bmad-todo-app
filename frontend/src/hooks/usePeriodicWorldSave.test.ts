@@ -116,6 +116,52 @@ describe('usePeriodicWorldSave', () => {
       consoleErr.mockRestore();
     });
   });
+
+  describe('exit flush listeners', () => {
+    let beaconSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      beaconSpy = vi.fn().mockReturnValue(true);
+      Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+        value: beaconSpy,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it('fires sendExitPayload on beforeunload when dirty entries exist', () => {
+      useWorldStore.getState().hydrateFromTodos([makeTodo({ id: 'a' })]);
+      useWorldStore.getState().setPosition('a', 10, 20);
+      renderHook(() => usePeriodicWorldSave({ intervalMs: 1000 }));
+      window.dispatchEvent(new Event('beforeunload'));
+      expect(beaconSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/todos/positions'),
+        expect.any(Blob),
+      );
+    });
+
+    it('fires sendExitPayload on visibilitychange=hidden when dirty entries exist', () => {
+      useWorldStore.getState().hydrateFromTodos([makeTodo({ id: 'a' })]);
+      useWorldStore.getState().setPosition('a', 10, 20);
+      renderHook(() => usePeriodicWorldSave({ intervalMs: 1000 }));
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        configurable: true,
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(beaconSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/todos/positions'),
+        expect.any(Blob),
+      );
+    });
+
+    it('does NOT fire sendExitPayload on beforeunload when no dirty entries', () => {
+      useWorldStore.getState().hydrateFromTodos([makeTodo({ id: 'a' })]);
+      renderHook(() => usePeriodicWorldSave({ intervalMs: 1000 }));
+      window.dispatchEvent(new Event('beforeunload'));
+      expect(beaconSpy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('sendExitPayload', () => {
@@ -139,6 +185,28 @@ describe('sendExitPayload', () => {
     expect(beaconSpy).toHaveBeenCalledWith(
       '/api/todos/positions',
       expect.any(Blob),
+    );
+  });
+
+  it('falls back to fetch when sendBeacon is available but returns false (quota exceeded)', () => {
+    const beaconSpy = vi.fn().mockReturnValue(false);
+    Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+      value: beaconSpy,
+      configurable: true,
+      writable: true,
+    });
+    const fetchSpy = vi.fn().mockResolvedValue(new Response());
+    Object.defineProperty(globalThis, 'fetch', {
+      value: fetchSpy,
+      configurable: true,
+      writable: true,
+    });
+    const result = sendExitPayload(PAYLOAD);
+    expect(result).toBe(true);
+    expect(beaconSpy).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/todos/positions',
+      expect.objectContaining({ method: 'PATCH', keepalive: true }),
     );
   });
 
