@@ -52,3 +52,21 @@ class EmbeddingDimensionError(AppError):
             status_code=500,
             detail=f"expected {expected}-dim vector, got {got}-dim",
         )
+
+
+class ChatSessionNotFoundError(AppError):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(
+            error="not_found",
+            message=f"Chat session with id {session_id} not found",
+            status_code=404,
+        )
+
+
+class ChatMessageNotFoundError(AppError):
+    def __init__(self, message_id: str) -> None:
+        super().__init__(
+            error="not_found",
+            message=f"Chat message with id {message_id} not found",
+            status_code=404,
+        )

@@ -16,8 +16,10 @@ readme = "README.md"
 
 dependencies = [
     "alembic>=1.18.4",
+    "crewai>=1.0.0,<2.0.0",
     "fastapi>=0.135.3",
     "google-genai>=1.0.0",
+    "langchain-anthropic>=0.3.0",
     "pgvector>=0.4.2",
     "psycopg[binary]>=3.2.0",
     "psycopg-pool>=3.2.0",

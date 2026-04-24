@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.api.agent import router as agent_router
 from src.api.creatures import router as creatures_router
 from src.api.search import router as search_router
 from src.api.todos import router as todos_router
@@ -26,6 +27,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning(
             "GOOGLE_API_KEY not configured — embedding generation will be "
             "disabled; todos will save with embedding_status='pending'",
+        )
+    if not settings.anthropic_api_key:
+        logger.warning(
+            "ANTHROPIC_API_KEY not configured — agent chat endpoint will error on use"
         )
     if not settings.embedding_model.strip():
         # Empty/whitespace-only model name → every embedding call 400s at
@@ -82,3 +87,4 @@ def validation_error_handler(
 app.include_router(todos_router)
 app.include_router(creatures_router)
 app.include_router(search_router)
+app.include_router(agent_router)

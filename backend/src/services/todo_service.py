@@ -84,6 +84,24 @@ def get_todo(db: Session, todo_id: uuid.UUID) -> Todo:
     return _get_active_todo(db, todo_id)
 
 
+def list_for_agent(
+    db: Session,
+    filter: str = "active",
+    limit: int = 100,
+) -> list[TodoResponse]:
+    """Return todos for agent tool use. filter: 'active' | 'completed' | 'all'."""
+    include_active = filter in ("active", "all")
+    include_completed = filter in ("completed", "all")
+    rows = list_todos(
+        db,
+        include_active=include_active,
+        include_completed=include_completed,
+        include_deleted=False,
+    )
+    hard_cap = min(limit, 500)
+    return rows[:hard_cap]
+
+
 def update_todo(
     db: Session,
     todo_id: uuid.UUID,

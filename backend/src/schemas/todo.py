@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
@@ -89,6 +90,7 @@ class TodoResponse(BaseModel):
     embedding_status: str
     archived: bool
     archived_at: datetime | None
+    display_metadata: dict[str, Any] = Field(default_factory=dict)
     deleted: bool
     deleted_at: datetime | None
     created_at: datetime

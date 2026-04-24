@@ -5,6 +5,8 @@ from starlette.testclient import TestClient
 from src.config import settings
 from src.database import SessionLocal, get_db
 from src.main import app
+from src.models.chat_message import ChatMessage
+from src.models.chat_session import ChatSession
 from src.models.creature import Creature
 from src.models.todo import Todo
 from tests._safeguard import require_test_database
@@ -23,6 +25,8 @@ def _safeguard_test_database() -> None:  # type: ignore[misc]
 def _clean_db() -> None:  # type: ignore[misc]
     """Delete all test data before each test."""
     with SessionLocal() as session:
+        session.query(ChatMessage).delete()
+        session.query(ChatSession).delete()
         session.query(Creature).delete()
         session.query(Todo).delete()
         session.commit()

@@ -2,7 +2,7 @@
 
 Revision ID: 0001_schema
 Revises:
-Create Date: 2026-04-22 10:00:00.000000
+Create Date: 2026-04-24 00:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -10,7 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 import pgvector.sqlalchemy.vector  # noqa: F401
 import sqlalchemy as sa
-
+from sqlalchemy.dialects import postgresql
 
 revision: str = '0001_schema'
 down_revision: Union[str, None] = None
@@ -20,6 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+    op.create_table(
+        'chat_sessions',
+        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('title', sa.Text(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+    )
 
     op.create_table(
         'todos',
@@ -35,6 +44,7 @@ def upgrade() -> None:
         sa.Column('embedding_status', sa.String(length=20), server_default=sa.text("'pending'"), nullable=False),
         sa.Column('archived', sa.Boolean(), server_default=sa.text('false'), nullable=False),
         sa.Column('archived_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('display_metadata', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.Column('deleted', sa.Boolean(), server_default=sa.text('false'), nullable=False),
         sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -47,6 +57,25 @@ def upgrade() -> None:
     op.create_index('ix_todos_active', 'todos', ['deleted', 'archived'], unique=False, postgresql_where=sa.text('deleted = false'))
     op.create_index('ix_todos_text_search', 'todos', [sa.literal_column("to_tsvector('english', text)")], unique=False, postgresql_using='gin')
     op.execute("CREATE INDEX ix_todos_embedding ON todos USING hnsw (embedding vector_cosine_ops)")
+
+    op.create_table(
+        'chat_messages',
+        sa.Column('id', sa.UUID(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+        sa.Column('session_id', sa.UUID(), nullable=False),
+        sa.Column('role', sa.String(length=16), nullable=False),
+        sa.Column('content', sa.Text(), nullable=False),
+        sa.Column('skill', sa.String(length=64), nullable=True),
+        sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
+        sa.Column('status', sa.String(length=16), server_default=sa.text("'complete'"), nullable=False),
+        sa.Column('error', sa.Text(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.CheckConstraint("role IN ('user','assistant','system','tool')", name='ck_chat_messages_role'),
+        sa.CheckConstraint("status IN ('pending','streaming','complete','failed','cancelled')", name='ck_chat_messages_status'),
+        sa.ForeignKeyConstraint(['session_id'], ['chat_sessions.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+    )
+
+    op.create_index('idx_chat_messages_session_created', 'chat_messages', ['session_id', 'created_at'], unique=False)
 
     op.create_table(
         'creatures',
@@ -62,8 +91,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table('creatures')
+    op.execute("DROP TABLE IF EXISTS creatures CASCADE")
+    op.execute("DROP INDEX IF EXISTS idx_chat_messages_session_created")
+    op.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
     op.execute("DROP INDEX IF EXISTS ix_todos_embedding")
-    op.drop_index('ix_todos_text_search', table_name='todos', postgresql_using='gin')
-    op.drop_index('ix_todos_active', table_name='todos', postgresql_where=sa.text('deleted = false'))
-    op.drop_table('todos')
+    op.execute("DROP INDEX IF EXISTS ix_todos_text_search")
+    op.execute("DROP INDEX IF EXISTS ix_todos_active")
+    op.execute("DROP TABLE IF EXISTS todos CASCADE")
+    op.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")

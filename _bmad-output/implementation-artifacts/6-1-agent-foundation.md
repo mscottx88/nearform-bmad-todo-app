@@ -1,6 +1,6 @@
 # Story 6.1: Agent Foundation
 
-Status: ready-for-dev
+Status: in-progress
 
 > **Scope note:** First story of Epic 6 (The Intelligent Pond Companion). Builds the complete
 > backend AI substrate — schema regeneration, session CRUD, agent bounded context (SkillContext,

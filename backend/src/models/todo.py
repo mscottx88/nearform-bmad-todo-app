@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
@@ -12,7 +13,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base
@@ -76,6 +77,11 @@ class Todo(Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+    display_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        server_default=sa.text("'{}'::jsonb"),
+        nullable=False,
     )
     deleted: Mapped[bool] = mapped_column(
         Boolean,

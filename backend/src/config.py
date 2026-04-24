@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/todo_pond"
     google_api_key: str = ""
+    anthropic_api_key: str = ""
     embedding_model: str = "gemini-embedding-001"
     cors_origins: str = "http://localhost:5173"
     # archive is deprecated in v1 (see architecture.md) but the setting is
@@ -26,6 +27,16 @@ class Settings(BaseSettings):
         if "://" not in value:
             raise ValueError(
                 "DATABASE_URL must contain '://' (e.g. postgresql+psycopg://user:pass@host/db)",
+            )
+        return value
+
+    @field_validator("anthropic_api_key")
+    @classmethod
+    def _validate_anthropic_api_key(cls, value: str) -> str:
+        if value and not value.strip():
+            raise ValueError(
+                "ANTHROPIC_API_KEY is whitespace-only — "
+                "set a real key or leave unset/empty",
             )
         return value
 
