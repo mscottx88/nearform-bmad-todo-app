@@ -142,33 +142,27 @@ export function InfoPopup({
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
   const resizeHandleOverRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // Neon thumb state — tracks the textarea's own scrollTop so the
-  // overlay thumb repositions and resizes correctly as the user
-  // types or scrolls. Updated by a scroll listener on the textarea.
-  const [thumbInfo, setThumbInfo] = useState<{ top: number; height: number; visible: boolean }>({
-    top: 0, height: 0, visible: false,
-  });
+  const thumbRef = useRef<HTMLDivElement | null>(null);
   const MIN_THUMB_PX = 28;
-  const TRACK_WIDTH = 15;
-  const THUMB_INSET = 3; // px margin at top and bottom of thumb within track
-  // Sync thumb to textarea scroll state. Called on every textarea
-  // scroll event and whenever editorHeight changes.
+  const THUMB_INSET = 3;
+  // Direct DOM sync — no React state, no re-render latency.
+  // Mirrors NeonScrollbar's updateThumbs pattern exactly.
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
-    if (!ta) return;
+    const thumb = thumbRef.current;
+    if (!ta || !thumb) return;
     const { scrollTop, scrollHeight, clientHeight } = ta;
     if (scrollHeight <= clientHeight + 1) {
-      setThumbInfo({ top: 0, height: 0, visible: false });
+      thumb.style.display = 'none';
       return;
     }
-    // usable = track height minus equal top+bottom insets so thumb
-    // has the same margin at both ends (matches NeonScrollbar.tsx).
     const usable = editorHeight - THUMB_INSET * 2;
-    const ratio = clientHeight / scrollHeight;
-    const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
+    const thumbH = Math.max(MIN_THUMB_PX, (clientHeight / scrollHeight) * usable);
     const maxTop = usable - thumbH;
     const scrollFrac = scrollTop / (scrollHeight - clientHeight);
-    setThumbInfo({ top: THUMB_INSET + scrollFrac * maxTop, height: thumbH, visible: true });
+    thumb.style.display = '';
+    thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
+    thumb.style.height = `${thumbH}px`;
   }, [editorHeight]);
   useEffect(() => {
     if (!editing) return;
@@ -178,7 +172,6 @@ export function InfoPopup({
     syncThumb();
     return () => ta.removeEventListener('scroll', syncThumb);
   }, [editing, syncThumb]);
-  // Re-sync whenever editText changes (content grows/shrinks).
   useLayoutEffect(() => {
     if (editing) syncThumb();
   }, [editText, editing, syncThumb]);
@@ -305,12 +298,14 @@ export function InfoPopup({
     document.body.style.userSelect = 'none';
     const startY = e.clientY;
     const startScroll = ta.scrollTop;
-    const usable = editorHeight - TRACK_WIDTH;
+    const usable = editorHeight - THUMB_INSET * 2;
+    const thumbH = Math.max(MIN_THUMB_PX, (ta.clientHeight / ta.scrollHeight) * usable);
     const maxScroll = ta.scrollHeight - ta.clientHeight;
     const onMove = (ev: MouseEvent): void => {
       const delta = ev.clientY - startY;
-      const scrollDelta = (delta / usable) * maxScroll;
-      ta.scrollTop = Math.max(0, Math.min(maxScroll, startScroll + scrollDelta));
+      // Map thumb travel range (usable − thumbH) to full scroll range.
+      const fraction = delta / (usable - thumbH);
+      ta.scrollTop = Math.max(0, Math.min(maxScroll, startScroll + fraction * maxScroll));
     };
     const onUp = (ev: MouseEvent): void => {
       document.body.style.userSelect = '';
@@ -482,16 +477,19 @@ export function InfoPopup({
                 />
                 {/* Neon scrollbar track — always rendered; thumb is
                     visible only when textarea overflows. */}
+                {/* Track + thumb. Thumb is ALWAYS in the DOM so
+                    thumbRef is never null. syncThumb sets
+                    display:none when no overflow, then restores
+                    display:'' + updates top/height on scroll. */}
                 <div className="info-popup__neon-track">
-                  {thumbInfo.visible && (
-                    <div
-                      className="info-popup__neon-thumb"
-                      style={{ top: thumbInfo.top, height: thumbInfo.height }}
-                      onMouseDown={handleThumbDragStart}
-                      onMouseEnter={() => onDragAffordanceHover(true)}
-                      onMouseLeave={() => onDragAffordanceHover(false)}
-                    />
-                  )}
+                  <div
+                    ref={thumbRef}
+                    className="info-popup__neon-thumb"
+                    style={{ display: 'none' }}
+                    onMouseDown={handleThumbDragStart}
+                    onMouseEnter={() => onDragAffordanceHover(true)}
+                    onMouseLeave={() => onDragAffordanceHover(false)}
+                  />
                 </div>
               </div>
               <div
