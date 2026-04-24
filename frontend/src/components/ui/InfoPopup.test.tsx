@@ -115,11 +115,12 @@ describe('InfoPopup', () => {
       expect(container.textContent).toMatch(/pending/i);
     });
 
-    it('embedding=complete hides the embedding row', () => {
+    it('embedding=complete shows the embedding row with "COMPLETE"', () => {
       const { container } = render(
         <InfoPopup todo={makeTodo({ embeddingStatus: 'complete' })} focused={false} />,
       );
-      expect(container.textContent).not.toMatch(/EMBEDDING/i);
+      expect(container.textContent).toMatch(/EMBEDDING/i);
+      expect(container.textContent).toMatch(/COMPLETE/i);
     });
 
     it('updatedAt === createdAt hides the Updated row', () => {

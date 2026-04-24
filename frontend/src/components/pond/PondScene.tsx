@@ -341,7 +341,7 @@ export function PondScene() {
         />
       </EffectComposer>
     </Canvas>
-    <PondSearchOverlay />
+    <PondSearchOverlay hasVisiblePads={renderTodos.length > 0} />
     </>
   );
 }

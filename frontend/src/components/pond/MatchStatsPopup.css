@@ -1,0 +1,71 @@
+/* Positioner: the drei <Html> element is placed at the 3D anchor (top of
+   the pole). Without `center`, the HTML's top-left corner sits at that
+   anchor. This wrapper shifts the chip so it is horizontally centred on
+   the anchor AND sits fully ABOVE it (bottom edge aligned to anchor Y
+   via `translateY(-100%)`) — a small negative margin adds a subtle gap
+   between pole crown and chip base. */
+.match-stats-popup__positioner {
+  transform: translate(-50%, -100%);
+  margin-bottom: 2px;
+  pointer-events: none;
+}
+
+/* Floating, non-interactive match-stats popup that hovers above a lily pad
+   while a search is active. Visual intent: lightweight HUD chip — small,
+   semi-transparent, neon glow, never claims pointer events. */
+.match-stats-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 9px;
+  background: rgba(0, 12, 16, 0.7);
+  border: 1px solid rgba(0, 238, 255, 0.5);
+  border-radius: 6px;
+  box-shadow:
+    0 0 8px rgba(0, 238, 255, 0.4),
+    inset 0 0 4px rgba(0, 238, 255, 0.18);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #aaffff;
+  text-shadow: 0 0 4px rgba(0, 238, 255, 0.65);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  text-transform: lowercase;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: stats-popup-in 200ms ease-out both;
+}
+
+.match-stats-popup__row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.match-stats-popup__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: #80ffff;
+  filter: drop-shadow(0 0 2px currentColor);
+}
+
+.match-stats-popup__value {
+  display: inline-block;
+  min-width: 0;
+}
+
+@keyframes stats-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

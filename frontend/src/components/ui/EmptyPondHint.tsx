@@ -10,17 +10,27 @@ export function EmptyPondHint() {
       center
       style={{ pointerEvents: 'none' }}
     >
-      <div className="empty-hint" aria-label={HINT_TEXT}>
-        {HINT_TEXT.split('').map((char, i) => (
-          <span
-            key={i}
-            className="empty-hint__char"
-            style={{ animationDelay: `${i * 0.08}s` }}
-            aria-hidden="true"
-          >
-            {char === ' ' ? '\u00A0' : char}
-          </span>
-        ))}
+      <div className="empty-hint-wrap">
+        <div className="empty-hint" aria-label={HINT_TEXT}>
+          {HINT_TEXT.split('').map((char, i) => (
+            <span
+              key={i}
+              className="empty-hint__char"
+              style={{ animationDelay: `${i * 0.08}s` }}
+              aria-hidden="true"
+            >
+              {char === ' ' ? ' ' : char}
+            </span>
+          ))}
+        </div>
+        <ul className="empty-hint__shortcuts" aria-label="keyboard shortcuts">
+          <li>
+            Press <kbd className="empty-hint__kbd">Enter</kbd> to create your first task
+          </li>
+          <li>
+            Press <kbd className="empty-hint__kbd">/</kbd> to use a slash command
+          </li>
+        </ul>
       </div>
     </Html>
   );

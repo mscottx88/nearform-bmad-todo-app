@@ -37,3 +37,13 @@
   margin-top: 0.4em;
   text-transform: lowercase;
 }
+
+.pond-search-overlay__empty {
+  color: var(--neon-pink);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+  opacity: 0.85;
+  margin-top: 0.6em;
+  text-shadow: 0 0 6px var(--neon-pink);
+}

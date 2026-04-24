@@ -16,19 +16,19 @@ describe('PondSearchOverlay', () => {
 
   it('renders the typed query when search is active', () => {
     usePondStore.setState({ searchQuery: 'hello', searchActive: true });
-    render(<PondSearchOverlay />);
+    render(<PondSearchOverlay hasVisiblePads={true} />);
     expect(screen.getByText('hello')).toBeInTheDocument();
   });
 
   it('applies the --active class when search is active (opacity=1 via CSS)', () => {
     usePondStore.setState({ searchQuery: 'hello', searchActive: true });
-    const { container } = render(<PondSearchOverlay />);
+    const { container } = render(<PondSearchOverlay hasVisiblePads={true} />);
     const root = container.firstChild as HTMLElement;
     expect(root.className).toContain('pond-search-overlay--active');
   });
 
   it('omits the --active class when search is inactive (opacity=0 via CSS transition)', () => {
-    const { container } = render(<PondSearchOverlay />);
+    const { container } = render(<PondSearchOverlay hasVisiblePads={true} />);
     const root = container.firstChild as HTMLElement;
     expect(root.className).not.toContain('pond-search-overlay--active');
     expect(root.getAttribute('aria-hidden')).toBe('true');
@@ -40,12 +40,12 @@ describe('PondSearchOverlay', () => {
       searchActive: true,
       vectorSearchUnavailable: true,
     });
-    const { rerender } = render(<PondSearchOverlay />);
+    const { rerender } = render(<PondSearchOverlay hasVisiblePads={true} />);
     expect(screen.getByText('semantic search offline')).toBeInTheDocument();
 
     // Flip the flag and verify the badge disappears.
     usePondStore.setState({ vectorSearchUnavailable: false });
-    rerender(<PondSearchOverlay />);
+    rerender(<PondSearchOverlay hasVisiblePads={true} />);
     expect(screen.queryByText('semantic search offline')).not.toBeInTheDocument();
   });
 
@@ -55,7 +55,25 @@ describe('PondSearchOverlay', () => {
       searchActive: false,
       vectorSearchUnavailable: true,
     });
-    render(<PondSearchOverlay />);
+    render(<PondSearchOverlay hasVisiblePads={true} />);
     expect(screen.queryByText('semantic search offline')).not.toBeInTheDocument();
+  });
+
+  it('shows "nothing to search" feedback when search is active but no pads are visible', () => {
+    usePondStore.setState({ searchQuery: 'foo', searchActive: true });
+    render(<PondSearchOverlay hasVisiblePads={false} />);
+    expect(screen.getByText(/nothing to search/i)).toBeInTheDocument();
+  });
+
+  it('does NOT show "nothing to search" when pads are visible', () => {
+    usePondStore.setState({ searchQuery: 'foo', searchActive: true });
+    render(<PondSearchOverlay hasVisiblePads={true} />);
+    expect(screen.queryByText(/nothing to search/i)).not.toBeInTheDocument();
+  });
+
+  it('does NOT show "nothing to search" when search is inactive', () => {
+    usePondStore.setState({ searchQuery: '', searchActive: false });
+    render(<PondSearchOverlay hasVisiblePads={false} />);
+    expect(screen.queryByText(/nothing to search/i)).not.toBeInTheDocument();
   });
 });

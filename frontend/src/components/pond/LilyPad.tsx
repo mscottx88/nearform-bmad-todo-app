@@ -20,6 +20,7 @@ import {
 } from '../../api/todoApi';
 import { EmergingCreature } from '../creatures/EmergingCreature';
 import { GlowSource } from './GlowSource';
+import { MatchStatsPopup } from './MatchStatsPopup';
 
 // Story 4.2: drag + spread-out support.
 // Module-scope so every pad shares the same Plane + scratch vectors
@@ -2580,6 +2581,12 @@ export function LilyPad({
           </div>
         </Html>
       )}
+      {/* Match statistics popup — non-interactive HUD chip above the pad.
+          Visible only while a search is active and this pad has a hit;
+          `searchHit` becomes undefined when search clears (both clearSearch
+          and backspace-to-empty reset `searchResults` to a new Map), so the
+          component unmounts with no extra gating. */}
+      {searchHit && !completing && !deleting && <MatchStatsPopup hit={searchHit} />}
       {/* Completion creature — only visible during the emerge window of the
           `completing` phase. The component self-hides before/after via its
           useFrame; mounting while `completing` is present is enough. */}

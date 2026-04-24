@@ -240,7 +240,11 @@ export function InfoPopup({
   }
 
   const embeddingColor =
-    todo.embeddingStatus === 'failed' ? 'var(--neon-pink)' : 'var(--neon-orange)';
+    todo.embeddingStatus === 'failed'
+      ? 'var(--neon-pink)'
+      : todo.embeddingStatus === 'complete'
+        ? 'var(--neon-green)'
+        : 'var(--neon-orange)';
 
   // Measure the panel for the callout line endpoint. Line runs from
   // the pad centroid (SVG origin at the `.info-popup` zero-size
@@ -563,14 +567,12 @@ export function InfoPopup({
               </MetaRow>
             )}
             <MetaRow label="Status">{statusBadges}</MetaRow>
-            {todo.embeddingStatus !== 'complete' && (
-              <MetaRow label="Embedding">
-                <StatusBadge
-                  label={todo.embeddingStatus.toUpperCase()}
-                  color={embeddingColor}
-                />
-              </MetaRow>
-            )}
+            <MetaRow label="Embedding">
+              <StatusBadge
+                label={todo.embeddingStatus.toUpperCase()}
+                color={embeddingColor}
+              />
+            </MetaRow>
             <MetaRow label="Position">
               ({Number.isFinite(popupX) ? popupX.toFixed(2) : '—'},{' '}
               {Number.isFinite(popupZ) ? popupZ.toFixed(2) : '—'})
