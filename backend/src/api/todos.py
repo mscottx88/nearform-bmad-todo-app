@@ -58,6 +58,22 @@ def update_positions(
     return todo_service.update_positions(db, data.positions)
 
 
+# Story 4-9: navigator.sendBeacon is POST-only, so a POST alias is
+# provided alongside the PATCH route. Both accept the same payload and
+# delegate to the same service function. sendBeacon is the preferred
+# exit-flush path on the frontend; fetch({keepalive: true, method:PATCH})
+# is the fallback for environments without sendBeacon support.
+@router.post(
+    "/positions",
+    response_model=list[TodoResponse],
+)
+def update_positions_beacon(
+    data: TodoPositionsUpdate,
+    db: Session = Depends(get_db),
+) -> list[TodoResponse]:
+    return todo_service.update_positions(db, data.positions)
+
+
 @router.patch(
     "/{todo_id}",
     response_model=TodoResponse,

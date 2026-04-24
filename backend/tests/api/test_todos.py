@@ -291,6 +291,30 @@ def test_update_positions_accepts_soft_deleted(client: TestClient) -> None:
     assert body[0]["deleted"] is True
 
 
+def test_update_positions_post_beacon_alias(client: TestClient) -> None:
+    # navigator.sendBeacon is POST-only; the POST /positions alias must
+    # accept the same payload and produce the same result as PATCH.
+    id_a = client.post("/api/todos", json={"text": "Beacon A"}).json()["id"]
+    id_b = client.post("/api/todos", json={"text": "Beacon B"}).json()["id"]
+    response = client.post(
+        "/api/todos/positions",
+        json={
+            "positions": [
+                {"id": id_a, "position_x": 3.5, "position_y": 4.5, "rotation_y": 0.1},
+                {"id": id_b, "position_x": -2.0, "position_y": 1.0, "rotation_y": 0.2},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    assert body[0]["id"] == id_a
+    assert body[0]["position_x"] == 3.5
+    assert body[0]["position_y"] == 4.5
+    assert body[1]["id"] == id_b
+    assert body[1]["position_x"] == -2.0
+
+
 def test_update_todo_not_found(client: TestClient) -> None:
     fake_id = str(uuid.uuid4())
     response = client.patch(

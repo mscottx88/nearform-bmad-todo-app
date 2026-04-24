@@ -6,8 +6,8 @@
  * collects every dirty entry from `useWorldStore` and fires a single
  * `PATCH /api/todos/positions` with the batch. On tab exit
  * (`beforeunload` / `visibilitychange=hidden`), flushes the same set
- * via `navigator.sendBeacon` with a `fetch({keepalive: true})`
- * fallback.
+ * via `navigator.sendBeacon` (POST to the `/positions` alias) with a
+ * `fetch({keepalive: true, method: PATCH})` fallback.
  *
  * Design notes:
  * - The interval uses a simple `setInterval`. A real one-per-app
@@ -77,22 +77,27 @@ function buildBeaconPayload(
 }
 
 /**
- * Send the payload via `fetch({ method: 'PATCH', keepalive: true })`.
+ * Send the payload on page exit using the most reliable available API.
  *
- * `navigator.sendBeacon` is NOT used here even though it's the
- * canonical exit-flush API — it only supports POST, and our endpoint
- * requires PATCH. Using sendBeacon against `/api/todos/positions`
- * returns 405 Method Not Allowed at the backend. Modern browsers
- * (Chrome 62+, Firefox 71+, Safari 13+) honour `keepalive: true` on
- * fetch during the unload phase, so the reliability gap vs sendBeacon
- * is small in practice.
+ * Preference order:
+ *  1. `navigator.sendBeacon` — fire-and-forget, browser-guaranteed during
+ *     unload even on mobile. The backend exposes a POST `/positions` alias
+ *     specifically for this path (sendBeacon is POST-only; the existing
+ *     PATCH route returns 405 when hit by sendBeacon).
+ *  2. `fetch({ method: 'PATCH', keepalive: true })` — fallback for
+ *     environments without sendBeacon (e.g. older Safari, SSR test harnesses).
  *
- * The response is not awaited. The local `lastSavedAtMs` is NOT
- * bumped — next mount re-hydrates from server truth.
+ * The response is not awaited. `lastSavedAtMs` is NOT bumped — next mount
+ * re-hydrates from server truth.
  */
 export function sendExitPayload(payload: { positions: BeaconSaveEntry[] }): boolean {
   const url = (apiClient.defaults.baseURL ?? '') + WORLD_SAVE_URL;
   const body = JSON.stringify(payload);
+
+  if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    return navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+  }
+
   if (typeof fetch !== 'function') return false;
   try {
     void fetch(url, {

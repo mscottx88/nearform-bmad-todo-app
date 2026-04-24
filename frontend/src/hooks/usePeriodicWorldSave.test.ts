@@ -119,23 +119,42 @@ describe('usePeriodicWorldSave', () => {
 });
 
 describe('sendExitPayload', () => {
+  const PAYLOAD = { positions: [{ id: 'a', position_x: 1, position_y: 2, rotation_y: 0 }] };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('uses fetch({method: PATCH, keepalive: true}) — sendBeacon is not used because it is POST-only', () => {
-    // sendBeacon's POST requirement collides with the endpoint's
-    // PATCH-only signature (returns 405 Method Not Allowed). fetch
-    // with keepalive is honoured during unload on modern browsers.
+  it('prefers navigator.sendBeacon — POST to /positions alias (sendBeacon is POST-only)', () => {
+    // The backend exposes POST /todos/positions specifically so sendBeacon
+    // (which is POST-only) can be used. fetch({keepalive,PATCH}) is the fallback.
+    const beaconSpy = vi.fn().mockReturnValue(true);
+    Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+      value: beaconSpy,
+      configurable: true,
+      writable: true,
+    });
+    const result = sendExitPayload(PAYLOAD);
+    expect(result).toBe(true);
+    expect(beaconSpy).toHaveBeenCalledWith(
+      '/api/todos/positions',
+      expect.any(Blob),
+    );
+  });
+
+  it('falls back to fetch({method: PATCH, keepalive: true}) when sendBeacon is unavailable', () => {
+    Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
     const fetchSpy = vi.fn().mockResolvedValue(new Response());
     Object.defineProperty(globalThis, 'fetch', {
       value: fetchSpy,
       configurable: true,
       writable: true,
     });
-    const result = sendExitPayload({
-      positions: [{ id: 'a', position_x: 1, position_y: 2, rotation_y: 0 }],
-    });
+    const result = sendExitPayload(PAYLOAD);
     expect(result).toBe(true);
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/todos/positions',
@@ -148,15 +167,18 @@ describe('sendExitPayload', () => {
     );
   });
 
-  it('returns false when fetch is unavailable (SSR / legacy environments)', () => {
+  it('returns false when both sendBeacon and fetch are unavailable (SSR / legacy)', () => {
+    Object.defineProperty(globalThis.navigator, 'sendBeacon', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
     Object.defineProperty(globalThis, 'fetch', {
       value: undefined,
       configurable: true,
       writable: true,
     });
-    const result = sendExitPayload({
-      positions: [{ id: 'a', position_x: 1, position_y: 2, rotation_y: 0 }],
-    });
+    const result = sendExitPayload(PAYLOAD);
     expect(result).toBe(false);
   });
 });
