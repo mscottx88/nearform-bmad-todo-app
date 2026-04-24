@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
 import { NeonScrollbar } from './NeonScrollbar';
@@ -94,7 +94,17 @@ export function InfoPopup({
       if (dx < 0.1 && dz < 0.1) {
         wasDraggingRef.current = false;
         setStickyPos(null);
+        return;
       }
+      // Safety: if the server applied a clamp / rejection / collision
+      // response, the refetched position may never converge with the
+      // drag-end anchor. Clear after a bounded timeout so the popup
+      // doesn't get permanently stranded on a stale coordinate.
+      const timer = window.setTimeout(() => {
+        wasDraggingRef.current = false;
+        setStickyPos(null);
+      }, 2000);
+      return () => { window.clearTimeout(timer); };
     }
   }, [dragAnchor, stickyPos, todo.positionX, todo.positionY]);
 
@@ -128,86 +138,34 @@ export function InfoPopup({
 
   // Edit-mode state. Edit happens INLINE in the popup (replaces the
   // readonly text div with a textarea); the text region is
-  // user-resizable via a neon resize handle at its bottom edge.
+  // user-resizable via a neon resize handle at its bottom edge. The
+  // neon scrollbar chrome comes from the shared NeonScrollbar component
+  // in overlay mode (drives its thumb against the textarea's native
+  // scrollTop), so there's no bespoke thumb math here.
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(todo.text);
   const EDITOR_DEFAULT_HEIGHT = 180;
   const EDITOR_MIN_HEIGHT = 80;
-  // Max resize height is viewport-relative so the user can stretch
-  // the editor across most of the screen when composing long text.
-  // The fallback covers SSR / jsdom (tests) where window is absent.
-  const EDITOR_MAX_HEIGHT =
+  // Max resize height is viewport-relative. Kept in state + refreshed
+  // on window resize so stretching the window up (or down) while
+  // editing immediately adjusts the bound. Fallback covers SSR / jsdom.
+  const computeEditorMax = (): number =>
     typeof window !== 'undefined' ? Math.max(480, window.innerHeight - 160) : 800;
+  const [editorMaxHeight, setEditorMaxHeight] = useState<number>(computeEditorMax);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = (): void => { setEditorMaxHeight(computeEditorMax()); };
+    window.addEventListener('resize', onResize);
+    return () => { window.removeEventListener('resize', onResize); };
+  }, []);
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
-  const resizeHandleOverRef = useRef(false);
-  // Callback refs backed by state so effects fire AFTER the element
-  // has mounted. useRef-backed refs appeared null at effect time when
-  // rendered inside a drei <Html> portal — switching to state-backed
-  // refs fixes that by making element mount a state transition React
-  // re-runs effects on.
+  // Callback ref backed by state so NeonScrollbar's effects fire AFTER
+  // the textarea element has actually mounted. useRef.current appeared
+  // null to effects when rendered inside a drei <Html> portal —
+  // state-backed refs turn mount into a state transition that re-runs
+  // consumer effects.
   const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
-  const [thumbEl, setThumbEl] = useState<HTMLDivElement | null>(null);
-  // Keep the old ref-shape in sync so code that reads .current still works.
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const thumbRef = useRef<HTMLDivElement | null>(null);
-  textareaRef.current = textareaEl;
-  thumbRef.current = thumbEl;
-  const MIN_THUMB_PX = 8;
-  const THUMB_INSET = 3;
-  // Thumb sync using only values we KNOW or can measure reliably:
-  //   visibleHeight = editorHeight - 2 (border) — always correct from
-  //     React state; never reads ta.clientHeight which is 0 until the
-  //     drei <Html> portal settles its layout.
-  //   textHeight = ta.scrollHeight — intrinsic content measurement;
-  //     reliable once the textarea has its value (React sets it before
-  //     any effect runs).
-  //   scrollOffset = ta.scrollTop — current scroll position.
-  // Thumb sync using only values we KNOW or can measure reliably:
-  //   visibleHeight = editorHeight - 2 (border) — always correct from
-  //     React state; never reads ta.clientHeight which is 0 until the
-  //     drei <Html> portal settles its layout.
-  //   textHeight = ta.scrollHeight — intrinsic content measurement.
-  //   scrollOffset = ta.scrollTop — current scroll position.
-  // Thumb is hidden entirely when content fits (no scroll needed).
-  const syncThumb = useCallback((): void => {
-    const ta = textareaRef.current;
-    const thumb = thumbRef.current;
-    if (!ta || !thumb) return;
-    const visibleHeight = editorHeight - 2;
-    const textHeight = ta.scrollHeight;
-    if (textHeight <= visibleHeight + 1) {
-      thumb.style.display = 'none';
-      return;
-    }
-    const scrollOffset = ta.scrollTop;
-    const usable = editorHeight - THUMB_INSET * 2;
-    const ratio = visibleHeight / textHeight;
-    const thumbH = Math.max(MIN_THUMB_PX, ratio * usable);
-    const maxTop = usable - thumbH;
-    const maxScroll = textHeight - visibleHeight;
-    const scrollFrac = scrollOffset / maxScroll;
-    thumb.style.display = 'block';
-    thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
-    thumb.style.height = `${thumbH}px`;
-  }, [editorHeight]);
-  useEffect(() => {
-    if (!editing || !textareaEl || !thumbEl) return;
-    textareaEl.scrollTop = 0;
-    textareaEl.addEventListener('scroll', syncThumb, { passive: true });
-    const ro = new ResizeObserver(() => syncThumb());
-    ro.observe(textareaEl);
-    syncThumb();
-    return () => {
-      textareaEl.removeEventListener('scroll', syncThumb);
-      ro.disconnect();
-    };
-  }, [editing, textareaEl, thumbEl, syncThumb]);
-  // Also sync whenever content changes (typing) — fires after layout so
-  // textarea.scrollHeight reflects the new content height.
-  useLayoutEffect(() => {
-    if (editing && textareaEl && thumbEl) syncThumb();
-  }, [editText, editing, textareaEl, thumbEl, syncThumb]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
   useEffect(() => {
@@ -220,6 +178,11 @@ export function InfoPopup({
       setEditorHeight(EDITOR_DEFAULT_HEIGHT);
     }
   }, [focused, editing]);
+  // Reset scroll to top on each edit-open so the user sees the start
+  // of the text regardless of where the textarea was last scrolled.
+  useEffect(() => {
+    if (editing && textareaEl) textareaEl.scrollTop = 0;
+  }, [editing, textareaEl]);
 
   const handleWheel = useCallback((e: React.WheelEvent): void => {
     const canvas = document.querySelector('canvas');
@@ -241,33 +204,31 @@ export function InfoPopup({
     );
   }, []);
 
-  // Wheel over a scrollable region. If the element can consume the
-  // gesture direction, stop propagation so the panel's handleWheel
-  // (which re-fires onto the canvas for OrbitControls zoom) does NOT
-  // run — text scrolls, camera stays put. Checks both:
+  // Wheel over a scrollable region. Stop propagation so the panel's
+  // handleWheel (which re-fires onto the canvas for OrbitControls zoom)
+  // does NOT run — text scrolls, camera stays put. Checks both:
   //   - NeonScrollbar inner (readonly text region)
   //   - textarea (edit-mode editor, scrolls natively via overflow-y:auto)
+  //
+  // In edit mode we ALWAYS stop — even once the textarea hits its
+  // scroll limit — because users reaching the bottom/top of their own
+  // text do not expect the camera to start zooming. Readonly mode
+  // keeps bubble-at-boundary so the scene scrolls once the content is
+  // exhausted (matches the rest-of-app wheel behaviour).
   const handleScrollableWheel = useCallback((e: React.WheelEvent<HTMLDivElement>): void => {
-    const wantsUp = e.deltaY < 0;
-    const wantsDown = e.deltaY > 0;
-    // Readonly NeonScrollbar inner.
-    const inner = e.currentTarget.querySelector('.neon-scrollbar-inner') as HTMLElement | null;
-    if (inner) {
-      const canScrollUp = inner.scrollTop > 0;
-      const canScrollDown = inner.scrollTop < inner.scrollHeight - inner.clientHeight - 1;
-      if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
-        e.stopPropagation();
-      }
-      return;
-    }
-    // Edit-mode textarea (scrolls its own content natively).
     const ta = e.currentTarget.querySelector('.info-popup__editor-textarea') as HTMLTextAreaElement | null;
     if (ta) {
-      const canScrollUp = ta.scrollTop > 0;
-      const canScrollDown = ta.scrollTop < ta.scrollHeight - ta.clientHeight - 1;
-      if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
-        e.stopPropagation();
-      }
+      e.stopPropagation();
+      return;
+    }
+    const inner = e.currentTarget.querySelector('.neon-scrollbar-inner') as HTMLElement | null;
+    if (!inner) return;
+    const wantsUp = e.deltaY < 0;
+    const wantsDown = e.deltaY > 0;
+    const canScrollUp = inner.scrollTop > 0;
+    const canScrollDown = inner.scrollTop < inner.scrollHeight - inner.clientHeight - 1;
+    if ((wantsUp && canScrollUp) || (wantsDown && canScrollDown)) {
+      e.stopPropagation();
     }
   }, []);
 
@@ -321,38 +282,6 @@ export function InfoPopup({
     setEditorHeight(EDITOR_DEFAULT_HEIGHT);
   };
 
-  // Neon thumb drag — scrolls the textarea on mousemove.
-  const handleThumbDragStart = useCallback((e: React.MouseEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    e.stopPropagation();
-    const ta = textareaRef.current;
-    if (!ta) return;
-    usePondStore.getState().setCursorMode('grabbing');
-    document.body.style.userSelect = 'none';
-    const startY = e.clientY;
-    const startScroll = ta.scrollTop;
-    const usable = editorHeight - THUMB_INSET * 2;
-    const thumbH = Math.max(MIN_THUMB_PX, (ta.clientHeight / ta.scrollHeight) * usable);
-    const maxScroll = ta.scrollHeight - ta.clientHeight;
-    const onMove = (ev: MouseEvent): void => {
-      const delta = ev.clientY - startY;
-      // Map thumb travel range (usable − thumbH) to full scroll range.
-      const fraction = delta / (usable - thumbH);
-      ta.scrollTop = Math.max(0, Math.min(maxScroll, startScroll + fraction * maxScroll));
-    };
-    const onUp = (ev: MouseEvent): void => {
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      const overDraggable = el?.closest('.info-popup__editor-resize') !== null
-        || el?.closest('.info-popup__neon-thumb') !== null;
-      usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [editorHeight]);
-
   // Resize handle drag — matches NeonScrollbar's thumb-drag pattern
   // (document-level mousemove / mouseup). Pointer events proved
   // unreliable: some mouse drivers & browsers suppress the window
@@ -360,38 +289,52 @@ export function InfoPopup({
   // cursor overlay frozen mid-drag and sometimes swallowed the
   // pointerup so the drag never ended. Plain mouse events on
   // document work consistently.
+  //
+  // Listener teardown is managed via a ref held by an unmount-cleanup
+  // effect — if the component unmounts mid-drag (focused flips,
+  // popup closes) the document listeners + body.userSelect + cursor
+  // mode would otherwise leak.
+  const resizeTeardownRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    return () => { resizeTeardownRef.current?.(); };
+  }, []);
   const handleEditorResizeStart = (e: React.MouseEvent<HTMLDivElement>): void => {
     e.stopPropagation();
     e.preventDefault();
     editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
     usePondStore.getState().setCursorMode('grabbing');
     // Block text selection while dragging so a rapid cursor sweep
-    // doesn't highlight text across the popup (same guard
-    // NeonScrollbar uses for its thumb drag).
+    // doesn't highlight text across the popup.
     document.body.style.userSelect = 'none';
     const onMove = (ev: MouseEvent): void => {
       const start = editorResizeRef.current;
       if (!start) return;
       const next = start.baseH + (ev.clientY - start.startY);
-      setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
+      setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(editorMaxHeight, next)));
     };
-    const onUp = (ev: MouseEvent): void => {
+    const teardown = (ev?: MouseEvent): void => {
       editorResizeRef.current = null;
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      resizeTeardownRef.current = null;
       // Resolve the element actually under the pointer at release.
       // If it's a draggable affordance (handle or scrollbar thumb),
-      // stay on 'grab'; otherwise revert to 'firefly'.
+      // stay on 'grab'; otherwise revert to 'firefly'. Unmount-path
+      // teardown (no event) falls straight back to 'firefly'.
       let overDraggable = false;
-      const el = document.elementFromPoint(ev.clientX, ev.clientY);
-      if (el) {
-        overDraggable =
-          el.closest('.info-popup__editor-resize') !== null ||
-          el.closest('.nsb-thumb') !== null;
+      if (ev) {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        if (el) {
+          overDraggable =
+            el.closest('.info-popup__editor-resize') !== null ||
+            el.closest('.nsb-thumb') !== null;
+        }
       }
       usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
     };
+    const onUp = (ev: MouseEvent): void => { teardown(ev); };
+    resizeTeardownRef.current = () => { teardown(); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   };
@@ -431,17 +374,9 @@ export function InfoPopup({
     }
     store.setCursorMode(overDraggable ? 'grab' : 'firefly');
   }, []);
-  // Resize-handle hover — same firefly↔grab swap as thumb hover, but
-  // also updates resizeHandleOverRef so the drag-release handler
-  // above can decide whether to revert to grab or firefly.
-  const handleEditorResizeEnter = (): void => {
-    resizeHandleOverRef.current = true;
-    onDragAffordanceHover(true);
-  };
-  const handleEditorResizeLeave = (): void => {
-    resizeHandleOverRef.current = false;
-    onDragAffordanceHover(false);
-  };
+  // Resize-handle hover — same firefly↔grab swap as thumb hover.
+  const handleEditorResizeEnter = (): void => { onDragAffordanceHover(true); };
+  const handleEditorResizeLeave = (): void => { onDragAffordanceHover(false); };
 
   return (
     <Html
@@ -455,6 +390,7 @@ export function InfoPopup({
           width={INFO_PANEL_OFFSET_X}
           height={INFO_PANEL_OFFSET_Y}
           viewBox={`0 0 ${INFO_PANEL_OFFSET_X} ${INFO_PANEL_OFFSET_Y}`}
+          style={{ transform: `translate(-${INFO_PANEL_OFFSET_X}px, -100%)` }}
         >
           <line
             x1={INFO_PANEL_OFFSET_X}
@@ -478,14 +414,10 @@ export function InfoPopup({
               editor lets the user drag to grow/shrink the region. */}
           {editing ? (
             <div className="info-popup__editor-wrap" onWheel={handleScrollableWheel}>
-              {/* Direct textarea + inline neon scrollbar overlay.
-                  The textarea fills the box (height: editorHeight,
-                  overflow-y: auto) and scrolls natively. A neon
-                  track+thumb is absolutely positioned on the right,
-                  synced via the textarea's own scrollTop /
-                  scrollHeight — this avoids the NeonScrollbar
-                  architecture mismatch (it scrolls its own inner,
-                  not an external element). */}
+              {/* Textarea scrolls natively (overflow-y: auto). The
+                  shared NeonScrollbar in overlay mode drives its thumb
+                  against the textarea's scrollTop / scrollHeight — no
+                  bespoke thumb math here. */}
               <div
                 className="info-popup__editor-textbox"
                 style={{ height: editorHeight }}
@@ -497,35 +429,40 @@ export function InfoPopup({
                   autoFocus
                   onChange={(e) => { setEditText(e.target.value); }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Escape') { e.stopPropagation(); cancelEdit(); return; }
+                    if (e.key === 'Escape') {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      cancelEdit();
+                      return;
+                    }
                     if (e.key !== 'Enter') return;
+                    // IME composition: Enter confirms the pending
+                    // glyph, it is not a commit. Skip.
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                     const wantsNewline = e.ctrlKey || e.metaKey || e.shiftKey;
-                    if (!wantsNewline) { e.preventDefault(); commitEdit(); return; }
+                    if (!wantsNewline) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      commitEdit();
+                      return;
+                    }
                     e.preventDefault();
+                    e.stopPropagation();
                     const t = e.currentTarget;
-                    const s = t.selectionStart; const en = t.selectionEnd;
-                    setEditText(editText.slice(0, s) + '\n' + editText.slice(en));
-                    requestAnimationFrame(() => { t.selectionStart = t.selectionEnd = s + 1; });
+                    const s = t.selectionStart;
+                    const en = t.selectionEnd;
+                    setEditText((prev) => prev.slice(0, s) + '\n' + prev.slice(en));
+                    requestAnimationFrame(() => {
+                      if (t.isConnected) { t.selectionStart = t.selectionEnd = s + 1; }
+                    });
                   }}
                 />
-                {/* Neon scroll track + thumb. Track is always in the
-                    DOM; thumb's display / top / height are owned by
-                    syncThumb via direct DOM writes (no `style` prop —
-                    React would re-apply it on every render and fight
-                    the JS-managed state). setThumbEl is a callback
-                    ref backed by useState so the syncThumb effect
-                    fires once the element is actually mounted — the
-                    drei <Html> portal's insertion races React's
-                    useRef-commit timing otherwise. */}
-                <div className="info-popup__neon-track">
-                  <div
-                    ref={setThumbEl}
-                    className="info-popup__neon-thumb"
-                    onMouseDown={handleThumbDragStart}
-                    onMouseEnter={() => onDragAffordanceHover(true)}
-                    onMouseLeave={() => onDragAffordanceHover(false)}
-                  />
-                </div>
+                <NeonScrollbar
+                  color="cyan"
+                  scrollElement={textareaEl}
+                  onThumbHover={onDragAffordanceHover}
+                  onThumbDrag={onDragAffordanceDrag}
+                />
               </div>
               <div
                 className="info-popup__editor-resize"
@@ -588,13 +525,15 @@ export function InfoPopup({
             <MetaRow label="Status">{statusBadges}</MetaRow>
             {todo.embeddingStatus !== 'complete' && (
               <MetaRow label="Embedding">
-                <span style={{ color: embeddingColor, textTransform: 'uppercase' }}>
-                  {todo.embeddingStatus}
-                </span>
+                <StatusBadge
+                  label={todo.embeddingStatus.toUpperCase()}
+                  color={embeddingColor}
+                />
               </MetaRow>
             )}
             <MetaRow label="Position">
-              ({popupX.toFixed(2)}, {popupZ.toFixed(2)})
+              ({Number.isFinite(popupX) ? popupX.toFixed(2) : '—'},{' '}
+              {Number.isFinite(popupZ) ? popupZ.toFixed(2) : '—'})
             </MetaRow>
           </div>
 

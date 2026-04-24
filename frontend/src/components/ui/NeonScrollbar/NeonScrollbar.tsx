@@ -5,14 +5,14 @@
  * continues tracking during scroll-thumb drag (native scrollbars capture
  * input at the OS compositor level; DOM thumbs fire standard mousemove events).
  *
- * Architecture:
- *   Outer wrapper  — position:relative; overflow:hidden; height from context
- *   Inner div      — height:100%; overflow:scroll; hides native scrollbar
- *   Track-Y / Track-X / Corner — position:absolute overlays
- *   Thumb-Y / Thumb-X — position:absolute inside their tracks
- *
- * Content never overlaps the tracks because the inner has padding-right and
- * padding-bottom equal to the track width (10 px), enforced by box-sizing.
+ * Two modes:
+ *   - Wrap mode (default): provide `children`. Component renders an inner
+ *     scrollable div that contains the children; tracks overlay that inner.
+ *   - Overlay mode: provide `scrollElement` (the externally-owned scrollable
+ *     HTMLElement — e.g. a textarea). Component renders only tracks + thumbs
+ *     and drives them against the external element's scrollTop/scrollHeight.
+ *     The outer wrapper becomes absolutely positioned so the consumer can
+ *     layer it over their own scrollable element.
  */
 
 import React, { useEffect, useLayoutEffect, useRef, useCallback } from 'react';
@@ -21,7 +21,8 @@ import './NeonScrollbar.css';
 export type NeonScrollbarColor = 'cyan' | 'orange' | 'gold' | 'green' | 'pink';
 
 interface NeonScrollbarProps {
-  children: React.ReactNode;
+  /** Wrap-mode content. Ignored when `scrollElement` is provided. */
+  children?: React.ReactNode;
   color?: NeonScrollbarColor;
   /** Classes applied to the outer wrapper (e.g. existing layout / border classes). */
   className?: string;
@@ -31,8 +32,15 @@ interface NeonScrollbarProps {
   innerClassName?: string;
   /** Inline styles on the inner div (e.g. overflowX:'hidden'). */
   innerStyle?: React.CSSProperties;
-  /** Forward the inner element to this ref for external scroll control. */
+  /** Forward the inner element to this ref for external scroll control (wrap mode). */
   scrollRef?: { current: HTMLDivElement | null };
+  /**
+   * Overlay mode: drive the thumbs against an externally-owned scrollable
+   * element (e.g. a textarea). When set, the component skips the inner
+   * wrapping div and positions the outer absolutely over the consumer's
+   * layout. `children` is ignored in this mode.
+   */
+  scrollElement?: HTMLElement | null;
   /** Total items in virtual content (enables virtual Y-thumb sizing). */
   virtualYTotal?: number;
   /** 0-based index of first loaded item in DOM. */
@@ -72,6 +80,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   innerClassName,
   innerStyle,
   scrollRef,
+  scrollElement,
   virtualYTotal,
   virtualYStart,
   virtualYLoadedCount,
@@ -80,6 +89,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   onThumbDrag,
 }) => {
   const innerRef = useRef<HTMLDivElement | null>(null);
+  const overlayMode = scrollElement !== undefined;
   const thumbYRef = useRef<HTMLDivElement>(null);
   const thumbXRef = useRef<HTMLDivElement>(null);
   const trackYRef = useRef<HTMLDivElement>(null);
@@ -116,7 +126,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
   // useLayoutEffect runs before paint so thumbs are correctly sized on first render
   // and after remounts (e.g. DataTable pagination replaces the loading screen).
   useLayoutEffect(() => {
-    const inner = innerRef.current;
+    const inner = scrollElement ?? innerRef.current;
     const thumbY = thumbYRef.current;
     const thumbX = thumbXRef.current;
     const trackY = trackYRef.current;
@@ -263,11 +273,11 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       mo.disconnect();
       if (pendingRaf !== null) cancelAnimationFrame(pendingRaf);
     };
-  }, []);
+  }, [scrollElement]);
 
   // ── Vertical thumb drag ──────────────────────────────────────────────────
   useEffect(() => {
-    const inner = innerRef.current;
+    const inner = scrollElement ?? innerRef.current;
     const thumbY = thumbYRef.current;
     const trackY = trackYRef.current;
     if (!inner || !thumbY || !trackY) return;
@@ -356,11 +366,11 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
-  }, []);
+  }, [scrollElement]);
 
   // ── Horizontal thumb drag ────────────────────────────────────────────────
   useEffect(() => {
-    const inner = innerRef.current;
+    const inner = scrollElement ?? innerRef.current;
     const thumbX = thumbXRef.current;
     const trackX = trackXRef.current;
     if (!inner || !thumbX || !trackX) return;
@@ -407,11 +417,11 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
-  }, []);
+  }, [scrollElement]);
 
   // ── Track click — jump to position ──────────────────────────────────────
   useEffect(() => {
-    const inner = innerRef.current;
+    const inner = scrollElement ?? innerRef.current;
     const trackY = trackYRef.current;
     const trackX = trackXRef.current;
     const thumbY = thumbYRef.current;
@@ -448,16 +458,22 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       trackY.removeEventListener('click', onTrackYClick);
       trackX.removeEventListener('click', onTrackXClick);
     };
-  }, []);
+  }, [scrollElement]);
 
-  const outerClass = ['neon-scrollbar', className].filter(Boolean).join(' ');
+  const outerClass = [
+    'neon-scrollbar',
+    overlayMode ? 'neon-scrollbar--overlay' : null,
+    className,
+  ].filter(Boolean).join(' ');
   const innerClass = ['neon-scrollbar-inner', innerClassName].filter(Boolean).join(' ');
 
   return (
     <div className={outerClass} style={style} data-color={color}>
-      <div ref={setInnerRef} className={innerClass} style={innerStyle}>
-        {children}
-      </div>
+      {!overlayMode && (
+        <div ref={setInnerRef} className={innerClass} style={innerStyle}>
+          {children}
+        </div>
+      )}
       <div ref={trackYRef} className="nsb-track nsb-track-y">
         <div ref={thumbYRef} className="nsb-thumb nsb-thumb-y" />
       </div>

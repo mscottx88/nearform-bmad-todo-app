@@ -13,6 +13,23 @@
      or max-height on this element — all work correctly */
 }
 
+/* Overlay mode: consumer owns the scrollable element (e.g. a textarea); the
+   neon scrollbar overlays it. Tracks + thumbs re-enable pointer events;
+   the outer wrapper itself is a pass-through so the underlying element
+   still receives hover / wheel / selection events. */
+.neon-scrollbar--overlay {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.neon-scrollbar--overlay .nsb-track,
+.neon-scrollbar--overlay .nsb-thumb,
+.neon-scrollbar--overlay .nsb-corner {
+  pointer-events: auto;
+}
+
 /* ── Inner scrollable area ───────────────────────────────────────────────── */
 .neon-scrollbar-inner {
   height: 100%;
