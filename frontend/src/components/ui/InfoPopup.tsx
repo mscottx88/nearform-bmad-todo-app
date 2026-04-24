@@ -280,35 +280,36 @@ export function InfoPopup({
     setEditorHeight(EDITOR_DEFAULT_HEIGHT);
   };
 
-  // Resize handle on the bottom edge of the editor — user drags it
-  // to grow/shrink the scrollable region. Window-level pointermove /
-  // pointerup (not setPointerCapture) because the latter proved
-  // unreliable across browsers in testing — the drag felt stuck or
-  // didn't travel beyond the handle's initial rect. Window listeners
-  // fire regardless of where the cursor ends up.
-  const handleEditorResizeStart = (e: React.PointerEvent<HTMLDivElement>): void => {
+  // Resize handle drag — matches NeonScrollbar's thumb-drag pattern
+  // (document-level mousemove / mouseup). Pointer events proved
+  // unreliable: some mouse drivers & browsers suppress the window
+  // pointermove during a captured gesture, which left the custom
+  // cursor overlay frozen mid-drag and sometimes swallowed the
+  // pointerup so the drag never ended. Plain mouse events on
+  // document work consistently.
+  const handleEditorResizeStart = (e: React.MouseEvent<HTMLDivElement>): void => {
     e.stopPropagation();
     e.preventDefault();
     editorResizeRef.current = { startY: e.clientY, baseH: editorHeight };
     usePondStore.getState().setCursorMode('grabbing');
-    const onMove = (ev: PointerEvent): void => {
+    // Block text selection while dragging so a rapid cursor sweep
+    // doesn't highlight text across the popup (same guard
+    // NeonScrollbar uses for its thumb drag).
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent): void => {
       const start = editorResizeRef.current;
       if (!start) return;
       const next = start.baseH + (ev.clientY - start.startY);
       setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
     };
-    const onUp = (ev: PointerEvent): void => {
+    const onUp = (ev: MouseEvent): void => {
       editorResizeRef.current = null;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      // Resolve the element actually under the pointer at release
-      // time. If it's a draggable affordance (resize handle or
-      // scrollbar thumb), stay on the hover 'grab' glyph; otherwise
-      // revert to 'firefly'. The ref alone isn't reliable because
-      // browsers suppress pointerenter/leave on elements other than
-      // the one that captured the pointerdown, so the ref can drift
-      // out of sync mid-drag.
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      // Resolve the element actually under the pointer at release.
+      // If it's a draggable affordance (handle or scrollbar thumb),
+      // stay on 'grab'; otherwise revert to 'firefly'.
       let overDraggable = false;
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       if (el) {
@@ -318,9 +319,8 @@ export function InfoPopup({
       }
       usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   };
 
   // Shared cursor-mode helpers — used by both NeonScrollbar instances
@@ -473,9 +473,9 @@ export function InfoPopup({
               </NeonScrollbar>
               <div
                 className="info-popup__editor-resize"
-                onPointerDown={handleEditorResizeStart}
-                onPointerEnter={handleEditorResizeEnter}
-                onPointerLeave={handleEditorResizeLeave}
+                onMouseDown={handleEditorResizeStart}
+                onMouseEnter={handleEditorResizeEnter}
+                onMouseLeave={handleEditorResizeLeave}
                 aria-label="Resize editor"
                 role="separator"
                 aria-orientation="horizontal"
