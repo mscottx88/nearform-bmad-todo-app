@@ -223,7 +223,8 @@ def _run_fts(
     # produced locally from three booleans — never user input. The
     # query parameter that COULD contain user input (`q`) is bound via
     # `:q`, not interpolated.
-    stmt = text(f"""
+    stmt = text(
+        f"""
         SELECT id,
                ts_rank_cd(
                    to_tsvector('english', text),
@@ -235,7 +236,8 @@ def _run_fts(
            AND {visibility}
          ORDER BY fts_score DESC
          LIMIT :max_candidates
-    """)  # noqa: S608
+    """  # noqa: S608
+    )
     rows = db.execute(
         stmt,
         {"q": q, "max_candidates": MAX_CANDIDATES_PER_SIDE},
@@ -309,7 +311,8 @@ def _run_vector(
     # produced locally from three booleans — never user input. The only
     # external value here is the embedding vector, which is bound via
     # :query_vec.
-    stmt = text(f"""
+    stmt = text(
+        f"""
         SELECT id,
                1 - (embedding <=> :query_vec) AS similarity
           FROM todos
@@ -319,7 +322,8 @@ def _run_vector(
            AND {visibility}
          ORDER BY embedding <=> :query_vec
          LIMIT :max_candidates
-    """).bindparams(bindparam("query_vec", type_=Vector(768)))  # noqa: S608
+    """  # noqa: S608
+    ).bindparams(bindparam("query_vec", type_=Vector(768)))
 
     rows = db.execute(
         stmt,

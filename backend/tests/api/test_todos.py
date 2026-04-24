@@ -203,7 +203,12 @@ def test_update_positions_skips_missing_ids(client: TestClient) -> None:
         "/api/todos/positions",
         json={
             "positions": [
-                {"id": real_id, "position_x": 7.0, "position_y": 8.0, "rotation_y": 0.0},
+                {
+                    "id": real_id,
+                    "position_x": 7.0,
+                    "position_y": 8.0,
+                    "rotation_y": 0.0,
+                },
                 {
                     "id": fake_id,
                     "position_x": 99.0,
