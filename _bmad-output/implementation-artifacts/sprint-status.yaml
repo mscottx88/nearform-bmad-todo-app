@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-24 # story 6-1 started
+last_updated: 2026-04-24 # story 6-1 implemented → review
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -111,7 +111,7 @@ development_status:
 
   # Epic 6: The Intelligent Pond Companion (2026-04-23 addendum — replaced the REMOVED Epic 6 scope)
   epic-6: in-progress
-  6-1-agent-foundation: in-progress  # schema regen (chat_sessions/chat_messages/display_metadata) + chat_service + SkillContext + BaseTool tools + crew_runner + intent_classifier + chat skill + SSE endpoint
+  6-1-agent-foundation: review  # schema regen (chat_sessions/chat_messages/display_metadata) + chat_service + SkillContext + BaseTool tools + crew_runner + intent_classifier + chat skill + SSE endpoint
   6-2-chat-panel: backlog
   6-3-rephrase-skill: backlog
   6-4-plan-skill: backlog
