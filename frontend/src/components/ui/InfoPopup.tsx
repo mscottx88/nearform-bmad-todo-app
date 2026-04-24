@@ -514,12 +514,6 @@ export function InfoPopup({
                     top / height via direct DOM writes. A style prop
                     would be re-applied by React on every re-render,
                     overwriting the JS-managed state. */}
-                {/* DEBUG — remove before merging */}
-                {debugInfo && (
-                  <div style={{ position: 'absolute', top: 0, left: '-200px', color: 'yellow', fontSize: '8px', background: 'rgba(0,0,0,0.8)', whiteSpace: 'pre', zIndex: 9999999, padding: '2px', pointerEvents: 'none' }}>
-                    {debugInfo}
-                  </div>
-                )}
                 <div className="info-popup__neon-track">
                   <div
                     ref={thumbRef}
@@ -574,6 +568,12 @@ export function InfoPopup({
                 {todo.text}
               </div>
             </NeonScrollbar>
+            </div>
+          )}
+          {/* TEMP DEBUG — inside panel so it is not clipped */}
+          {editing && debugInfo && (
+            <div style={{ fontFamily: 'monospace', fontSize: '9px', color: '#ff0', background: '#000', padding: '2px 4px', lineHeight: 1.4, letterSpacing: 0 }}>
+              {debugInfo}
             </div>
           )}
           <div className="info-popup__divider" />
