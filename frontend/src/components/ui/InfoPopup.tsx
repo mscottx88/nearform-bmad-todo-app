@@ -172,19 +172,30 @@ export function InfoPopup({
     if (!editing) return;
     const ta = textareaRef.current;
     if (!ta) return;
+    // Reset scroll to top when edit opens. Without this, autoFocus
+    // places the cursor at the end of the text, the browser auto-scrolls
+    // the textarea to show the cursor, and the first syncThumb call sees
+    // scrollTop = max → scrollFrac = 1 → thumb renders at the bottom as
+    // a sliver (if clientHeight is also 0 at that moment).
+    ta.scrollTop = 0;
     ta.addEventListener('scroll', syncThumb, { passive: true });
-    // ResizeObserver fires once the browser has computed layout for the
-    // textarea (including when the drei <Html> portal positions itself
-    // on the first RAF after mount — useLayoutEffect fires too early
-    // for that, so clientHeight can be 0 on the first call).
-    const ro = new ResizeObserver(syncThumb);
+    // ResizeObserver fires once the browser has committed the textarea's
+    // layout. Use RAF inside the callback so we read dimensions AFTER
+    // the browser has also positioned the drei <Html> portal — without
+    // the RAF, clientHeight can still be 0 on the very first RO firing.
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(syncThumb);
+    });
     ro.observe(ta);
-    // Belt-and-suspenders: a direct syncThumb in the same tick catches
-    // the case where the textarea already has its final size.
+    // Direct call as belt-and-suspenders for the case where the element
+    // already has its final size by the time this effect runs.
     syncThumb();
     return () => {
       ta.removeEventListener('scroll', syncThumb);
       ro.disconnect();
+      cancelAnimationFrame(raf);
     };
   }, [editing, syncThumb]);
   // Also sync whenever content changes (resize or typing).
