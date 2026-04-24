@@ -7,16 +7,15 @@
 }
 
 .info-popup__callout {
-  /* Anchored left of the pad: the SVG spans leftward and upward from
-     the anchor point. The X offset comes from the JS-side
-     `INFO_PANEL_OFFSET_X` constant — set via inline style on the SVG
-     so the pixel offset stays in one place. */
+  /* Tiny (1 × 1) SVG pinned at the pad centroid (origin of the
+     zero-size `.info-popup` wrapper). overflow: visible lets the
+     line render anywhere — the JSX draws from (0, 0) [pad centroid]
+     to the popup centroid computed from the measured panel rect. */
   position: absolute;
   left: 0;
   top: 0;
   overflow: visible;
   pointer-events: none;
-  transform: translateY(-100%);
 }
 
 .info-popup__callout line {
@@ -46,39 +45,56 @@
     0 0 8px var(--neon-cyan),
     0 0 16px rgba(0, 238, 255, 0.35),
     inset 0 0 6px rgba(0, 238, 255, 0.08);
-  /* Slide + fade on mount. `both` fill mode keeps the final transform
-     applied. The starting position is 20 px further LEFT than rest so
-     the panel appears to glide in from outside its anchor. */
-  animation: info-popup-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* Grow-from-point animation: the panel's clip rect expands from a
+     50% inset on all sides (a single center point) to inset(0 0 0 0)
+     (fully visible) while the transform holds rest position. Then
+     the panel's direct children fade in after the grow completes,
+     so the contents only appear once the box is at full size (per
+     user spec, CR amendment 2026-04-23). */
+  animation: info-popup-grow 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes info-popup-enter {
-  from {
-    opacity: 0;
-    transform: translate(
-      calc(-1 * var(--info-offset-x) - 20px),
-      calc(-1 * var(--info-offset-y))
-    );
-  }
-  to {
-    opacity: 1;
-    transform: translate(
-      calc(-1 * var(--info-offset-x)),
-      calc(-1 * var(--info-offset-y))
-    );
-  }
+@keyframes info-popup-grow {
+  from { clip-path: inset(50% 50% 50% 50%); }
+  to { clip-path: inset(0 0 0 0); }
 }
 
-/* Fade-out during dismissal (PondScene holds the mount for 100 ms so
-   this animation can run before React unmounts). */
+/* Children fade in after the 200 ms grow animation completes.
+   Using `:scope > *` on the panel would be ideal but `:scope` is
+   unnecessary — direct children of the panel via the `>` combinator
+   is what we want. The 200 ms delay matches the grow duration. */
+.info-popup__panel > * {
+  animation: info-popup-content-reveal 120ms ease-out 200ms both;
+}
+
+@keyframes info-popup-content-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Dismiss: inverse grow + fade. The panel's clip rect shrinks back
+   to the center point while the whole panel fades out. Children
+   don't need a separate reveal during exit — their fade goes with
+   the parent. PondScene holds the mount for the duration. */
 .info-popup__panel--dismissing {
-  animation: info-popup-exit 100ms ease-in both;
+  animation: info-popup-exit 120ms ease-in both;
   pointer-events: none;
 }
 
+.info-popup__panel--dismissing > * {
+  animation: none;
+  opacity: 1;
+}
+
 @keyframes info-popup-exit {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+  to {
+    clip-path: inset(50% 50% 50% 50%);
+    opacity: 0;
+  }
 }
 
 .info-popup__panel--hover {

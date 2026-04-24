@@ -231,12 +231,63 @@ export function InfoPopup({
   const embeddingColor =
     todo.embeddingStatus === 'failed' ? 'var(--neon-pink)' : 'var(--neon-orange)';
 
+  // Measure the panel for the callout line endpoint. Line runs from
+  // the pad centroid (SVG origin at the `.info-popup` zero-size
+  // anchor) to the popup centroid. Centroid = panel top-left
+  // (`-INFO_PANEL_OFFSET_X, -INFO_PANEL_OFFSET_Y`) + half the
+  // measured panel size. ResizeObserver keeps the endpoint in sync
+  // as the panel grows / shrinks (hover → focused transition adds
+  // action buttons; edit mode + resize handle change height).
+  const [panelRect, setPanelRect] = useState<{ w: number; h: number }>({
+    w: 0,
+    h: 0,
+  });
+  const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!panelEl) return;
+    const measure = (): void => {
+      setPanelRect({ w: panelEl.offsetWidth, h: panelEl.offsetHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(panelEl);
+    return () => { ro.disconnect(); };
+  }, [panelEl]);
+  const calloutX2 = -INFO_PANEL_OFFSET_X + panelRect.w / 2;
+  const calloutY2 = -INFO_PANEL_OFFSET_Y + panelRect.h / 2;
+
+  // Cursor override: when the cursor is over the popup panel itself
+  // (not a draggable child like the scrollbar thumb or resize handle),
+  // force cursorMode back to 'firefly'. The pad mesh underneath is
+  // still considered "hovered" by R3F (the canvas stopped getting
+  // pointermove events once the panel started absorbing them, so
+  // the pad's own onPointerLeave never fires), which leaves the
+  // frog-hand 'grab' glyph stuck on the popup. Only draggable
+  // children inside the popup should show the hand; the panel body
+  // itself reverts to firefly.
+  //
+  // mouseenter / mouseleave don't bubble through child transitions,
+  // so hovering the scrollbar thumb / resize handle leaves the
+  // panel's own mouseleave dormant — their own hover handlers take
+  // over. Leaving the popup back toward the pad restores 'grab'
+  // since R3F's cached "pad is hovered" is (usually) still valid.
+  const handlePanelMouseEnter = useCallback((): void => {
+    const store = usePondStore.getState();
+    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
+  }, []);
+  const handlePanelMouseLeave = useCallback((): void => {
+    const store = usePondStore.getState();
+    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
+  }, []);
+
   const panelProps = focused
     ? {
         onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
         onPointerUp: (e: React.PointerEvent) => e.stopPropagation(),
         onClick: (e: React.MouseEvent) => e.stopPropagation(),
         onWheel: handleWheel,
+        onMouseEnter: handlePanelMouseEnter,
+        onMouseLeave: handlePanelMouseLeave,
       }
     : {};
 
@@ -357,21 +408,20 @@ export function InfoPopup({
       style={{ pointerEvents: 'none', zIndex: 9998 }}
     >
       <div className="info-popup">
+        {/* Callout: tiny 1×1 SVG anchored at the pad centroid (SVG
+            origin = info-popup zero-size wrapper origin). The line
+            runs from (0, 0) [pad centroid] to the popup centroid
+            computed from the measured panel rect. overflow: visible
+            lets the line render far outside the 1×1 viewport. */}
         <svg
           className="info-popup__callout"
-          width={INFO_PANEL_OFFSET_X}
-          height={INFO_PANEL_OFFSET_Y}
-          viewBox={`0 0 ${INFO_PANEL_OFFSET_X} ${INFO_PANEL_OFFSET_Y}`}
-          style={{ transform: `translate(-${INFO_PANEL_OFFSET_X}px, -100%)` }}
+          width={1}
+          height={1}
         >
-          <line
-            x1={INFO_PANEL_OFFSET_X}
-            y1={INFO_PANEL_OFFSET_Y}
-            x2="0"
-            y2="0"
-          />
+          <line x1={0} y1={0} x2={calloutX2} y2={calloutY2} />
         </svg>
         <div
+          ref={setPanelEl}
           className={
             `info-popup__panel info-popup__panel--${focused ? 'focused' : 'hover'}` +
             (dismissing ? ' info-popup__panel--dismissing' : '')

@@ -132,7 +132,7 @@ export function PondScene() {
   // for `INFO_POPUP_EXIT_MS` so its CSS exit keyframe can run. During
   // that window `dismissing` is true — the panel fades, pointer-events
   // go to none, and React then unmounts.
-  const INFO_POPUP_EXIT_MS = 100;
+  const INFO_POPUP_EXIT_MS = 120;
   const [displayedInfoTodoId, setDisplayedInfoTodoId] = useState<string | null>(null);
   const [infoDismissing, setInfoDismissing] = useState(false);
   useEffect(() => {
