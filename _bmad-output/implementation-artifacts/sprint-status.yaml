@@ -1,5 +1,5 @@
 # generated: 2026-04-14
-# last_updated: 2026-04-24 (story 3.4 CR rounds 1-4 complete; 22 patches applied across 4 groups)
+# last_updated: 2026-04-24 (story 3.4 done; 22 CR patches applied across 4 groups + NeonScrollbar unit tests)
 # project: nearform-bmad-todo-app
 # project_key: NOKEY
 # tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   3-1-interactive-camera-controls: done  # implementation + CR patches landed in 48619b2; defer #1 promoted to fix, defer #2 remains [OPEN]
   3-2-atmosphere-mode-toggle: backlog
   3-3-todo-visibility-via-slash-commands: done  # slash-command TodoInput mode + 8 visibility commands; backend GET /api/todos + /api/search gain visibility flags; pads keep full colour + halo lerps green/red; Uncomplete/Undelete popup labels; POST /api/todos/:id/restore; animation suppressed when pad stays visible
-  3-4-lily-pad-info-popup: review  # NEW 2026-04-23; amended via CR rounds 1-4 (2026-04-24). Hover-to-preview info popup (text, timestamps, status) anchored LEFT of the pad; focused mode absorbs the former ActionPopup (Complete/Delete/Set-Color) + inline edit mode. NeonScrollbar gained an overlay-mode API to drive neon chrome over the textarea natively. Drag-follow experiment was reversed during CR — popup now fades out on drag-start via clip-path exit animation; reappears with grow-from-point enter + delayed content reveal on fresh pointerEnter. Callout line connects pad centroid to popup centroid (ResizeObserver). 339 frontend tests pass. 22 CR patches applied; status still 'review' pending manual browser verification of animations.
+  3-4-lily-pad-info-popup: done  # 2026-04-23 → done 2026-04-24. Hover-to-preview info popup (text, timestamps, status) anchored LEFT of the pad; focused mode absorbs the former ActionPopup (Complete/Delete/Set-Color) + inline edit mode. NeonScrollbar gained an overlay-mode API to drive neon chrome over the textarea natively (later flattened out of its own subdirectory). Drag-follow experiment was reversed during CR — popup fades out on drag-start via clip-path exit animation; reappears with grow-from-point enter + delayed content reveal on fresh pointerEnter. Callout line connects pad centroid to popup centroid (ResizeObserver). CR rounds 1-4 ran 2026-04-24 across Groups 1-4 (popup core; NeonScrollbar port + overlay; scene wiring + store; docs + sprint) — 4 decisions resolved, 22 patches applied, 17 new NeonScrollbar unit tests added. 356 frontend tests pass.
   epic-3-retrospective: pending
 
   # Epic 4: Organizing the Pond

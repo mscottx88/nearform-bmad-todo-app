@@ -11,7 +11,7 @@
 >
 > **For the current architecture**, see:
 > - Spec Dev Notes §"Scrollbar convention" in [3-4-lily-pad-info-popup.md](../_bmad-output/implementation-artifacts/3-4-lily-pad-info-popup.md)
-> - JSDoc on [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx) (`scrollElement` prop = overlay mode)
+> - JSDoc on [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar.tsx) (`scrollElement` prop = overlay mode)
 > - The reference consumer at [`InfoPopup.tsx`](../frontend/src/components/ui/InfoPopup.tsx) (edit mode uses `<NeonScrollbar scrollElement={textareaEl} …>`)
 >
 > The scrollbar pitfalls below (Pitfalls 1–8) describe **abandoned code**.
@@ -97,7 +97,7 @@ chrome.
 </div>
 ```
 
-See [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx)
+See [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar.tsx)
 for the `scrollElement` prop's JSDoc and the `.neon-scrollbar--overlay`
 CSS modifier.
 
@@ -488,9 +488,9 @@ structure for edit mode:
 
 All thumb math, drag handling, scroll listeners, and ResizeObservers now
 live inside `NeonScrollbar` (see `updateThumbs` in
-[NeonScrollbar.tsx](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx)).
+[NeonScrollbar.tsx](../frontend/src/components/ui/NeonScrollbar.tsx)).
 The `.neon-scrollbar--overlay` CSS modifier (in
-[NeonScrollbar.css](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.css))
+[NeonScrollbar.css](../frontend/src/components/ui/NeonScrollbar.css))
 handles the absolute-positioning + pointer-events gating.
 
 For the cursor (still applies):

@@ -1,6 +1,6 @@
 # Story 3.4: Lily Pad Info Popup (Hover-Preview + Focused-Interactive + Inline Edit)
 
-Status: review
+Status: done
 
 > **Amended 2026-04-23** (during code review, decisions D1/D2/D3): the original "sibling of ActionPopup" model was superseded during implementation. InfoPopup absorbed ActionPopup entirely (one LEFT-anchored panel that hosts both metadata and actions); an inline edit mode was added; and `NeonScrollbar` gained a second API (overlay mode) so a textarea can own its native scroll while NeonScrollbar drives the thumb chrome. See the Scope and Acceptance Criteria below for the as-shipped behaviour, and Dev Agent Record Implementation Notes #5-#7 for the deviation rationale.
 >
@@ -415,15 +415,14 @@ No blocking issues encountered. Vitest stayed green throughout (330 tests passin
 - [x] Neon chrome matches tokens (`var(--neon-cyan)` border + glow, monospace, status badges in their semantic colors)
 - [x] `npx tsc --noEmit -p tsconfig.app.json` clean
 - [x] `npx vitest run` green — 330 passed (29 test files)
-- [ ] Manually verified in browser: hover multiple pads in quick succession, click to focus, scroll long text with NeonScrollbar thumb + track click, Escape to dismiss. _(Not performed — dev agent cannot drive the browser. Dev server smoke test recommended before code review.)_
-- [x] Committed at task checkpoints per CLAUDE.md — _pending end-of-story commit; not committed per CLAUDE.md checkpoint policy because the user has been actively steering the implementation with corrections. Will commit once user signals story is ready to freeze._
+- [x] Manually verified in browser (2026-04-24 after CR round 3): enter/exit animations (grow-from-point + content reveal, fade-out on leave/drag-start), cursor override over popup body, callout centroid-to-centroid. Additional tweaks surfaced and landed in commit `8eb8e5b`.
+- [x] Committed at task checkpoints per CLAUDE.md — six checkpoint commits land the story + CR rounds: `e9ab75c` (initial story), `fff503f` / `ff719ae` (Group 1 CR + spec amendments), `42d5e16` (Group 2 CR), `9535fd6` (Group 3 CR — drag-follow removal + animations), `8eb8e5b` (browser-verified tweaks), `41e1ad2` (Group 4 docs CR).
 
 ### File List
 
 **New files:**
-- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx` (ported from rag-csv-crew; extended with overlay mode during CR — see IN #7)
-- `frontend/src/components/ui/NeonScrollbar/NeonScrollbar.css` (ported from rag-csv-crew; `.neon-scrollbar--overlay` modifier added during CR)
-- `frontend/src/components/ui/NeonScrollbar/index.ts`
+- `frontend/src/components/ui/NeonScrollbar.tsx` (ported from rag-csv-crew; extended with overlay mode during CR — see IN #7; flattened out of its own directory 2026-04-24 since the component is a single-file unit like the other `ui/` components)
+- `frontend/src/components/ui/NeonScrollbar.css` (ported from rag-csv-crew; `.neon-scrollbar--overlay` modifier added during CR; flattened 2026-04-24)
 - `frontend/src/components/ui/InfoPopup.tsx` (hosts meta + text + actions + color swatch + inline editor)
 - `frontend/src/components/ui/InfoPopup.css`
 - `frontend/src/components/ui/InfoPopup.test.tsx`
@@ -453,6 +452,7 @@ No blocking issues encountered. Vitest stayed green throughout (330 tests passin
 - 2026-04-23 — ActionPopup merged into InfoPopup (IN #5). Inline edit mode added (IN #6). Bespoke edit-mode scrollbar replaced with NeonScrollbar overlay-mode API (IN #7, shipped during CR refactor). Eleven commits `e026c4c` → `f5d5c3e` landed these three deviations; the first seven commits in the range layered on the bespoke scrollbar before the CR refactor replaced it with the proper NeonScrollbar extension.
 - 2026-04-23 — Code review of Group 1 (popup core, 22 files / ~2139 diff lines) completed. 7 decisions resolved (batch-accepted all option-1 resolutions), 14 patches applied (2 deferred: P8 focus-loss preview leak, P10 PopupColorSwatch BEM rename). Spec amended post-review to reflect as-shipped behaviour: Scope rewritten, ACs #6/#9/#11/#14 amended, AC section "Inline edit mode" added (#17–#21), AC #22 test coverage expanded, Dev Notes §"Scrollbar convention" updated for overlay mode, §"Positioning math" retitled (ActionPopup gone). 337 frontend tests pass; `tsc --noEmit` clean. Groups 2–4 still pending review.
 - 2026-04-24 — Three post-animation-verification tweaks per user feedback: (1) custom cursor over popup body reverts from `'grab'` to `'firefly'` via new panel `onMouseEnter` / `onMouseLeave` handlers (R3F pad-hover state stays stale when panel absorbs pointer events, so explicit override is needed) — new AC #2c; (2) callout SVG now connects pad centroid to popup centroid (measured via `ResizeObserver`) instead of pad anchor to panel top-left corner — AC #13 rewritten; (3) enter animation replaced: was 180 ms slide + fade-in, now 200 ms grow-from-center-point (`clip-path` inset(50%) → inset(0)) followed by 120 ms content fade-in at the 200 ms mark, so contents appear only when the box is at full size — ACs #2 and #2b rewritten, new `info-popup-grow` / `info-popup-content-reveal` / `info-popup-exit` keyframes. 339 frontend tests pass; `tsc --noEmit` clean.
+- 2026-04-24 — Story marked `done`. Final housekeeping: (a) `NeonScrollbar.tsx` / `.css` flattened out of their own subdirectory — the component is a single-file unit like the other `ui/` components; the `index.ts` barrel was removed. (b) Added `NeonScrollbar.test.tsx` with 17 unit tests covering wrap vs overlay mode selection, `data-color` variants, `scrollRef` forwarding (populated in wrap mode, null in overlay), dev-mode invariant warnings (children + scrollElement mutually exclusive; virtualYTotal + scrollElement mutually exclusive), overlay-mode behaviour with a live external element, and className/style pass-through. (c) Completion Checklist closed: manual browser verification done 2026-04-24 (tweaks surfaced and landed in `8eb8e5b`); end-of-story commits landed across the CR series. 356 frontend tests pass total.
 
 ---
 
