@@ -1183,6 +1183,17 @@ export function LilyPad({
     const group = groupRef.current;
     if (!group) return;
 
+    // Story 4.9: read the LIVE rest position from the world store
+    // every tick. The component-scoped `posX` / `posZ` are only the
+    // render-time snapshot — they lag the store between drag release
+    // and the React Query refetch, causing a ~50-200 ms flash back
+    // to the pre-drag position (the exact failure mode the deleted
+    // sticky mechanism was masking). Using live store reads inside
+    // useFrame closes that gap without reintroducing sticky state.
+    const liveWorldEntry = useWorldStore.getState().worldMetadata.get(todo.id);
+    const livePosX = liveWorldEntry?.positionX ?? posX;
+    const livePosZ = liveWorldEntry?.positionY ?? posZ;
+
     // Deletion-sequence entry. Ordered BEFORE the completing transition per
     // spec — if state somehow contains both, deletion wins (terminal intent).
     // Read startedAt from the store entry if already stamped (remount mid-
@@ -1261,7 +1272,7 @@ export function LilyPad({
       // don't write y), so without this seed a crest at the pad's
       // position would sit above the pad for ~8 frames.
       {
-        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        const elev = usePondStore.getState().sampleElevation(livePosX, livePosZ);
         group.position.y = targetY.current + elev;
       }
     }
@@ -1327,7 +1338,7 @@ export function LilyPad({
       // and without this seed the first resting frame would lerp UP
       // through any wave crest sitting at the pad's position.
       {
-        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        const elev = usePondStore.getState().sampleElevation(livePosX, livePosZ);
         group.position.y = targetY.current + elev;
       }
     }
@@ -1458,7 +1469,7 @@ export function LilyPad({
         !completingRippleFired.current &&
         t >= COMPLETING_DISSOLVE_START
       ) {
-        usePondStore.getState().triggerRipple(posX, posZ);
+        usePondStore.getState().triggerRipple(livePosX, livePosZ);
         completingRippleFired.current = true;
       }
 
@@ -1566,7 +1577,7 @@ export function LilyPad({
 
       // Ripple: fire exactly once at the dissolve start.
       if (!deletingRippleFired.current && t >= DELETING_DISSOLVE_START) {
-        usePondStore.getState().triggerRipple(posX, posZ);
+        usePondStore.getState().triggerRipple(livePosX, livePosZ);
         deletingRippleFired.current = true;
       }
 
@@ -1727,8 +1738,8 @@ export function LilyPad({
         !isDraggingRef.current &&
         commitNudgeMag > 0.3
       ) {
-        const commitX = posX + siblingNudgeRef.current.x;
-        const commitZ = posZ + siblingNudgeRef.current.z;
+        const commitX = livePosX + siblingNudgeRef.current.x;
+        const commitZ = livePosZ + siblingNudgeRef.current.z;
         // Story 4.9: cascade nudge commit writes to the world store;
         // sticky flags are gone. The store's dirty-tracking drives
         // the periodic save.
@@ -1845,8 +1856,8 @@ export function LilyPad({
           // formula (anchor + dir × NUDGE_RADIUS − rest).
           const primary = usePondStore.getState().activeDragAnchor;
           const secondaries = usePondStore.getState().displacedPads;
-          const nudgedX = posX + siblingNudgeRef.current.x;
-          const nudgedZ = posZ + siblingNudgeRef.current.z;
+          const nudgedX = livePosX + siblingNudgeRef.current.x;
+          const nudgedZ = livePosZ + siblingNudgeRef.current.z;
           let pushX = 0;
           let pushZ = 0;
           let engaged = false;
@@ -1894,8 +1905,8 @@ export function LilyPad({
             // a STABLE steady-state position, not a moving mid-lerp
             // value that would propagate a feedback wave out to
             // pads well beyond NUDGE_RADIUS of the actual dragger.
-            const targetNudgeX = nudgedX + pushX - posX;
-            const targetNudgeZ = nudgedZ + pushZ - posZ;
+            const targetNudgeX = nudgedX + pushX - livePosX;
+            const targetNudgeZ = nudgedZ + pushZ - livePosZ;
             lastNudgeTargetRef.current = { x: targetNudgeX, z: targetNudgeZ };
             // 2026-04-23: cascade-driven rotation. Pad rotates to face
             // AWAY from its pusher(s) — the direction of the summed
@@ -1949,11 +1960,11 @@ export function LilyPad({
           // reach the server, resetting on refresh.
           //
           group.position.x =
-            posX +
+            livePosX +
             Math.sin(t * 0.3 + seed) * 0.08 * ramp +
             siblingNudgeRef.current.x;
           group.position.z =
-            posZ +
+            livePosZ +
             Math.cos(t * 0.25 + seed * 1.3) * 0.06 * ramp +
             siblingNudgeRef.current.z;
         }
@@ -2006,11 +2017,11 @@ export function LilyPad({
         // clear tolerance — no release snap, no sticky-stuck.
         const target = lastNudgeTargetRef.current;
         const publishX = target
-          ? posX + target.x
-          : posX + siblingNudgeRef.current.x;
+          ? livePosX + target.x
+          : livePosX + siblingNudgeRef.current.x;
         const publishZ = target
-          ? posZ + target.z
-          : posZ + siblingNudgeRef.current.z;
+          ? livePosZ + target.z
+          : livePosZ + siblingNudgeRef.current.z;
         usePondStore.getState().setDisplacedPad(todo.id, {
           x: publishX,
           z: publishZ,
@@ -2304,7 +2315,7 @@ export function LilyPad({
         waitStartRef.current = state.clock.elapsedTime;
       }
       const elapsedMs = (state.clock.elapsedTime - waitStartRef.current) * 1000;
-      group.position.set(posX, DROP_Y_REST, posZ);
+      group.position.set(livePosX, DROP_Y_REST, livePosZ);
       group.scale.setScalar(0);
       if (elapsedMs >= initialDelayMs) {
         phaseTimer.current = 0;
@@ -2318,7 +2329,7 @@ export function LilyPad({
     if (phase === 'forming') {
       const t = Math.min(phaseTimer.current / FORM_DURATION, 1);
       group.scale.setScalar(easeOut(t));
-      group.position.set(posX, DROP_Y_START, posZ);
+      group.position.set(livePosX, DROP_Y_START, livePosZ);
       if (t >= 1) {
         phaseTimer.current = 0;
         phaseRef.current = 'dropping';
@@ -2329,16 +2340,14 @@ export function LilyPad({
       // refresh. Ease-out so it "lands" softly rather than popping.
       const t = Math.min(phaseTimer.current / MATERIALIZE_DURATION, 1);
       group.scale.setScalar(easeOut(t));
-      group.position.set(posX, DROP_Y_REST, posZ);
+      group.position.set(livePosX, DROP_Y_REST, livePosZ);
       if (t >= 1) {
         setTextOpacity(1);
         phaseTimer.current = 0;
         // Story 2.10 CR-patch: seed position.y with the water elevation
         // at the pad's spawn point so the first resting frame doesn't
-        // lerp UP through a wave crest. Without this seed, a crest
-        // passing the pad at handoff sits above the pad for ~8 frames
-        // (AC #4 violation during the transition window).
-        const elev = usePondStore.getState().sampleElevation(posX, posZ);
+        // lerp UP through a wave crest.
+        const elev = usePondStore.getState().sampleElevation(livePosX, livePosZ);
         group.position.y = targetY.current + elev;
         phaseRef.current = 'resting';
         restStartTime.current = 0;
@@ -2346,11 +2355,11 @@ export function LilyPad({
     } else if (phase === 'dropping') {
       const t = Math.min(phaseTimer.current / DROP_DURATION, 1);
       const y = DROP_Y_START + (DROP_Y_REST - DROP_Y_START) * easeInOut(t);
-      group.position.set(posX, y, posZ);
+      group.position.set(livePosX, y, livePosZ);
       if (t >= 1) {
         setTextOpacity(1);
         if (!dropNotified.current && onDropComplete) {
-          onDropComplete(posX, posZ);
+          onDropComplete(livePosX, livePosZ);
           dropNotified.current = true;
         }
         phaseTimer.current = 0;
@@ -2373,16 +2382,16 @@ export function LilyPad({
       // at its own ripple's epicenter, where sin(-t*5.5) oscillates
       // rapidly and splash=exp(-10t) spikes sharply. RIDE_LERP acts
       // as a low-pass filter — matches resting's smoothing.
-      const rawElev = usePondStore.getState().sampleElevation(posX, posZ);
+      const rawElev = usePondStore.getState().sampleElevation(livePosX, livePosZ);
       rideElevRef.current = THREE.MathUtils.lerp(
         rideElevRef.current,
         rawElev,
         RIDE_LERP,
       );
       group.position.set(
-        posX,
+        livePosX,
         DROP_Y_REST + bounce + rideElevRef.current,
-        posZ,
+        livePosZ,
       );
       if (t >= 1) {
         phaseTimer.current = 0;
@@ -2400,7 +2409,7 @@ export function LilyPad({
       // Shares `rideElevRef` with settling for continuity across the
       // settling→pulsing boundary (no snap on transition).
       {
-        const rawElev = usePondStore.getState().sampleElevation(posX, posZ);
+        const rawElev = usePondStore.getState().sampleElevation(livePosX, livePosZ);
         rideElevRef.current = THREE.MathUtils.lerp(
           rideElevRef.current,
           rawElev,
@@ -2454,9 +2463,9 @@ export function LilyPad({
         // lands at the equivalent `targetY + rideElevRef.current`.
         // No snap.
         group.position.set(
-          posX,
+          livePosX,
           targetY.current + rideElevRef.current,
-          posZ,
+          livePosZ,
         );
         restStartTime.current = 0;
         phaseRef.current = 'resting';
