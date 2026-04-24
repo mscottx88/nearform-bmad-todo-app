@@ -154,10 +154,23 @@ export function InfoPopup({
   //     any effect runs).
   //   scrollOffset = ta.scrollTop — current scroll position.
   const [debugInfo, setDebugInfo] = useState('');
+  // Bare-minimum debug: fires on every editing→true transition, no
+  // syncThumb involvement. If this DOESN'T appear, setState from a
+  // useEffect is broken or editing never reaches true in this component.
+  useEffect(() => {
+    if (!editing) { setDebugInfo(''); return; }
+    setDebugInfo(
+      `OPEN ta=${!!textareaRef.current} th=${!!thumbRef.current} eH=${editorHeight}`
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
-    if (!ta || !thumb) return;
+    if (!ta || !thumb) {
+      setDebugInfo(`refs null: ta=${!!ta} thumb=${!!thumb}`);
+      return;
+    }
     const visibleHeight = editorHeight - 2;
     const textHeight = ta.scrollHeight;
     const scrollOffset = ta.scrollTop;
