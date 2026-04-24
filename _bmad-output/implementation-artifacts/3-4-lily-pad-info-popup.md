@@ -612,3 +612,46 @@ All patches applied 2026-04-23. Tests: 339 frontend tests pass (337 prior + 2 ne
 ### Dismissed — Group 3
 
 5 findings dismissed: `onCommitText` "wired but prop not shown" (InfoPopup does accept it, verified in Group 1); `setHoveredTodoId` `undefined` footgun (TypeScript enforces `string | null`); `updateTodo`/`infoTodo` stale-closure ripple position (pre-existing, not introduced by this diff); `onPreviewColor` signature widening to `| null` (matches P8 fix plan); `formatRelative` weeks-format inconsistency (`'2m'` vs `'2 weeks ago'` — cosmetic stylistic choice).
+
+---
+
+## Review Findings — Group 4 (docs + sprint)
+
+Code review of Group 4 (568 diff lines: new 523-line `docs/custom-scrollbar-and-cursor.md` + `sprint-status.yaml` update) — 2026-04-24.
+Layers: Tech-Accuracy Auditor (doc vs current code), Editorial Reviewer (structure + prose), Spec-Consistency Auditor (doc vs amended spec).
+
+**Headline finding:** the `docs/custom-scrollbar-and-cursor.md` file is **substantially stale**. It was committed during implementation (`642343c`, 2026-04-23) while the dev was on the bespoke-scrollbar path. During CR the bespoke scrollbar was deleted and replaced with NeonScrollbar overlay mode (see IN #7). The doc's Part 1 "what works" blocks and Part 3 "final architecture" describe code that no longer exists — and worse, actively recommend the path that was abandoned.
+
+### Decisions needed — Group 4
+
+- [x] [Review][Decision] **What to do with `docs/custom-scrollbar-and-cursor.md`** — **[RESOLVED 2026-04-24: option (b) — repurpose as historical record.]** The doc now carries a banner at the top marking it as historical context for the pre-CR architecture, with forward pointers to the canonical homes (spec Dev Notes §"Scrollbar convention", `NeonScrollbar.tsx` JSDoc, `InfoPopup.tsx` consumer). The bespoke-scrollbar pitfalls (1–8) are preserved as the record of why overlay mode exists. Cursor + drag-teardown pitfalls (9–15) are updated where they had stale class names; Pitfall 7's wheel-stop guidance is corrected for AC #21 (edit mode stops unconditionally); Pitfall 10 merged into Pitfall 14 (same root cause); the end-of-file "Summary of things that work" table is cut (it recommended the deleted architecture). Three options considered:
+    - **(a) Full rewrite.** Restructure: Part 1 = "Why NeonScrollbar got an overlay mode — the textarea-in-portal problem"; Part 2 = cursor + drag-teardown gotchas that still apply; Part 3 = current architecture (NeonScrollbar overlay API + InfoPopup integration) as reference. Most work, most useful going forward.
+    - **(b) Repurpose as historical record.** Retitle to something like "Dead ends before landing on NeonScrollbar overlay mode". Add a 5-line preamble that points forward to the current architecture (spec Dev Notes §"Scrollbar convention", NeonScrollbar's JSDoc). Preserves the hard-won gotcha catalogue but doesn't mislead future readers.
+    - **(c) Delete entirely.** The spec Dev Notes §"Scrollbar convention" + component JSDoc is canonical; the field notes only describe abandoned code paths.
+    - **(d) Minimal patch.** Fix the ~8 STALE sections in place, add the missing sections (enter/exit animations, callout, cursor override), leave structure alone. Lowest short-term effort; doc stays long and patchwork.
+
+### Patches — Group 4
+
+D1 resolved to option (b) — historical-record repurposing. Status of each patch below reflects what the (b) approach applied vs skipped.
+
+- [x] [Review][Patch] **[HIGH] Part 1 "what works" block** — applied: the block now reads "What we first tried… / What actually shipped (2026-04-24 CR refactor)" with the overlay-mode code sample and a pointer to `NeonScrollbar.tsx`.
+- [x] [Review][Patch] **[HIGH] Part 3 "final architecture"** — applied: rewritten to show the current textarea + overlay-mode `<NeonScrollbar scrollElement={textareaEl}>` DOM tree; notes that thumb math and drag handling live inside NeonScrollbar. Points forward to the spec for the rest of the shipped architecture (animations, callout).
+- [x] [Review][Patch] **[HIGH] Pitfalls 4/5/8 — bespoke thumb guidance** — applied-by-proxy: the historical-record banner at the top makes clear these pitfalls describe abandoned code. Not individually edited — they remain as the record of why the bespoke path was abandoned.
+- [x] [Review][Patch] **[MED] Pitfall 7 wheel-stop guidance contradicts AC #21** — applied: the caveat paragraph now states the edit-mode-unconditional-stop + readonly-bubble-at-boundary behaviour, noting the earlier direction-gating was tightened during CR.
+- [x] [Review][Patch] **[MED] Pitfalls 10 & 14 are the same pitfall** — applied: Pitfall 10 reduced to a cross-reference to Pitfall 14; Pitfall 14's code sample updated from `.info-popup__neon-thumb` (deleted) to `.nsb-thumb` (NeonScrollbar overlay thumb).
+- [x] [Review][Patch] **[MED] Duplicate summary table** — applied: removed; the anti-pattern table above is now the single summary.
+- [x] [Review][Patch] **[HIGH] `sprint-status.yaml` stale `last_updated` + stale story-line comment** — applied: `last_updated` bumped to 2026-04-24; story-line comment rewritten to reflect the four CR rounds, the drag-follow reversal, overlay mode, and the 339-test state.
+- [ ] [Review][Patch] **[HIGH] Missing: clip-path grow + content-reveal enter animation** — skipped under (b). Spec ACs #2, #2b are the canonical home; the docs file's role is now historical, so duplicating animation details there would just create another drift risk. Pointer to the spec already added in Part 3.
+- [ ] [Review][Patch] **[HIGH] Missing: callout pad-centroid → popup-centroid + ResizeObserver** — skipped under (b), same reason. Spec AC #13 is canonical.
+- [ ] [Review][Patch] **[MED] Missing: panel-body cursor override (AC #2c)** — skipped under (b). Spec AC #2c is canonical; docs Part 3 cursor bullets now mention it with a pointer to the AC.
+- [ ] [Review][Patch] **[MED] Pitfall 15 NeonScrollbar prop surface incomplete** — skipped under (b). The full prop surface (`scrollElement`, virtual-Y props, overlay CSS modifier) is documented in `NeonScrollbar.tsx` JSDoc — canonical home for the component's API. Pitfall 15 stays as the historical note about why the hover/drag callbacks were added locally.
+- [ ] [Review][Patch] **[LOW] Opening paragraph / "The goal" / editorializing / passive phrasings / Pitfall 7 mid-thought / TOC** — skipped under (b). Low-value prose polish on a historical document. Deferred to anyone who revisits the doc.
+
+### Deferred — Group 4
+
+- [x] [Review][Defer] [MED] Pitfall 6 scrollTop-reset effect shape drift — the isolated `scrollTop=0` effect still exists (InfoPopup.tsx:155-157); the listener/RO moved into NeonScrollbar. Fixable as part of rewrite/patch batch. Deferred pending D1.
+- [x] [Review][Defer] [LOW] Pitfall 2 table (portal timing + observer workarounds) still true but moot post-refactor — NeonScrollbar owns the observers now. Leave as historical context.
+
+### Dismissed — Group 4
+
+2 findings dismissed: memory entry staleness (I already replaced `feedback_hover_popup_follows_drag.md` with `feedback_hover_popup_drag_exit.md` in Group 3 — it is current); story status "still `review`" (correct, doc + sprint update don't change that).

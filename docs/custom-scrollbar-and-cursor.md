@@ -1,14 +1,22 @@
-# Custom Scrollbar + Custom Cursor — Field Notes
+# Custom Scrollbar + Custom Cursor — Historical Field Notes
 
-Building a user-controlled neon scrollbar for a `<textarea>` that lives
-inside a drei `<Html>` portal — and combining it with a custom canvas
-cursor ("firefly" / "frog hand") — turns out to be much harder than it
-looks. This document records every dead end, every fix that looked right
-but wasn't, and the patterns that finally worked, so no one has to
-re-discover them. The working reference implementation lives in
-[frontend/src/components/ui/InfoPopup.tsx](../frontend/src/components/ui/InfoPopup.tsx)
-and
-[frontend/src/components/ui/InfoPopup.css](../frontend/src/components/ui/InfoPopup.css).
+> **Historical record.** These are the dead ends + gotchas we hit on the
+> way to shipping story 3.4 (lily pad info popup with inline editor).
+> The document was originally a "what works" guide written on 2026-04-23
+> mid-implementation. During code review (2026-04-24) the bespoke-
+> scrollbar architecture it describes was **deleted** and replaced with
+> `NeonScrollbar` overlay mode. The cursor + drag-teardown pitfalls
+> still apply; the scrollbar pitfalls are preserved here as the
+> historical record of why overlay mode exists.
+>
+> **For the current architecture**, see:
+> - Spec Dev Notes §"Scrollbar convention" in [3-4-lily-pad-info-popup.md](../_bmad-output/implementation-artifacts/3-4-lily-pad-info-popup.md)
+> - JSDoc on [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx) (`scrollElement` prop = overlay mode)
+> - The reference consumer at [`InfoPopup.tsx`](../frontend/src/components/ui/InfoPopup.tsx) (edit mode uses `<NeonScrollbar scrollElement={textareaEl} …>`)
+>
+> The scrollbar pitfalls below (Pitfalls 1–8) describe **abandoned code**.
+> The cursor pitfalls (Pitfalls 11–15) and the drag-teardown pattern
+> (Pitfall 9) still apply to current code.
 
 ## Part 1 — Custom scrollbar over a textarea
 
@@ -56,22 +64,42 @@ unresolvable layout race:
   inner doesn't overflow at all — NeonScrollbar's thumb stays at
   full-track size.
 
-**What works:** don't wrap the textarea in NeonScrollbar. Build a
-dedicated tiny scrollbar component that mirrors the **textarea's own
-`scrollTop` and `scrollHeight`**, not some container's.
+**What we first tried:** don't wrap the textarea in NeonScrollbar; build
+a dedicated tiny scrollbar component that mirrors the textarea's own
+`scrollTop` and `scrollHeight` directly.
 
 ```tsx
+/* HISTORICAL — this approach was deleted during CR. Preserved here
+   for context; see Pitfalls 2–8 for the reasons we ran into it. */
 <div className="info-popup__editor-textbox" style={{ height: editorHeight }}>
   <textarea
     ref={setTextareaEl}
     style={{ height: '100%', overflowY: 'auto' }}
-    /* native scrollbar hidden via CSS: scrollbar-width: none */
   />
   <div className="info-popup__neon-track">
     <div ref={setThumbEl} className="info-popup__neon-thumb" />
   </div>
 </div>
 ```
+
+**What actually shipped (2026-04-24 CR refactor):** `NeonScrollbar` got
+a second API — an **overlay mode** via the `scrollElement` prop — that
+drives the thumb against an externally-owned scrollable element. The
+bespoke track/thumb DOM, `syncThumb` math, and `thumbEl` state are all
+gone. The overlay mode solves the same layout race by NOT wrapping the
+textarea at all — it just overlays an absolutely-positioned track + thumb
+chrome.
+
+```tsx
+<div className="info-popup__editor-textbox" style={{ position: 'relative', height: editorHeight }}>
+  <textarea ref={setTextareaEl} style={{ width: '100%', height: '100%', overflowY: 'auto' }} />
+  <NeonScrollbar scrollElement={textareaEl} color="cyan" />
+</div>
+```
+
+See [`NeonScrollbar.tsx`](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx)
+for the `scrollElement` prop's JSDoc and the `.neon-scrollbar--overlay`
+CSS modifier.
 
 ### Pitfall 2: `ta.clientHeight` is unreliable inside a drei `<Html>` portal
 
@@ -240,11 +268,14 @@ handler from firing, so no canvas zoom. The native browser scroll on
 the textarea still happens because the browser's scroll-target
 resolution is independent of React's synthetic event propagation.
 
-**Only caveat:** gate the `stopPropagation` on "can we actually scroll
-in this direction?" so wheel events over *non-scrollable* popup
-regions still zoom the camera. Read the textarea's `scrollTop`,
-`scrollHeight`, `clientHeight` and only stop propagation if the
-direction would consume the wheel.
+**As shipped (current code, AC #21):** in EDIT MODE the wheel handler
+unconditionally stops propagation whenever a textarea is present —
+users reaching the bottom/top of their own text do not expect the
+camera to start zooming. In READONLY mode the original direction-gating
+survives (stop only if the scroll region can consume the wheel in that
+direction), so scrolling past the end of the readonly text scrolls the
+pond camera as usual. Previously this file recommended direction-gating
+in both modes; that version was tightened during CR.
 
 ### Pitfall 8: CSS sizing chain (`height: 100%` + `max-height`)
 
@@ -289,15 +320,10 @@ rapid cursor sweep doesn't highlight text across the popup.
 
 ### Pitfall 10: drag release resolves to the wrong cursor state
 
-At the end of a drag, you want to revert the custom cursor glyph (see
-cursor section below) based on where the mouse actually is. Tracking a
-`isOverHandleRef` in `pointerenter` / `pointerleave` handlers is
-unreliable: browsers **suppress** those events on elements other than
-the one that captured `pointerdown`, so mid-drag transitions never
-fire and the ref drifts out of sync.
-
-**What works:** at `mouseup`, resolve the element under the cursor
-directly:
+_(See Pitfall 14 below — same root cause, same fix. Kept separate
+originally because this one arose in the scrollbar drag path and
+Pitfall 14 in the resize-handle path. Both resolve via
+`document.elementFromPoint` at `mouseup`.)_
 
 ```ts
 const onUp = (ev: MouseEvent) => {
@@ -412,10 +438,14 @@ now, and pick the cursor glyph from that:
 
 ```ts
 const el = document.elementFromPoint(ev.clientX, ev.clientY);
-const isDraggable = el?.closest('.info-popup__neon-thumb') !== null
+const isDraggable = el?.closest('.nsb-thumb') !== null           // NeonScrollbar thumb
                  || el?.closest('.info-popup__editor-resize') !== null;
 store.setCursorMode(isDraggable ? 'grab' : 'firefly');
 ```
+
+(Earlier drafts of this doc referenced `.info-popup__neon-thumb` — that
+class belonged to the bespoke scrollbar that was deleted during CR.
+NeonScrollbar's overlay-mode thumb is `.nsb-thumb`.)
 
 ### Pitfall 15: NeonScrollbar needs explicit drag-state callbacks
 
@@ -438,56 +468,52 @@ port stays drop-in compatible.
 
 ## Part 3 — What the final architecture looks like
 
-For the edit-mode textbox:
+**The edit-mode scrollbar described in earlier drafts was deleted during
+CR (2026-04-24).** `NeonScrollbar` was extended with an overlay mode so
+the popup no longer needs a bespoke track/thumb. The current DOM
+structure for edit mode:
 
 ```
-.info-popup__editor-textbox   (position:relative; overflow:hidden; neon border)
-  <textarea                   (height:100%; overflow-y:auto; padding-right:22)
-    ref={setTextareaEl}       (state-backed callback ref)
+.info-popup__editor-textbox   (position:relative; height: editorHeight; neon border)
+  <textarea                   (width:100%; height:100%; overflow-y:auto)
+    ref={setTextareaEl}       (state-backed callback ref → scrollElement prop)
   />
-  .info-popup__neon-track     (position:absolute; right:0; top:0; bottom:0; width:15)
-    .info-popup__neon-thumb   (position:absolute; top/height written by syncThumb)
-      ref={setThumbEl}        (state-backed callback ref)
+  <NeonScrollbar               (overlay mode — drives thumb against scrollElement.scrollTop)
+    scrollElement={textareaEl}
+    color="cyan"
+    onThumbHover={...}         (firefly → grab cursor swap on thumb hover)
+    onThumbDrag={...}          (grabbing during drag, grab/firefly at release)
+  />
 ```
 
-Thumb math:
+All thumb math, drag handling, scroll listeners, and ResizeObservers now
+live inside `NeonScrollbar` (see `updateThumbs` in
+[NeonScrollbar.tsx](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.tsx)).
+The `.neon-scrollbar--overlay` CSS modifier (in
+[NeonScrollbar.css](../frontend/src/components/ui/NeonScrollbar/NeonScrollbar.css))
+handles the absolute-positioning + pointer-events gating.
 
-```
-visibleHeight = editorHeight − 2
-textHeight    = textareaEl.scrollHeight
-scrollOffset  = textareaEl.scrollTop
-usable        = editorHeight − THUMB_INSET × 2
-ratio         = visibleHeight / textHeight
-thumbH        = max(MIN_THUMB_PX, ratio × usable)
-maxTop        = usable − thumbH
-maxScroll     = textHeight − visibleHeight
-scrollFrac    = scrollOffset / maxScroll
-thumb.top     = THUMB_INSET + scrollFrac × maxTop
-thumb.height  = thumbH
-```
-
-Effects:
-
-1. Main setup effect depends on `[editing, textareaEl, thumbEl, syncThumb]`
-   and, when all four are present, resets scrollTop, attaches a scroll
-   listener, attaches a ResizeObserver on the textarea, and calls
-   `syncThumb()` once.
-2. `useLayoutEffect` on `[editText, ...]` calls `syncThumb()` so the
-   thumb resizes live as the user types.
-3. `syncThumb()` is also invoked from the scroll listener (user wheel
-   or thumb drag) and from the RO callback (layout settled).
-
-For the cursor:
+For the cursor (still applies):
 
 - Global: `html, body { cursor: none; }` + fixed-position canvas with
   `z-index: 2147483647; pointer-events: none`.
 - Every interactive element: explicit `cursor: none`.
 - Hover mode popup: panel `pointer-events: none`.
-- Focused mode popup: panel `pointer-events: auto`, child elements
-  receive mouse events normally.
+- Focused mode popup: panel `pointer-events: auto`; child elements
+  receive mouse events normally. The panel itself explicitly reverts
+  `cursorMode` from `'grab'` to `'firefly'` in its own `onMouseEnter`
+  (R3F's pointer-hover state on the pad underneath goes stale once the
+  panel absorbs events, leaving the frog-hand glyph visible through the
+  popup — see AC #2c).
 - Cursor-mode transitions on drag release use
   `document.elementFromPoint` to resolve the under-cursor element,
   not stale refs.
+
+For the rest of the shipped architecture (enter/exit animations via
+`clip-path`, callout centroid-to-centroid via `ResizeObserver`,
+hover-popup-fades-on-drag behaviour), see the amended spec at
+[3-4-lily-pad-info-popup.md](../_bmad-output/implementation-artifacts/3-4-lily-pad-info-popup.md)
+ACs #2, #2a, #2b, #2c, #13. Those are not duplicated here.
 
 ## Summary of things that look reasonable but don't work
 
@@ -505,19 +531,8 @@ For the cursor:
 | `cursor: none` on body and hoping it inherits    | UA stylesheets override on form elements + thumbs |
 | `z-index: 9999` on the cursor canvas             | drei Html uses z-indexes up to 16 million       |
 
-## Summary of things that work
-
-| Problem                                 | Solution                                              |
-|-----------------------------------------|-------------------------------------------------------|
-| Textarea scrollbar in a portal          | Bespoke track + thumb; read `scrollHeight` / `scrollTop` directly from the textarea |
-| `clientHeight` unreliable               | Compute from React state (`editorHeight − 2`)         |
-| Ref-null-at-effect-time                 | State-backed callback refs (`useState` + `ref={setEl}`) |
-| Thumb visibility toggled from JS        | `element.style.display = 'block' | 'none'` explicitly; no CSS `display` rule; no JSX `style` prop |
-| Inner that resolves `height: 100%`      | Parent has explicit `height`, not just `max-height`   |
-| Cursor at top on edit open              | `ta.scrollTop = 0` when mounting                      |
-| Wheel scroll without canvas zoom        | `e.stopPropagation()` on the editor wrapper, gated by "can scroll in this direction" |
-| Smooth drag with custom cursor tracking | `mousedown` on target + `document.mousemove` / `mouseup` |
-| Correct cursor glyph at drag release    | `document.elementFromPoint(ev.clientX, ev.clientY)`  |
-| Custom cursor always above popups       | `z-index: 2147483647`                                 |
-| Custom cursor over scrollbar thumb      | `cursor: none` on `.nsb-thumb`                        |
-| Custom cursor in hover-mode popup       | Accept it doesn't — hover popups are `pointer-events: none` |
+_(An earlier draft of this document included a second summary table
+enumerating "things that work". It has been removed — the anti-pattern
+table above plus the individual pitfall bodies are the single source of
+truth, and the "what works" column was misleading once the bespoke
+scrollbar architecture was replaced with NeonScrollbar overlay mode.)_
