@@ -1190,9 +1190,15 @@ export function LilyPad({
     // to the pre-drag position (the exact failure mode the deleted
     // sticky mechanism was masking). Using live store reads inside
     // useFrame closes that gap without reintroducing sticky state.
+    //
+    // Declared as `let` so the cascade-commit block below can re-
+    // assign these after its `setPosition` write — otherwise the
+    // cascade-branch group.position assignment would paint with the
+    // pre-commit values (captured here at frame-top) for one frame,
+    // flashing the sibling back to its pre-nudge location.
     const liveWorldEntry = useWorldStore.getState().worldMetadata.get(todo.id);
-    const livePosX = liveWorldEntry?.positionX ?? posX;
-    const livePosZ = liveWorldEntry?.positionY ?? posZ;
+    let livePosX = liveWorldEntry?.positionX ?? posX;
+    let livePosZ = liveWorldEntry?.positionY ?? posZ;
 
     // Deletion-sequence entry. Ordered BEFORE the completing transition per
     // spec — if state somehow contains both, deletion wins (terminal intent).
@@ -1745,6 +1751,14 @@ export function LilyPad({
         // the periodic save.
         useWorldStore.getState().setPosition(todo.id, commitX, commitZ);
         siblingNudgeRef.current = { x: 0, z: 0 };
+        // Commit changed this pad's rest position THIS FRAME — update
+        // the live locals so downstream branches (cascade publish,
+        // resting-drift group.position writer) paint from the new
+        // position, not the pre-commit one. Without this the drift
+        // branch would write `origX + drift + 0` for this tick,
+        // flashing the sibling to its pre-nudge location.
+        livePosX = commitX;
+        livePosZ = commitZ;
         // Clear cached target too — nudge is 0 now, so no cascade
         // partner should pick up this pad's (stale) target as a
         // secondary anchor for the next drag.

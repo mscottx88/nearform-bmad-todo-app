@@ -123,30 +123,10 @@ describe('sendExitPayload', () => {
     vi.clearAllMocks();
   });
 
-  it('prefers navigator.sendBeacon when available', () => {
-    const sendBeacon = vi.fn().mockReturnValue(true);
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { sendBeacon },
-      configurable: true,
-      writable: true,
-    });
-    const result = sendExitPayload({
-      positions: [{ id: 'a', position_x: 1, position_y: 2, rotation_y: 0 }],
-    });
-    expect(result).toBe(true);
-    expect(sendBeacon).toHaveBeenCalledWith(
-      '/api/todos/positions',
-      expect.any(Blob),
-    );
-  });
-
-  it('falls back to fetch({keepalive}) when sendBeacon returns false', () => {
-    const sendBeacon = vi.fn().mockReturnValue(false);
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { sendBeacon },
-      configurable: true,
-      writable: true,
-    });
+  it('uses fetch({method: PATCH, keepalive: true}) — sendBeacon is not used because it is POST-only', () => {
+    // sendBeacon's POST requirement collides with the endpoint's
+    // PATCH-only signature (returns 405 Method Not Allowed). fetch
+    // with keepalive is honoured during unload on modern browsers.
     const fetchSpy = vi.fn().mockResolvedValue(new Response());
     Object.defineProperty(globalThis, 'fetch', {
       value: fetchSpy,
@@ -166,5 +146,17 @@ describe('sendExitPayload', () => {
         headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
       }),
     );
+  });
+
+  it('returns false when fetch is unavailable (SSR / legacy environments)', () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    const result = sendExitPayload({
+      positions: [{ id: 'a', position_x: 1, position_y: 2, rotation_y: 0 }],
+    });
+    expect(result).toBe(false);
   });
 });

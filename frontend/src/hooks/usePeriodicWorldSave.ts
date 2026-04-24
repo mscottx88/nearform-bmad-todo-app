@@ -77,45 +77,34 @@ function buildBeaconPayload(
 }
 
 /**
- * Send the payload via the best-effort exit path:
- *   1. `navigator.sendBeacon` (preferred — fire-and-forget, browser
- *      guarantees delivery attempt during unload).
- *   2. `fetch({ keepalive: true })` (fallback — some browsers /
- *      payload sizes reject the beacon).
+ * Send the payload via `fetch({ method: 'PATCH', keepalive: true })`.
  *
- * Neither path awaits or reads the response. The local
- * `lastSavedAtMs` is NOT bumped — next mount re-hydrates from
- * server truth.
+ * `navigator.sendBeacon` is NOT used here even though it's the
+ * canonical exit-flush API — it only supports POST, and our endpoint
+ * requires PATCH. Using sendBeacon against `/api/todos/positions`
+ * returns 405 Method Not Allowed at the backend. Modern browsers
+ * (Chrome 62+, Firefox 71+, Safari 13+) honour `keepalive: true` on
+ * fetch during the unload phase, so the reliability gap vs sendBeacon
+ * is small in practice.
+ *
+ * The response is not awaited. The local `lastSavedAtMs` is NOT
+ * bumped — next mount re-hydrates from server truth.
  */
 export function sendExitPayload(payload: { positions: BeaconSaveEntry[] }): boolean {
-  // Resolve the absolute URL: the SPA dev proxy or the prod host
-  // adds `/api` prefix via axios baseURL. For beacon / keepalive
-  // fetch we need the full URL relative to the origin.
   const url = (apiClient.defaults.baseURL ?? '') + WORLD_SAVE_URL;
   const body = JSON.stringify(payload);
-  if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-    // Blob with explicit JSON Content-Type so FastAPI parses it.
-    try {
-      const blob = new Blob([body], { type: 'application/json' });
-      if (navigator.sendBeacon(url, blob)) return true;
-    } catch {
-      // Fall through to fetch fallback.
-    }
+  if (typeof fetch !== 'function') return false;
+  try {
+    void fetch(url, {
+      method: 'PATCH',
+      body,
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return true;
+  } catch {
+    return false;
   }
-  if (typeof fetch === 'function') {
-    try {
-      void fetch(url, {
-        method: 'PATCH',
-        body,
-        keepalive: true,
-        headers: { 'Content-Type': 'application/json' },
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return false;
 }
 
 export interface PeriodicWorldSaveOptions {
