@@ -52,9 +52,13 @@ interface NeonScrollbarProps {
    * Fired at thumb drag-start and drag-end (vertical thumb only —
    * horizontal is infrequent and not draggable in our current
    * layouts). Consumers swap cursorMode to 'grabbing' during drag
-   * and back to 'grab' on release.
+   * and back to 'grab' on release. The second argument is the
+   * MouseEvent on release so consumers can resolve the element
+   * under the cursor (document.elementFromPoint) and decide
+   * whether to fall back to the 'grab' affordance or return to
+   * 'firefly' when the drag ended somewhere other than the thumb.
    */
-  onThumbDrag?: (dragging: boolean) => void;
+  onThumbDrag?: (dragging: boolean, event?: MouseEvent) => void;
 }
 
 const MIN_THUMB_PX = 28;
@@ -314,7 +318,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       }
     };
 
-    const onMouseUp = (): void => {
+    const onMouseUp = (e: MouseEvent): void => {
       if (!isDragging) return;
       isDragging = false;
       document.body.style.userSelect = '';
@@ -329,7 +333,7 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
       }
       isVirtual = false;
       isDraggingVirtualRef.current = false;
-      onThumbDragRef.current?.(false);
+      onThumbDragRef.current?.(false, e);
     };
 
     // Hover callbacks — consumers use these to swap the app's custom

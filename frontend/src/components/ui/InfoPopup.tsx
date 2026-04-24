@@ -297,21 +297,26 @@ export function InfoPopup({
       const next = start.baseH + (ev.clientY - start.startY);
       setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(EDITOR_MAX_HEIGHT, next)));
     };
-    const onUp = (): void => {
+    const onUp = (ev: PointerEvent): void => {
       editorResizeRef.current = null;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      // Revert the cursor glyph based on where the pointer landed
-      // at release. If the cursor is still over the handle, stay on
-      // 'grab' (hover affordance). If it moved off during the drag
-      // (handle-leave was suppressed because cursorMode was
-      // 'grabbing'), revert all the way to 'firefly' so the glyph
-      // isn't stuck on-screen until the user incidentally hovers a
-      // pad.
-      usePondStore
-        .getState()
-        .setCursorMode(resizeHandleOverRef.current ? 'grab' : 'firefly');
+      // Resolve the element actually under the pointer at release
+      // time. If it's a draggable affordance (resize handle or
+      // scrollbar thumb), stay on the hover 'grab' glyph; otherwise
+      // revert to 'firefly'. The ref alone isn't reliable because
+      // browsers suppress pointerenter/leave on elements other than
+      // the one that captured the pointerdown, so the ref can drift
+      // out of sync mid-drag.
+      let overDraggable = false;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (el) {
+        overDraggable =
+          el.closest('.info-popup__editor-resize') !== null ||
+          el.closest('.nsb-thumb') !== null;
+      }
+      usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -329,9 +334,29 @@ export function InfoPopup({
       if (store.cursorMode === 'grab') store.setCursorMode('firefly');
     }
   }, []);
-  const onDragAffordanceDrag = useCallback((dragging: boolean): void => {
+  // On drag release, resolve the element actually under the cursor
+  // (from the MouseEvent coords when available) to decide whether to
+  // stay on the 'grab' hover glyph or revert all the way to
+  // 'firefly'. Without this, releasing over empty space would leave
+  // the frog hand stuck on-screen until the user happened to hover
+  // something draggable — because mouseenter / mouseleave transitions
+  // don't fire on the thumb if the cursor never crosses it post-release.
+  const onDragAffordanceDrag = useCallback((dragging: boolean, e?: MouseEvent): void => {
     const store = usePondStore.getState();
-    store.setCursorMode(dragging ? 'grabbing' : 'grab');
+    if (dragging) {
+      store.setCursorMode('grabbing');
+      return;
+    }
+    let overDraggable = false;
+    if (e) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (el) {
+        overDraggable =
+          el.closest('.nsb-thumb') !== null ||
+          el.closest('.info-popup__editor-resize') !== null;
+      }
+    }
+    store.setCursorMode(overDraggable ? 'grab' : 'firefly');
   }, []);
   // Resize-handle hover — same firefly↔grab swap as thumb hover, but
   // also updates resizeHandleOverRef so the drag-release handler
