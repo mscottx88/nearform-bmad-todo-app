@@ -11,6 +11,7 @@ describe('PondSearchOverlay', () => {
       searchResults: new Map(),
       searchAllMatches: false,
       vectorSearchUnavailable: false,
+      activePopupTodoId: null,
     });
   });
 
@@ -75,5 +76,48 @@ describe('PondSearchOverlay', () => {
     usePondStore.setState({ searchQuery: '', searchActive: false });
     render(<PondSearchOverlay hasVisiblePads={false} />);
     expect(screen.queryByText(/nothing to search/i)).not.toBeInTheDocument();
+  });
+
+  it('applies --faded when a popup is open on a pad that is a search match', () => {
+    const matchedId = 'todo-abc';
+    usePondStore.setState({
+      searchQuery: 'foo',
+      searchActive: true,
+      activePopupTodoId: matchedId,
+      searchResults: new Map([
+        [matchedId, { score: 0.9, matchType: 'hybrid' }],
+      ]),
+    });
+    const { container } = render(<PondSearchOverlay hasVisiblePads={true} />);
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).toContain('pond-search-overlay--faded');
+  });
+
+  it('does NOT apply --faded when the focused pad has no search hit', () => {
+    usePondStore.setState({
+      searchQuery: 'foo',
+      searchActive: true,
+      activePopupTodoId: 'todo-xyz',
+      searchResults: new Map([
+        ['todo-other', { score: 0.5, matchType: 'keyword' }],
+      ]),
+    });
+    const { container } = render(<PondSearchOverlay hasVisiblePads={true} />);
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).not.toContain('pond-search-overlay--faded');
+  });
+
+  it('does NOT apply --faded when no popup is open, even if the query matches pads', () => {
+    usePondStore.setState({
+      searchQuery: 'foo',
+      searchActive: true,
+      activePopupTodoId: null,
+      searchResults: new Map([
+        ['todo-abc', { score: 0.9, matchType: 'hybrid' }],
+      ]),
+    });
+    const { container } = render(<PondSearchOverlay hasVisiblePads={true} />);
+    const root = container.firstChild as HTMLElement;
+    expect(root.className).not.toContain('pond-search-overlay--faded');
   });
 });

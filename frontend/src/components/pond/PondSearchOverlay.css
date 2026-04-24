@@ -17,6 +17,14 @@
   opacity: 1;
 }
 
+/* When a popup is open on a pad that is itself a search match, fade the
+   overlay nearly out — the focused pad is what the user is looking at,
+   and the typed query would just compete with it. The query stays
+   parseable (not gone) so the user can keep narrowing. */
+.pond-search-overlay--active.pond-search-overlay--faded {
+  opacity: 0.15;
+}
+
 .pond-search-overlay__query {
   color: var(--neon-cyan);
   font-family: var(--font-mono);
