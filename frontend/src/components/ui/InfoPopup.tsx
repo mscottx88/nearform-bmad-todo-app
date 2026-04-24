@@ -153,11 +153,12 @@ export function InfoPopup({
   //     reliable once the textarea has its value (React sets it before
   //     any effect runs).
   //   scrollOffset = ta.scrollTop — current scroll position.
+  const [debugInfo, setDebugInfo] = useState('');
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
     if (!ta || !thumb) return;
-    const visibleHeight = editorHeight - 2; // 2 = top + bottom border
+    const visibleHeight = editorHeight - 2;
     const textHeight = ta.scrollHeight;
     const scrollOffset = ta.scrollTop;
     const usable = editorHeight - THUMB_INSET * 2;
@@ -169,6 +170,7 @@ export function InfoPopup({
     thumb.style.display = 'block';
     thumb.style.top = `${THUMB_INSET + scrollFrac * maxTop}px`;
     thumb.style.height = `${thumbH}px`;
+    setDebugInfo(`eH=${editorHeight} vis=${visibleHeight} txt=${textHeight} sT=${Math.round(scrollOffset)} h=${Math.round(thumbH)}`);
   }, [editorHeight]);
   useEffect(() => {
     if (!editing) return;
@@ -512,6 +514,12 @@ export function InfoPopup({
                     top / height via direct DOM writes. A style prop
                     would be re-applied by React on every re-render,
                     overwriting the JS-managed state. */}
+                {/* DEBUG — remove before merging */}
+                {debugInfo && (
+                  <div style={{ position: 'absolute', top: 0, left: '-200px', color: 'yellow', fontSize: '8px', background: 'rgba(0,0,0,0.8)', whiteSpace: 'pre', zIndex: 9999999, padding: '2px', pointerEvents: 'none' }}>
+                    {debugInfo}
+                  </div>
+                )}
                 <div className="info-popup__neon-track">
                   <div
                     ref={thumbRef}
