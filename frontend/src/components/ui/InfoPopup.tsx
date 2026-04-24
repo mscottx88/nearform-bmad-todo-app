@@ -141,8 +141,18 @@ export function InfoPopup({
   const [editorHeight, setEditorHeight] = useState<number>(EDITOR_DEFAULT_HEIGHT);
   const editorResizeRef = useRef<{ startY: number; baseH: number } | null>(null);
   const resizeHandleOverRef = useRef(false);
+  // Callback refs backed by state so effects fire AFTER the element
+  // has mounted. useRef-backed refs appeared null at effect time when
+  // rendered inside a drei <Html> portal — switching to state-backed
+  // refs fixes that by making element mount a state transition React
+  // re-runs effects on.
+  const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
+  const [thumbEl, setThumbEl] = useState<HTMLDivElement | null>(null);
+  // Keep the old ref-shape in sync so code that reads .current still works.
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
+  textareaRef.current = textareaEl;
+  thumbRef.current = thumbEl;
   const MIN_THUMB_PX = 40;  // raised from 28 — visible even in tall boxes
   const THUMB_INSET = 3;
   // Thumb sync using only values we KNOW or can measure reliably:
@@ -154,16 +164,6 @@ export function InfoPopup({
   //     any effect runs).
   //   scrollOffset = ta.scrollTop — current scroll position.
   const [debugInfo, setDebugInfo] = useState('');
-  // Bare-minimum debug: fires on every editing→true transition, no
-  // syncThumb involvement. If this DOESN'T appear, setState from a
-  // useEffect is broken or editing never reaches true in this component.
-  useEffect(() => {
-    if (!editing) { setDebugInfo(''); return; }
-    setDebugInfo(
-      `OPEN ta=${!!textareaRef.current} th=${!!thumbRef.current} eH=${editorHeight}`
-    );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing]);
   const syncThumb = useCallback((): void => {
     const ta = textareaRef.current;
     const thumb = thumbRef.current;
@@ -186,39 +186,22 @@ export function InfoPopup({
     setDebugInfo(`eH=${editorHeight} vis=${visibleHeight} txt=${textHeight} sT=${Math.round(scrollOffset)} h=${Math.round(thumbH)}`);
   }, [editorHeight]);
   useEffect(() => {
-    if (!editing) return;
-    const ta = textareaRef.current;
-    if (!ta) return;
-    // Reset scroll to top when edit opens. Without this, autoFocus
-    // places the cursor at the end of the text, the browser auto-scrolls
-    // the textarea to show the cursor, and the first syncThumb call sees
-    // scrollTop = max → scrollFrac = 1 → thumb renders at the bottom as
-    // a sliver (if clientHeight is also 0 at that moment).
-    ta.scrollTop = 0;
-    ta.addEventListener('scroll', syncThumb, { passive: true });
-    // ResizeObserver fires once the browser has committed the textarea's
-    // layout. Use RAF inside the callback so we read dimensions AFTER
-    // the browser has also positioned the drei <Html> portal — without
-    // the RAF, clientHeight can still be 0 on the very first RO firing.
-    let raf = 0;
-    const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(syncThumb);
-    });
-    ro.observe(ta);
-    // Direct call as belt-and-suspenders for the case where the element
-    // already has its final size by the time this effect runs.
+    if (!editing || !textareaEl || !thumbEl) return;
+    textareaEl.scrollTop = 0;
+    textareaEl.addEventListener('scroll', syncThumb, { passive: true });
+    const ro = new ResizeObserver(() => syncThumb());
+    ro.observe(textareaEl);
     syncThumb();
     return () => {
-      ta.removeEventListener('scroll', syncThumb);
+      textareaEl.removeEventListener('scroll', syncThumb);
       ro.disconnect();
-      cancelAnimationFrame(raf);
     };
-  }, [editing, syncThumb]);
-  // Also sync whenever content changes (resize or typing).
+  }, [editing, textareaEl, thumbEl, syncThumb]);
+  // Also sync whenever content changes (typing) — fires after layout so
+  // textarea.scrollHeight reflects the new content height.
   useLayoutEffect(() => {
-    if (editing) syncThumb();
-  }, [editText, editing, syncThumb]);
+    if (editing && textareaEl && thumbEl) syncThumb();
+  }, [editText, editing, textareaEl, thumbEl, syncThumb]);
   // Keep editText in sync with the incoming todo while NOT editing —
   // once edit opens, the user's in-flight draft owns the field.
   useEffect(() => {
@@ -502,7 +485,7 @@ export function InfoPopup({
                 style={{ height: editorHeight }}
               >
                 <textarea
-                  ref={textareaRef}
+                  ref={setTextareaEl}
                   className="info-popup__editor-textarea"
                   value={editText}
                   autoFocus
@@ -529,7 +512,7 @@ export function InfoPopup({
                     overwriting the JS-managed state. */}
                 <div className="info-popup__neon-track">
                   <div
-                    ref={thumbRef}
+                    ref={setThumbEl}
                     className="info-popup__neon-thumb"
                     onMouseDown={handleThumbDragStart}
                     onMouseEnter={() => onDragAffordanceHover(true)}
