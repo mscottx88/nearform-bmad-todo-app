@@ -13,6 +13,7 @@ import {
   selectSearchHit,
   selectIsSelected,
 } from '../../stores/usePondStore';
+import { useWorldStore } from '../../stores/useWorldStore';
 import {
   useUpdateTodoPositions,
   type UpdatePositionEntry,
@@ -993,6 +994,14 @@ export function LilyPad({
           dragPosRef.current = { x: newX, z: newZ };
           raycastSucceededRef.current = true;
 
+          // Story 4.9: mirror the drag position into the world store
+          // so the periodic / exit save has canonical state. The
+          // existing batch-PATCH on release path (story 4-8) still
+          // fires for immediate feedback; this is an additive write
+          // until the follow-up LilyPad refactor makes the store
+          // authoritative for reads too.
+          useWorldStore.getState().setPosition(todo.id, newX, newZ);
+
           // Publish the drag anchor so every other pad's useFrame
           // slide-out-of-the-way nudge (NUDGE_RADIUS) tracks the
           // cursor live. Cleared on release below.
@@ -1765,6 +1774,11 @@ export function LilyPad({
         const commitX = posX + siblingNudgeRef.current.x;
         const commitZ = posZ + siblingNudgeRef.current.z;
         dragPosRef.current = { x: commitX, z: commitZ };
+        // Story 4.9: mirror the cascade nudge commit into the world
+        // store so periodic / exit save can persist it even when the
+        // dragger's batch PATCH misses this sibling (< publish
+        // threshold, or batch failed).
+        useWorldStore.getState().setPosition(todo.id, commitX, commitZ);
         stickyDragRef.current = true;
         stickySetAtMsRef.current = performance.now();
         siblingNudgeRef.current = { x: 0, z: 0 };
@@ -1825,6 +1839,8 @@ export function LilyPad({
             // cleanup effect clears the flag when posX/posZ
             // arrives matching the target.
             dragPosRef.current = { x: spreadTarget.x, z: spreadTarget.z };
+            // Story 4.9: world store mirror (see drag-move site above).
+            useWorldStore.getState().setPosition(todo.id, spreadTarget.x, spreadTarget.z);
             stickyDragRef.current = true;
             stickySetAtMsRef.current = performance.now();
             // Story 4-8: use the batch endpoint for consistency even

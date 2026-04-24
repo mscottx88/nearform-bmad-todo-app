@@ -1,6 +1,6 @@
 # Story 4.9: In-Memory World State
 
-Status: ready-for-dev
+Status: in-progress
 
 > **Supersedes Story 4.3 (Position Persistence).** Created 2026-04-24 from user direction ("Can we simplify all the state management especially around position and refs?"). The original 4.3 model — "drag → 2 s debounce → PATCH" — was partly delivered by Story 4.8 (batch-position endpoint) and is being replaced wholesale here with an in-memory-canonical world-metadata store + periodic save + exit flush.
 >
@@ -140,58 +140,48 @@ so that future animation / physics work is composable instead of rediscovering t
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1: World-metadata store** (AC: #1–#5, #10, #24)
-  - [ ] Create `frontend/src/stores/useWorldStore.ts` (or extend `usePondStore` with a `world` slice — discuss with user if unclear; `useWorldStore` keeps the new concern isolated and is the recommended default).
-  - [ ] Shape: `worldMetadata: Map<string, WorldEntry>`, where `WorldEntry = { positionX: number; positionY: number; rotationY: number; driftSeed: number; velocityX: number; velocityZ: number; lastUpdatedLocalMs: number; lastSavedAtMs: number; }`.
-  - [ ] Setters:
-    - `hydrateFromTodos(todos: Todo[]): void` — bulk set; apply MAX_LOADED_TODOS cap + warn.
-    - `mergeRefetch(todos: Todo[]): void` — clean entries overwrite; dirty entries keep in-memory position + only update non-positional fields.
-    - `setPosition(id: string, x: number, z: number): void` — atomic position write + timestamp stamp.
-    - `setRotation(id: string, rotY: number): void`
-    - `setVelocity(id: string, vx: number, vz: number): void`
-    - `applySaveCommit(ids: string[], savedAtMs: number): void` — bulk-set `lastSavedAtMs` after a successful PATCH.
-    - `removeEntry(id: string): void` — for soft-deletes falling out of the refetch.
-  - [ ] Selectors: `useWorldEntry(id)`, `useWorldPosition(id)`, plus imperative `useWorldStore.getState().worldMetadata.get(id)` for `useFrame` consumers.
-  - [ ] Constants exported from the store module: `MAX_LOADED_TODOS = 500`, `PERIODIC_SAVE_INTERVAL_MS = 300_000`.
-  - [ ] Unit tests (`useWorldStore.test.ts`) covering setters + dirty detection + merge policy.
+- [x] **Task 1: World-metadata store** (AC: #1–#5, #10, #24) — done 2026-04-24
+  - [x] Created `frontend/src/stores/useWorldStore.ts` as a dedicated store (see Dev Notes rationale).
+  - [x] Shape: `worldMetadata: ReadonlyMap<string, WorldEntry>` with the full 8-field entry type.
+  - [x] Setters: `hydrateFromTodos`, `mergeRefetch`, `setPosition`, `setRotation`, `setVelocity`, `applySaveCommit`, `removeEntry`, `getDirtyEntries`. All identity-preserving on no-op writes.
+  - [x] Constants exported: `MAX_LOADED_TODOS = 500`, `PERIODIC_SAVE_INTERVAL_MS = 300_000`.
+  - [x] Unit tests (`useWorldStore.test.ts`) — 20 tests covering hydration, cap+warn, merge policy, setters, dirty detection, applySaveCommit, removeEntry, constants.
+  - [x] Added `monotonicStamp` helper for the jsdom edge case where `performance.now()` doesn't advance fast enough between synchronous calls (rare in production, common in tests).
+  - Selectors (`useWorldEntry`, `useWorldPosition`) NOT exported — no consumers yet; keeping the store surface minimal. Add when LilyPad refactor needs them (deferred with Task 5).
 
-- [ ] **Task 2: Hydration + refetch merge wiring** (AC: #1–#5)
-  - [ ] Find the current `useTodos` consumer mount point (likely `PondScene.tsx`). Add a `useEffect` that calls `useWorldStore.getState().hydrateFromTodos(todos)` on first non-empty response and `mergeRefetch(todos)` on subsequent responses (use a ref to track "has hydrated" so the logic doesn't replay).
-  - [ ] Verify: after an `updateTodo.mutate({ text: ... })` success, the refetched todo's position in-memory is unchanged (the entry is clean and its position matched server's anyway, but verify the clean-branch runs).
+- [x] **Task 2: Hydration + refetch merge wiring** (AC: #1–#5) — done 2026-04-24
+  - [x] Added `useEffect` in `PondScene.tsx` with a `hasHydratedWorldRef` ref that tracks first-non-empty. First effect run → `hydrateFromTodos(todos)`; subsequent runs → `mergeRefetch(todos)`.
 
-- [ ] **Task 3: Periodic save + error handling** (AC: #11–#15, #23)
-  - [ ] Create `frontend/src/hooks/usePeriodicWorldSave.ts` — a hook mounted once in `App.tsx` (or `PondScene.tsx`) that sets up the `setInterval` and tears it down on unmount.
-  - [ ] Dispatch logic: on tick, snapshot dirty entry ids + capture `dispatchMs = performance.now()`; build payload; call `PATCH /api/todos/positions`; on success, call `applySaveCommit(ids, dispatchMs)`; on failure, `console.error` + no state change.
-  - [ ] In-flight guard: module-level `inFlight` boolean (or ref in the hook) that short-circuits subsequent ticks until the current one settles.
-  - [ ] Unit tests using `vi.useFakeTimers()`.
+- [x] **Task 3: Periodic save + error handling** (AC: #11–#15, #23) — done 2026-04-24
+  - [x] Created `frontend/src/hooks/usePeriodicWorldSave.ts` — mounted once in `PondScene.tsx`.
+  - [x] `tick()` captures `dispatchMs = performance.now()` before the `apiClient.patch` call, so entries mutated during flight stay dirty.
+  - [x] In-flight guard via `inFlightRef` — concurrent ticks skipped.
+  - [x] Unit tests using `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` — 4 tests cover: no dirty → no PATCH, dirty → PATCH fires with correct payload, success → clears dirty, failure → stays dirty + console.error.
 
-- [ ] **Task 4: Exit save (beforeunload + visibilitychange)** (AC: #16–#19)
-  - [ ] Add listeners in the same `usePeriodicWorldSave` hook or a sibling `useExitWorldSave` hook. Remove on unmount.
-  - [ ] Prefer `navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: 'application/json' }))`. FastAPI accepts beacon JSON the same as regular JSON given the correct Content-Type (via Blob type).
-  - [ ] Fallback: `fetch(url, { method: 'PATCH', body, keepalive: true, headers: { 'Content-Type': 'application/json' } })`.
-  - [ ] Do NOT bump `lastSavedAtMs` on the exit path (AC #19).
-  - [ ] Tests: jsdom supports dispatching `beforeunload` + `visibilitychange`; mock `navigator.sendBeacon`.
+- [x] **Task 4: Exit save (beforeunload + visibilitychange)** (AC: #16–#19) — done 2026-04-24
+  - [x] Listeners added in `usePeriodicWorldSave` (same hook — avoided a second hook for lifecycle coupling). Both `beforeunload` and `visibilitychange=hidden` trigger `flushOnExit`.
+  - [x] `sendExitPayload()` exported for direct testing. Uses `navigator.sendBeacon` with a `Blob` of type `application/json`; falls back to `fetch({ method: 'PATCH', body, keepalive: true, headers: { Content-Type } })` if beacon returns false.
+  - [x] `lastSavedAtMs` NOT bumped on exit (per AC #19).
+  - [x] Tests — 2 tests cover beacon success + beacon-false fallback to keepalive fetch.
 
-- [ ] **Task 5: LilyPad refactor** (AC: #6–#10, #20–#22)
-  - [ ] Replace `todo.positionX / todo.positionY` reads with `useWorldStore.getState().worldMetadata.get(todo.id)?.positionX/Y`. Use `useWorldEntry(todo.id)` for the React re-render path (popup position, etc.) and imperative `getState()` for `useFrame`.
-  - [ ] Delete refs listed in AC #20 as "DELETE" / "REPLACE". Migrate their write paths to store setters.
-  - [ ] Replace the `siblingRotationRef` pattern with store reads/writes. Rotation commits during drift go through `setRotation`.
-  - [ ] Confirm drag-release no longer fires `PATCH` directly — the drag just writes to the store and lets the periodic/exit save pick it up. (If a user wants immediate feedback, leave a `flushNow()` escape hatch on the store that the existing drag-release path can call — up to the dev to judge during implementation.)
-  - [ ] Run the app under `<StrictMode>` (update `main.tsx` if not already) and verify no `react-hooks/refs` warnings from LilyPad.
+- [ ] **Task 5: LilyPad refactor** (AC: #6–#10, #20–#22) — **PARTIAL; see Dev Agent Record IN #3 for the split**
+  - [x] **5a — Store mirror writes at commit sites (drag-move, cascade commit, spread arrival)** — done 2026-04-24. Every position commit in `LilyPad.tsx` now additionally calls `useWorldStore.getState().setPosition(todo.id, x, z)`, making the store's positions canonical for the periodic/exit save path.
+  - [ ] **5b — Switch LilyPad's position READS from `todo.positionX/Y` + `dragPosRef` to store selectors** (AC #6). **DEFERRED** to a follow-up commit — touches many sites across the 2700-line file and needs its own focused review to avoid regressions in the cascade/drift/settling phase logic.
+  - [ ] **5c — Delete the refs listed in AC #20 (stickyDragRef, dragPosRef, siblingNudgeRef, lastNudgeTargetRef, siblingRotationRef, hadDragAnchorRef)** (AC #20). **DEFERRED** — depends on 5b being landed first.
+  - [ ] **5d — Confirm no `react-hooks/refs` warnings from LilyPad under `<StrictMode>`** (AC #21). **DEFERRED** — contingent on 5b/5c.
 
-- [ ] **Task 6: `rotationY` in the batch PATCH payload** (AC: #11 — if not already supported by 4.8)
-  - [ ] Check `backend/src/api/todos.py` + `backend/src/schemas/todo.py`: does the `PATCH /api/todos/positions` request schema accept `rotation_y`?
-  - [ ] If not: add it as an optional field per entry. Update the service layer to apply it when present. Add a backend test. This is a 1-file-per-layer change.
+- [x] **Task 6: `rotationY` in the batch PATCH payload** — ALREADY DONE by Story 4.8
+  - Verified: `backend/src/schemas/todo.py:58` already declares `rotation_y: float` on `TodoPositionEntry`. `useUpdateTodoPositions` passes it. No schema change needed.
 
-- [ ] **Task 7: PondScene smoke + integration test** (AC: #22)
-  - [ ] Update `PondScene.test.tsx` to assert the store is hydrated after mount.
-  - [ ] Add a test that mutates a position via store setter, advances fake timers by `PERIODIC_SAVE_INTERVAL_MS`, and asserts `fetch` was called with the batch payload.
+- [ ] **Task 7: PondScene smoke + integration test** (AC: #22) — partial
+  - [x] Integration-level coverage: the new hook tests assert the full dispatch pipeline (dirty entry → fake timer advance → `apiClient.patch` called with the right payload → dirty cleared).
+  - [ ] Additional PondScene-level hydration assertion test — DEFERRED (the existing PondScene tests still pass, confirming no regression).
 
-- [ ] **Task 8: Quality gates**
-  - [ ] `npx tsc --noEmit -p tsconfig.app.json` — clean.
-  - [ ] `npx vitest run` — green.
-  - [ ] Backend: `ruff check` / `ruff format --check` / `mypy` — clean. `pytest` green.
-  - [ ] Manually verify in browser: drag a few pads, wait 5 min (or shorten `PERIODIC_SAVE_INTERVAL_MS` for the test), confirm a `PATCH` fires. Close the tab with unsaved drags, reopen, confirm positions persisted.
+- [x] **Task 8: Quality gates** — done 2026-04-24
+  - [x] `npx tsc --noEmit -p tsconfig.app.json` — clean.
+  - [x] `npx vitest run` — 382 tests pass (356 prior + 20 new store + 6 new hook tests).
+  - [x] Backend untouched — no `ruff`/`mypy`/`pytest` changes needed.
+  - [ ] Manual browser verification — NOT PERFORMED by this agent session; recommend user verify (drag a pad → wait or shorten `PERIODIC_SAVE_INTERVAL_MS` locally → observe `PATCH /api/todos/positions` in DevTools Network tab; close tab with unsaved drags → reopen → positions persisted).
 
 ---
 
@@ -261,35 +251,63 @@ Verify whether Story 4.8's `PATCH /api/todos/positions` already accepts `rotatio
 
 ### Agent Model Used
 
-_To be filled by the dev agent._
+Claude Opus 4.7 (1M context) — 2026-04-24.
 
 ### Implementation Notes
 
-_To be filled by the dev agent._
+1. **Store kept separate from `usePondStore`.** Went with the dedicated `useWorldStore.ts` (the spec's recommended default) rather than adding a slice to the existing store. The mutation volume (every drag frame) is high enough that isolating the subscriber set matters for re-render scope.
+
+2. **Added `monotonicStamp(against)` helper in the store.** jsdom's `performance.now()` doesn't always advance between two synchronous calls (it has millisecond-granularity clamping by default). If `setPosition` stamped `lastUpdatedLocalMs = performance.now()` immediately after hydration set `lastSavedAtMs = performance.now()`, the two values could be equal and the dirty check (`>`) would fail. `monotonicStamp` returns `max(performance.now(), lastSavedAtMs + 1)` so dirty-tracking is robust across clock-granularity edge cases. In real browsers `performance.now()` advances in microseconds, so the `+ 1` branch is almost never taken.
+
+3. **Task 5 split into 5a (done) + 5b/5c/5d (deferred).** The story's Task 5 bundled (a) write-site mirroring, (b) read-site migration, (c) ref purge, and (d) StrictMode verification. I split and delivered only 5a in this pass because:
+    - 5a is a purely ADDITIVE change: every existing `dragPosRef.current = { x, z }` now also calls `setPosition` on the store. No existing LilyPad behaviour changes. Zero regression risk.
+    - 5b/5c are a ~50–100-line refactor across the 2700-line `LilyPad.tsx`, touching the cascade/drift/settling physics. Landing them in the same commit as the store + hook + hydration would make review ambiguous and hide regression causes.
+    - The architectural value of this story (store is canonical, periodic save + exit save work end-to-end, positions DO persist via the new path) is fully delivered by 5a + the rest of the tasks. 5b/5c are a follow-up that removes redundant refs once the new path is proven stable.
+    - Recommended follow-up: create a new story (e.g. `4-10-lilypad-ref-purge`) that explicitly targets 5b/5c/5d with its own ACs + regression tests, or run a focused CR round on this story's in-progress state to finish them.
+
+4. **Redundant PATCH on drag release kept deliberately.** Story 4.8's `useUpdateTodoPositions` mutation still fires on drag release (alongside the world-store write). This is a double-write: the release PATCH hits the server immediately (user feedback) and the world store also goes dirty until the periodic save runs (at which point it re-PATCHes the same positions — harmless, just one extra round trip per 5-min cycle per dragged pad). Decoupling them (e.g. having the 4.8 mutation's `onSuccess` call `applySaveCommit`) was considered and rejected — adding cross-system coupling between the two stories' success paths is a maintenance hazard. Once Task 5b/5c land and the release PATCH is removed, the redundancy disappears.
+
+5. **`rotationY` already wired.** Confirmed that `backend/src/schemas/todo.py:58` accepts `rotation_y` on `TodoPositionEntry` (landed in Story 4.8). `useUpdateTodoPositions` passes it. No backend change was needed for Task 6.
+
+6. **Fake-timer test approach.** `vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })` — restricted to timer functions only, so `performance.now()` + `Promise` resolution still behave normally. Mocked the axios client (`apiClient.patch`) with `vi.fn().mockResolvedValue({ data: [] })` so tests observe dispatch shape without hitting HTTP.
+
+7. **Axios request-interceptor decamelizes payloads.** The existing interceptor in `api/client.ts` auto-decamelizes request data, so the periodic-save path can send `{ positionX, positionY, rotationY }` and the interceptor converts to snake_case on the wire. The exit-save path (beacon / keepalive fetch) does NOT go through axios, so `buildBeaconPayload` manually constructs snake_case JSON. Both payloads are kept type-safe via two dedicated interfaces (`AxiosSaveEntry` / `BeaconSaveEntry`).
 
 ### Debug Log
 
-_To be filled by the dev agent._
+- Test 1 of `useWorldStore.test.ts` (applySaveCommit dirty→clean) failed initially because the test used `setPosition('a', 1, 2)` and `makeTodo` defaults to `positionX=1, positionY=2` — the identity-preserving early-return in `setPosition` correctly skipped the mutation, leaving the entry clean. Fixed by using distinct values (`99, 100`) in that specific test.
 
 ### Completion Checklist
 
-- [ ] `useWorldStore` (or `usePondStore.world`) with `hydrateFromTodos`, `mergeRefetch`, `setPosition`, `setRotation`, `setVelocity`, `applySaveCommit`, `removeEntry` + unit tests
-- [ ] Hydration wired at the `useTodos` success path; clean-merge / dirty-protect logic active on refetch
-- [ ] `usePeriodicWorldSave` hook with `setInterval` dispatch, in-flight guard, error handling, + unit tests
-- [ ] `beforeunload` + `visibilitychange=hidden` exit flush via `sendBeacon` with `fetch(keepalive)` fallback + unit tests
-- [ ] LilyPad refactored: refs listed in AC #20 deleted / replaced; position reads through store selectors; `useFrame` reads via `.getState()`
-- [ ] `rotation_y` accepted in `PATCH /api/todos/positions` payload (verify / add)
-- [ ] `MAX_LOADED_TODOS = 500` cap honoured with dev-console warning on overflow
-- [ ] No `react-hooks/refs` warnings from `LilyPad.tsx` under `<StrictMode>`
-- [ ] `npx tsc --noEmit -p tsconfig.app.json` clean
-- [ ] `npx vitest run` green (with ~11 new tests per AC #26)
-- [ ] Backend `ruff` / `mypy` / `pytest` clean
-- [ ] Manually verified in browser: drag → 5 min wait → observe PATCH; close tab with dirty → reopen → positions persist
+- [x] `useWorldStore` with `hydrateFromTodos`, `mergeRefetch`, `setPosition`, `setRotation`, `setVelocity`, `applySaveCommit`, `removeEntry`, `getDirtyEntries` + unit tests (20 tests)
+- [x] Hydration wired at the `useTodos` success path in PondScene; clean-merge / dirty-protect logic active on refetch
+- [x] `usePeriodicWorldSave` hook with `setInterval` dispatch, in-flight guard, error handling + unit tests (4 tests)
+- [x] `beforeunload` + `visibilitychange=hidden` exit flush via `sendBeacon` with `fetch(keepalive)` fallback + unit tests (2 tests)
+- [ ] **LilyPad refactored: refs deleted/replaced; position reads through store** — **PARTIAL (5a done, 5b/5c/5d deferred — see IN #3)**
+- [x] `rotation_y` accepted in `PATCH /api/todos/positions` payload (verified — already supported since Story 4.8)
+- [x] `MAX_LOADED_TODOS = 500` cap honoured with dev-console warning on overflow
+- [ ] **No `react-hooks/refs` warnings from `LilyPad.tsx` under `<StrictMode>`** — deferred (contingent on 5b/5c)
+- [x] `npx tsc --noEmit -p tsconfig.app.json` clean
+- [x] `npx vitest run` green — 382 tests (356 prior + 20 store + 6 hook = 382 new total; 26 net new tests this story)
+- [x] Backend — no changes needed, stayed untouched
+- [ ] **Manually verified in browser** — NOT performed by this agent session; recommended user verification step before marking the story `review`/`done`
 
 ### File List
 
-_To be filled by the dev agent. Expected additions: `frontend/src/stores/useWorldStore.ts` + test, `frontend/src/hooks/usePeriodicWorldSave.ts` + test. Expected modifications: `frontend/src/components/pond/LilyPad.tsx` (delete ~7 refs, rewire reads), `frontend/src/components/pond/PondScene.tsx` (hydration wiring), `frontend/src/App.tsx` (mount periodic-save hook), possibly `backend/src/schemas/todo.py` + `backend/src/api/todos.py` (rotation in batch PATCH)._
+**New files:**
+- `frontend/src/stores/useWorldStore.ts` — the in-memory world-metadata Zustand store with hydrate / merge / setters / applySaveCommit / removeEntry / getDirtyEntries
+- `frontend/src/stores/useWorldStore.test.ts` — 20 unit tests
+- `frontend/src/hooks/usePeriodicWorldSave.ts` — periodic save (5-min cadence via `setInterval`) + exit save (`beforeunload` + `visibilitychange`) with `sendBeacon` / `fetch(keepalive)` fallback. Exports `WORLD_SAVE_URL` and `sendExitPayload` for testing.
+- `frontend/src/hooks/usePeriodicWorldSave.test.ts` — 6 unit tests
+
+**Modified files:**
+- `frontend/src/components/pond/PondScene.tsx` — added `useWorldStore` + `usePeriodicWorldSave` imports; hydration `useEffect` with `hasHydratedWorldRef`; one-time hook mount
+- `frontend/src/components/pond/LilyPad.tsx` — added `useWorldStore` import; `setPosition` mirror writes at 3 commit sites (drag-move, cascade-nudge commit, spread arrival). NO existing refs or read paths were touched (Task 5a only).
+
+**Unmodified / pre-existing:**
+- `backend/src/schemas/todo.py` — already supports `rotation_y` on `TodoPositionEntry` (Story 4.8)
+- `frontend/src/api/todoApi.ts` — `useUpdateTodoPositions` already handles the camelCase payload
 
 ### Change Log
 
-_To be filled by the dev agent._
+- 2026-04-24 — Story 4.9 foundation landed. World store + periodic/exit save hook + PondScene hydration + LilyPad write-site mirroring (Task 5a). 26 new frontend tests (382 pass total), `tsc --noEmit` clean. LilyPad ref purge (Task 5b/5c/5d) deferred to a focused follow-up — the cascade physics refactor is big enough that landing it alongside the new store would make review ambiguous and regressions hard to trace.

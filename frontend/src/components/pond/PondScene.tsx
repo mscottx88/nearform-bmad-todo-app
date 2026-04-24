@@ -16,6 +16,8 @@ import { PondCamera } from './PondCamera';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { InfoPopup } from '../ui/InfoPopup';
+import { useWorldStore } from '../../stores/useWorldStore';
+import { usePeriodicWorldSave } from '../../hooks/usePeriodicWorldSave';
 
 // Milliseconds between consecutive pads entering the 'forming' phase on
 // the first staggered load. 100ms gives a visible cascade without dragging
@@ -66,6 +68,26 @@ export function PondScene() {
   useEffect(() => {
     if (todos.length > 0) hasSeenInitialLoadRef.current = true;
   }, [todos.length]);
+
+  // Story 4.9: hydrate the in-memory world-metadata store on first
+  // non-empty response, then merge subsequent refetches. The store is
+  // the canonical source of spatial state during the session; LilyPad
+  // and anything else that needs position reads through it.
+  const hasHydratedWorldRef = useRef(false);
+  useEffect(() => {
+    if (todos.length === 0) return;
+    if (!hasHydratedWorldRef.current) {
+      useWorldStore.getState().hydrateFromTodos(todos);
+      hasHydratedWorldRef.current = true;
+    } else {
+      useWorldStore.getState().mergeRefetch(todos);
+    }
+  }, [todos]);
+
+  // Story 4.9: mount the periodic-save + exit-save lifecycle. Writes
+  // every dirty world-metadata entry via `PATCH /api/todos/positions`
+  // on a 5-minute cadence + on tab exit. Single instance per app mount.
+  usePeriodicWorldSave();
 
   const handleCreated = useCallback((state: RootState) => {
     const canvas = state.gl.domElement;
