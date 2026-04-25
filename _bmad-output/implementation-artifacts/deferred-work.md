@@ -259,5 +259,23 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` Worker-thread `update_message` failures other than `ChatMessageNotFoundError` bubble unhandled — daemon thread dies with traceback to stderr, no DB record. Add a final fallback that logs and exits gracefully. (backend/src/api/agent.py `_run_and_finalise`)
 - `[OPEN]` `body.skill` only accepts exact lowercase matches — no `strip()` / `lower()` normalisation. Asymmetric with the whitespace-only validator on `content`. (backend/src/schemas/agent.py)
 - `[OPEN]` `lifespan` is `async def` for FastAPI's framework contract; the agent-key warning addition perpetuates the async surface (body remains sync). Constitutional principle holds; flag if FastAPI ever offers a sync-only lifespan API. (backend/src/main.py)
+
+### Group E — tests
+
+- `[OPEN]` Strict `MagicMock(spec=...)` adoption across all tool unit tests — large refactor; bogus method calls currently succeed silently. (backend/tests/agent/test_tools.py)
+- `[OPEN]` `q.empty()` drain anti-pattern in `TestRunCrew` — works under the current single-threaded test layout; revisit if `run_crew` gains concurrency. (backend/tests/agent/test_crew_runner.py)
+- `[OPEN]` `test_list_sessions_ordered_by_updated_at_desc` flakes when both sessions land in the same `func.now()` tick. Add an `id` tiebreaker to the `list_sessions` ORDER BY when CI surfaces it. (backend/src/services/chat_service.py `list_sessions`, backend/tests/services/test_chat_service.py)
+- `[OPEN]` `_CANCEL_MAP_LOCK` contention is never exercised — removing the locks would not fail any current test. Needs a threading-test pattern. (backend/src/api/agent.py)
+- `[OPEN]` AC 9 strict word-group size (2-5) is not asserted — `random.randint` makes single-run assertions flaky; needs a histogram or RNG-injection point. (backend/src/agent/crew_runner.py `_chunk_words`)
+- `[OPEN]` `time.sleep` is patched in `TestRunCrew` but not asserted-called — a regression that drops the sleep entirely would pass tests. Add `mock_sleep.assert_called()` when a regression slips through. (backend/tests/agent/test_crew_runner.py)
+- `[OPEN]` AC 9 `thought` / `tool_call` / `tool_result` events bypass-delay rule — not emitted by current skills, defer until a skill emits them. (backend/src/agent/crew_runner.py)
+- `[OPEN]` `Thread.start` failure scenario in chat handler — add when an OS-thread-limit test pattern is established. (backend/src/api/agent.py)
+- `[OPEN]` Standalone unit test of `_classify_intent` — covered indirectly via integration tests; defer until a regression demands it. (backend/src/api/agent.py)
+- `[OPEN]` `_run_and_finalise` finally-block branches (session_events None path, non-empty after pop) are not covered — add once cancellation is fully wired (Group C D-23). (backend/src/api/agent.py)
+- `[OPEN]` `client` fixture overrides `get_db` to share `db_session` with the test — masks bugs where the API endpoint forgets to commit; refactor to per-request Session if it bites. (backend/tests/conftest.py)
+- `[OPEN]` AC 9 ambiguity around 1-word inputs — spec says 2-5; behaviour for "yes." (1 word) is implementation-defined. Defer until the spec disambiguates. (backend/_bmad-output/implementation-artifacts/6-1-agent-foundation.md)
+- `[OPEN]` `test_chat_returns_event_stream` doesn't iterate the stream body — would need `httpx.stream()` instead of `client.post()`. The framing tests live in `test_crew_runner.py` instead. (backend/tests/api/test_agent.py)
+- `[OPEN]` Hard-coded `2026-01-01` timestamps in test fixtures — cosmetic. (backend/tests/agent/test_tools.py)
+- `[OPEN]` AC 1 migration round-trip is a manual deploy gate per Story DoD, not a unit test. (backend/migrations/versions/0001_schema.py)
 </content>
 </invoke>

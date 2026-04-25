@@ -585,6 +585,37 @@ Wire the router into [backend/src/main.py](backend/src/main.py): `from src.api.a
 - [x] [Review][Defer] `body.skill` accepts only exact lowercase matches — no `strip()`/`lower()` normalisation. Asymmetric with the whitespace-only validator on `content`.
 - [x] [Review][Defer] `lifespan` is `async def` for FastAPI's framework contract — pre-existing; the warning addition perpetuates it. Constitutional principle is "body must be sync", which holds.
 
+### Review Findings (Group E — tests) — 2026-04-24
+
+- [x] [Review][Patch] Added `TestCancelChat` covering P23 — cancel session A leaves session B's events untouched, idempotent on unknown session, pops the session entry from `_CANCEL_MAP` [backend/tests/api/test_agent.py]
+- [x] [Review][Patch] Added `TestFinaliseAssistantMessage` (P24 + P28) — extracted `_run_and_finalise`'s body to a module-level `finalise_assistant_message(...)` so the success / failure / row-vanished branches are unit-testable. Tests assert `content=prose, status='complete'` on success, `content='Agent run failed.', status='failed', error=raw_text` on failure (with explicit "no exception leak into content"), and that a missing row is logged not raised [backend/src/api/agent.py, backend/tests/api/test_agent.py]
+- [x] [Review][Patch] Added `TestGetSessionDetail` (P29) — happy path + 404 envelope shape [backend/tests/api/test_agent.py]
+- [x] [Review][Patch] Added test for `body.skill == "intent_classifier"` rejection (P25) — returns 400 with `error == "invalid_skill"` [backend/tests/api/test_agent.py]
+- [x] [Review][Patch] Added `_chunk_words` multi-line tests — assert `"\n"` chunk appears between line groups, blank-line emits two consecutive `"\n"` chunks (P18) [backend/tests/agent/test_crew_runner.py]
+- [x] [Review][Patch] Added empty-prose test — `crew.kickoff()` returning whitespace-only emits `agent_empty_response` error event with no `done`, `CrewResult(success=False, prose="")` (P20) [backend/tests/agent/test_crew_runner.py]
+- [x] [Review][Patch] All three `TestRunCrew` tests now assert the `CrewResult` return value (success / failure / empty paths) — was previously discarded [backend/tests/agent/test_crew_runner.py]
+- [x] [Review][Patch] `update_message` raise-on-missing-row test (P7) [backend/tests/services/test_chat_service.py]
+- [x] [Review][Patch] `list_messages` limit clamp tests — `limit=10**7` → real row count, `limit=0` → at least 1 row (P11) [backend/tests/services/test_chat_service.py]
+- [x] [Review][Patch] `update_message` bumps parent session's `updated_at` test (P14) — uses a small `time.sleep` so the timestamp delta is observable [backend/tests/services/test_chat_service.py]
+- [x] [Review][Patch] New `tests/agent/test_system_prompt.py` — asserts the AC 8 verbatim untrusted-data sentence is present in `BASE_SYSTEM_PROMPT` and the prompt is ≤ 200 words [backend/tests/agent/test_system_prompt.py]
+- [x] [Review][Patch] New `tests/test_bounded_context.py` — walks `src/agent/**/*.py` to assert no `from src.api` imports, and walks `src/**/*.py` to assert only `src/api/agent.py` may import `src.agent` (AC 6 + DoD) [backend/tests/test_bounded_context.py]
+
+- [x] [Review][Defer] Strict `MagicMock(spec=...)` adoption across all tool tests — large refactor; revisit when test brittleness becomes a real cost.
+- [x] [Review][Defer] `q.empty()` drain anti-pattern in `TestRunCrew` — works under current single-threaded test layout; revisit if concurrency leaks in.
+- [x] [Review][Defer] `test_list_sessions_ordered_by_updated_at_desc` flakes when both sessions land in the same `func.now()` tick — add an `id` tiebreaker to the `list_sessions` ORDER BY when CI surfaces it.
+- [x] [Review][Defer] `_CANCEL_MAP_LOCK` contention is not exercised by any test — needs threading-test infrastructure.
+- [x] [Review][Defer] AC 9 strict word-group size (2-5) not asserted — `random.randint` makes single-run assertions flaky; needs a histogram or determinism injection.
+- [x] [Review][Defer] `time.sleep` patched but not asserted-called across `TestRunCrew` — weak assertion. Add `mock_sleep.assert_called()` once a regression actually slips through.
+- [x] [Review][Defer] AC 9 `thought` / `tool_call` / `tool_result` events bypass-delay rule — not emitted by current skills, defer until a skill does.
+- [x] [Review][Defer] `Thread.start` failure scenario in chat handler — add when an OS-thread-limit test pattern is established.
+- [x] [Review][Defer] Standalone unit test of `_classify_intent` — covered indirectly via `TestFinaliseAssistantMessage` and the integration tests; defer until a regression demands it.
+- [x] [Review][Defer] `_run_and_finalise` finally-block clean-up branches (already-popped, non-empty after pop) — add when the cancellation flow gets fully wired (D-23).
+- [x] [Review][Defer] `client` fixture's `get_db` override shares one Session — masks "API forgot to commit" bugs; refactor to per-request Session if it bites.
+- [x] [Review][Defer] AC 9 ambiguity around 1-word inputs (the spec says 2-5; what about a 1-word reply?) — defer until the spec disambiguates.
+- [x] [Review][Defer] `test_chat_returns_event_stream` doesn't iterate the stream body — would need `httpx.stream()` instead of `client.post()`.
+- [x] [Review][Defer] Hard-coded `2026-01-01` timestamps in fixtures — cosmetic.
+- [x] [Review][Defer] AC 1 migration round-trip is a manual deploy gate per Story DoD, not a unit test.
+
 ---
 
 ## Dev Notes

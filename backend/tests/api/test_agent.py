@@ -100,3 +100,175 @@ class TestChatEndpoint:
             json={"content": "hello"},
         )
         assert resp.status_code == 404
+
+    # Story 6.1 CR Group E TP4: P25 internal-skill rejection.
+    def test_chat_intent_classifier_skill_returns_400(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        session = chat_service.create_session(db_session)
+        resp = client.post(
+            f"/api/agent/sessions/{session.id}/chat",
+            json={"content": "hi", "skill": "intent_classifier"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "invalid_skill"
+
+
+# Story 6.1 CR Group E TP3: P29 GET /sessions/{id} endpoint.
+class TestGetSessionDetail:
+    def test_returns_session(self, client: TestClient, db_session: Session) -> None:
+        session = chat_service.create_session(db_session)
+        resp = client.get(f"/api/agent/sessions/{session.id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(session.id)
+        assert body["title"] is None
+
+    def test_404_when_missing(self, client: TestClient) -> None:
+        resp = client.get(f"/api/agent/sessions/{uuid.uuid4()}")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"] == "not_found"
+
+
+# Story 6.1 CR Group E TP1: P23 cancel_chat session-scoped semantics.
+# Tests touch the module-level _CANCEL_MAP directly because the public
+# cancel handler doesn't otherwise expose its before/after state.
+class TestCancelChat:
+    def _seed_cancel_entries(
+        self, session_id: str, msg_ids: list[str]
+    ) -> dict[str, "object"]:
+        import threading  # noqa: PLC0415
+
+        from src.api.agent import _CANCEL_MAP, _CANCEL_MAP_LOCK  # noqa: PLC0415
+
+        events = {mid: threading.Event() for mid in msg_ids}
+        with _CANCEL_MAP_LOCK:
+            _CANCEL_MAP.setdefault(session_id, {}).update(events)
+        return events  # type: ignore[return-value]
+
+    def _clear_map(self) -> None:
+        from src.api.agent import _CANCEL_MAP, _CANCEL_MAP_LOCK  # noqa: PLC0415
+
+        with _CANCEL_MAP_LOCK:
+            _CANCEL_MAP.clear()
+
+    def test_cancel_only_affects_target_session(self, client: TestClient) -> None:
+        # The whole point of P23: cancelling session A must NOT fire
+        # session B's events. Previously cancel_chat iterated the
+        # global map.
+        self._clear_map()
+        sa = str(uuid.uuid4())
+        sb = str(uuid.uuid4())
+        events_a = self._seed_cancel_entries(sa, [str(uuid.uuid4())])
+        events_b = self._seed_cancel_entries(sb, [str(uuid.uuid4())])
+
+        resp = client.post(f"/api/agent/sessions/{sa}/cancel")
+        assert resp.status_code == 202
+
+        # All of A's events fired:
+        for ev in events_a.values():
+            assert ev.is_set()  # type: ignore[attr-defined]
+        # None of B's events fired:
+        for ev in events_b.values():
+            assert not ev.is_set()  # type: ignore[attr-defined]
+
+        self._clear_map()
+
+    def test_cancel_unknown_session_is_idempotent(self, client: TestClient) -> None:
+        self._clear_map()
+        resp = client.post(f"/api/agent/sessions/{uuid.uuid4()}/cancel")
+        assert resp.status_code == 202
+
+    def test_cancel_pops_session_entry(self, client: TestClient) -> None:
+        from src.api.agent import _CANCEL_MAP  # noqa: PLC0415
+
+        self._clear_map()
+        sa = str(uuid.uuid4())
+        self._seed_cancel_entries(sa, [str(uuid.uuid4())])
+        assert sa in _CANCEL_MAP
+
+        client.post(f"/api/agent/sessions/{sa}/cancel")
+        assert sa not in _CANCEL_MAP
+
+        self._clear_map()
+
+
+# Story 6.1 CR Group E TP2: finalise_assistant_message helper for P24+P28.
+# Driven directly (no thread, no API) so each branch is observable.
+class TestFinaliseAssistantMessage:
+    def test_success_path_writes_complete_status_and_prose(
+        self, db_session: Session
+    ) -> None:
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="",
+            status="pending",
+        )
+
+        finalise_assistant_message(
+            msg.id,
+            "chat",
+            CrewResult(success=True, prose="here is the answer", error=None),
+        )
+
+        rows = chat_service.list_messages(db_session, session.id)
+        assert rows[0].content == "here is the answer"
+        assert rows[0].status == "complete"
+        assert rows[0].skill == "chat"
+        assert rows[0].error is None
+
+    def test_failure_path_writes_generic_content_and_raw_error(
+        self, db_session: Session
+    ) -> None:
+        # P28: the EXC string must NOT leak into `content` (could carry
+        # API key / prompt). Generic "Agent run failed." in `content`;
+        # raw error text only into `error`.
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="",
+            status="pending",
+        )
+
+        finalise_assistant_message(
+            msg.id,
+            "chat",
+            CrewResult(
+                success=False,
+                prose="",
+                error="anthropic api error: sk-ant-leaked-key",
+            ),
+        )
+
+        rows = chat_service.list_messages(db_session, session.id)
+        assert rows[0].content == "Agent run failed."
+        assert rows[0].status == "failed"
+        assert rows[0].error == "anthropic api error: sk-ant-leaked-key"
+        # P28 contract: the raw error string must NOT appear in content.
+        assert "sk-ant-leaked-key" not in rows[0].content
+
+    def test_vanished_message_is_logged_not_raised(self, db_session: Session) -> None:
+        # If the assistant row was deleted mid-stream (e.g. delete_session
+        # cascaded), update_message raises ChatMessageNotFoundError; the
+        # helper must catch it and log instead of bubbling.
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        # Pass a UUID that doesn't exist in the DB; should NOT raise.
+        finalise_assistant_message(
+            uuid.uuid4(),
+            "chat",
+            CrewResult(success=True, prose="x", error=None),
+        )

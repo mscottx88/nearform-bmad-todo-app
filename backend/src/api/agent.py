@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from src.agent.crew_runner import run_crew, stream_sse
+from src.agent.crew_runner import CrewResult, run_crew, stream_sse
 from src.agent.llm import get_llm_for_agent
 from src.agent.skills.registry import SKILL_REGISTRY, SkillContext
 from src.database import SessionLocal, get_db
@@ -42,6 +42,50 @@ _CANCEL_MAP_LOCK = threading.Lock()
 # intent classifier is registered for `_classify_intent` to use; exposing
 # it as a user-facing skill leaks an internal routing primitive.
 _INTERNAL_SKILLS: frozenset[str] = frozenset({"intent_classifier"})
+
+
+def finalise_assistant_message(
+    assistant_msg_id: uuid.UUID,
+    resolved_skill: str,
+    result: CrewResult,
+) -> None:
+    """Write the final assistant DB row based on the run_crew CrewResult.
+
+    Extracted as a module-level function (Story 6.1 CR Group E TP2) so
+    the success / failure / row-vanished branches can be unit-tested
+    without driving the full chat handler. Called from inside the worker
+    thread spawned by `chat()` and bypasses the request-scoped session
+    by opening its own `SessionLocal()`.
+
+    P24: handles success path (update with content=prose, status=complete).
+    P28: failure path writes generic 'Agent run failed.' into the
+    user-visible content column; raw exception text only goes into the
+    `error` column.
+    """
+    try:
+        with SessionLocal() as session:
+            if result.success:
+                chat_service.update_message(
+                    session,
+                    assistant_msg_id,
+                    content=result.prose,
+                    status="complete",
+                    skill=resolved_skill,
+                )
+            else:
+                chat_service.update_message(
+                    session,
+                    assistant_msg_id,
+                    content="Agent run failed.",
+                    status="failed",
+                    skill=resolved_skill,
+                    error=result.error,
+                )
+    except ChatMessageNotFoundError:
+        logger.warning(
+            "assistant message %s vanished during finalisation",
+            assistant_msg_id,
+        )
 
 
 @router.post("/sessions", response_model=ChatSessionResponse)
@@ -122,40 +166,9 @@ def chat(
     )
 
     def _run_and_finalise() -> None:
-        # Story 6.1 CR P24: wrapper now handles BOTH success and failure
-        # finalisation by inspecting the CrewResult that run_crew returns.
-        # Previously the success path was an unimplemented TODO and rows
-        # stayed `status='pending'` with empty content forever.
         try:
             result = run_crew(ctx, resolved_skill)
-            try:
-                with SessionLocal() as session:
-                    if result.success:
-                        chat_service.update_message(
-                            session,
-                            assistant_msg_id,
-                            content=result.prose,
-                            status="complete",
-                            skill=resolved_skill,
-                        )
-                    else:
-                        # Story 6.1 CR P28: don't leak `str(exc)` (which can
-                        # contain prompts / API keys) into the user-visible
-                        # `content` column. Generic message there; raw error
-                        # text only into `error`.
-                        chat_service.update_message(
-                            session,
-                            assistant_msg_id,
-                            content="Agent run failed.",
-                            status="failed",
-                            skill=resolved_skill,
-                            error=result.error,
-                        )
-            except ChatMessageNotFoundError:
-                logger.warning(
-                    "assistant message %s vanished during finalisation",
-                    assistant_msg_id,
-                )
+            finalise_assistant_message(assistant_msg_id, resolved_skill, result)
         finally:
             with _CANCEL_MAP_LOCK:
                 session_events = _CANCEL_MAP.get(session_key)

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from src.agent.crew_runner import (
     AGENT_CHUNK_DELAY_MS,
+    CrewResult,
     _chunk_words,
     run_crew,
     stream_sse,
@@ -37,6 +38,26 @@ class TestChunkWords:
         chunks = _chunk_words("hello")
         assert chunks == ["hello"]
 
+    # Story 6.1 CR Group E TP5: P18 paragraph preservation.
+    def test_preserves_line_breaks_with_newline_chunks(self) -> None:
+        chunks = _chunk_words("first line here\nsecond line here")
+        # The "\n" chunk must appear between the two lines.
+        assert "\n" in chunks
+        nl_idx = chunks.index("\n")
+        # Words from the first line precede the newline; words from the
+        # second line follow it.
+        before = " ".join(chunks[:nl_idx])
+        after = " ".join(c for c in chunks[nl_idx + 1 :] if c != "\n")
+        assert before == "first line here"
+        assert after == "second line here"
+
+    def test_preserves_blank_line_between_paragraphs(self) -> None:
+        # `"a\n\nb"` produces three lines: "a", "", "b". The empty line
+        # contributes no word chunks, but TWO "\n" separator chunks
+        # mark the blank-line boundary.
+        chunks = _chunk_words("a\n\nb")
+        assert chunks.count("\n") == 2
+
 
 def _mock_skill(crew: MagicMock) -> MagicMock:
     spec = MagicMock()
@@ -58,7 +79,12 @@ class TestRunCrew:
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep"),
         ):
-            run_crew(ctx, "chat")
+            result = run_crew(ctx, "chat")
+
+        # Story 6.1 CR Group E TP7: assert the CrewResult contract.
+        assert result.success is True
+        assert result.prose == prose
+        assert result.error is None
 
         events: list[dict | None] = []
         while not q.empty():
@@ -119,7 +145,12 @@ class TestRunCrew:
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep"),
         ):
-            run_crew(ctx, "chat")
+            result = run_crew(ctx, "chat")
+
+        # TP7: CrewResult on the error path.
+        assert result.success is False
+        assert result.prose == ""
+        assert result.error == "boom"
 
         events = []
         while not q.empty():
@@ -128,6 +159,45 @@ class TestRunCrew:
         error_events = [e for e in events if e is not None and e.get("type") == "error"]
         assert len(error_events) == 1
         assert error_events[0]["code"] == "agent_crew_failed"
+        assert events[-1] is None
+
+    # Story 6.1 CR Group E TP6: P20 empty-prose path.
+    def test_empty_prose_emits_agent_empty_response_error(self) -> None:
+        q: queue.Queue[dict | None] = queue.Queue()
+        ctx = _make_ctx(q)
+
+        mock_crew = MagicMock()
+        mock_crew.kickoff.return_value = "   "  # whitespace only → strip → ""
+
+        registry = {"chat": _mock_skill(mock_crew)}
+        with (
+            patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
+            patch("src.agent.crew_runner.time.sleep"),
+        ):
+            result = run_crew(ctx, "chat")
+
+        # TP7: CrewResult on the empty-prose path is a failure.
+        assert isinstance(result, CrewResult)
+        assert result.success is False
+        assert result.prose == ""
+        assert result.error == "agent returned no content"
+
+        events = []
+        while not q.empty():
+            events.append(q.get())
+
+        # Exactly one error event with the expected code, then None.
+        error_events = [
+            e for e in events if isinstance(e, dict) and e.get("type") == "error"
+        ]
+        assert len(error_events) == 1
+        assert error_events[0]["code"] == "agent_empty_response"
+        # No `done` event on the empty path.
+        done_events = [
+            e for e in events if isinstance(e, dict) and e.get("type") == "done"
+        ]
+        assert done_events == []
+        # Sentinel terminates the stream.
         assert events[-1] is None
 
 

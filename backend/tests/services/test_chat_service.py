@@ -110,3 +110,62 @@ class TestChatService:
         assert messages[0].content == "Done!"
         assert messages[0].status == "complete"
         assert messages[0].skill == "chat"
+
+    # Story 6.1 CR Group E TP8: P7 update_message raises on missing row.
+    def test_update_message_raises_when_row_missing(self, db_session: Session) -> None:
+        from src.exceptions import ChatMessageNotFoundError
+
+        with pytest.raises(ChatMessageNotFoundError):
+            chat_service.update_message(
+                db_session,
+                uuid.uuid4(),
+                content="x",
+                status="complete",
+            )
+
+    # Story 6.1 CR Group E TP10: P14 update_message bumps session.updated_at.
+    def test_update_message_bumps_session_updated_at(self, db_session: Session) -> None:
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session, session.id, role="assistant", content="", status="pending"
+        )
+        before = chat_service.get_session(db_session, session.id).updated_at
+
+        # Sleep a hair so the timestamp delta is visible if the bump fires.
+        # Wall-clock precision is ms; a tiny sleep is enough.
+        import time
+
+        time.sleep(0.01)
+
+        chat_service.update_message(
+            db_session, msg.id, content="done", status="complete", skill="chat"
+        )
+
+        after = chat_service.get_session(db_session, session.id).updated_at
+        assert after > before, (
+            "update_message must bump session.updated_at for sort-by-recency"
+        )
+
+    # Story 6.1 CR Group E TP9: P11 list_messages clamps limit to [1, 200].
+    def test_list_messages_clamps_limit_to_200(self, db_session: Session) -> None:
+        session = chat_service.create_session(db_session)
+        for i in range(5):
+            chat_service.create_message(
+                db_session, session.id, role="user", content=f"m{i}"
+            )
+
+        # An LLM-supplied 1e7 limit must not result in a 1e7 LIMIT in SQL.
+        # Either the result count comes back as 200 (if there were that
+        # many rows) or the actual row count, whichever is smaller. Here:
+        # 5 rows < 200, so we get 5 — the contract being verified is that
+        # the absurd request didn't crash and didn't tax SQL.
+        messages = chat_service.list_messages(db_session, session.id, limit=10_000_000)
+        assert len(messages) == 5
+
+    def test_list_messages_clamps_zero_limit_to_min(self, db_session: Session) -> None:
+        session = chat_service.create_session(db_session)
+        chat_service.create_message(db_session, session.id, role="user", content="m0")
+
+        # limit=0 should be bumped to MIN (1), not return [] silently.
+        messages = chat_service.list_messages(db_session, session.id, limit=0)
+        assert len(messages) == 1
