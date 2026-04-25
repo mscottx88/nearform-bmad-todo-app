@@ -442,14 +442,20 @@ export function InfoPopup({
               editor lets the user drag to grow/shrink the region. */}
           {editing ? (
             <div className="info-popup__editor-wrap" onWheel={handleScrollableWheel}>
+              {/* Persistent keyboard-hint banner. Was briefly a
+                  NeonTooltip wrapping the textbox, but the tooltip's
+                  default `display: inline-flex` wrapper collapsed
+                  the textbox to its content width. A permanent
+                  banner is also clearer UX — the shortcut info is
+                  visible without the user having to hover to
+                  discover it. */}
+              <span className="info-popup__editor-hint" aria-hidden="true">
+                enter to save · shift+enter for new line · esc to cancel
+              </span>
               {/* Textarea scrolls natively (overflow-y: auto). The
                   shared NeonScrollbar in overlay mode drives its thumb
                   against the textarea's scrollTop / scrollHeight — no
                   bespoke thumb math here. */}
-              <NeonTooltip
-                text="enter to save · shift+enter for new line · esc to cancel"
-                placement="top"
-              >
               <div
                 className="info-popup__editor-textbox"
                 style={{ height: editorHeight }}
@@ -496,7 +502,6 @@ export function InfoPopup({
                   onThumbDrag={onDragAffordanceDrag}
                 />
               </div>
-              </NeonTooltip>
               <div
                 className="info-popup__editor-resize"
                 onMouseDown={handleEditorResizeStart}

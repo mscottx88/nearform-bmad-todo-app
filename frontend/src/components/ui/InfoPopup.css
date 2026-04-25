@@ -234,6 +234,24 @@
   gap: 4px;
 }
 
+/*
+ * Keyboard-shortcut hint sitting above the editor textarea while in
+ * edit mode. Same neon-mono micro-text style as the other hint
+ * banners (AgentComposer, TodoInput) so the visual language is
+ * consistent across all three keyboard-driven inputs.
+ */
+.info-popup__editor-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(0, 238, 255, 0.5);
+  text-shadow: 0 0 4px rgba(0, 238, 255, 0.3);
+  pointer-events: none;
+  user-select: none;
+  text-align: center;
+}
+
 /* Container div holding textarea + neon overlay. Height is set via
    inline style (editorHeight). overflow:hidden keeps the container
    clean; the textarea scrolls internally. */
