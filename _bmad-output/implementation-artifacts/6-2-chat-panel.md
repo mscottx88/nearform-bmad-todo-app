@@ -459,15 +459,23 @@ events with the persisted message row without it.
   and before building the `SkillContext` for the worker thread:
   ```python
   _HISTORY_WINDOW = 20
-  raw_history = chat_service.list_messages(
-      db, session_id, limit=_HISTORY_WINDOW
+  # Spec deviation reconciled in Group A code review (D6, choice C):
+  # `list_messages` is ASC + LIMIT, which silently returns the OLDEST
+  # N rows when the session has more than `limit` messages — the
+  # exact opposite of what we want for a sliding context window.
+  # Use `chat_service.list_recent_messages` (DESC + reverse → latest
+  # N in chronological order) instead. Original `list_messages`
+  # remains the right choice for endpoints that want the full
+  # earliest-first transcript (e.g. `GET /messages`).
+  raw_history = chat_service.list_recent_messages(
+      db, session_id, limit=_HISTORY_WINDOW * 4  # P2: larger buffer
   )
   history = tuple(
       m for m in raw_history
       if m.status == "complete"
       and m.role in ("user", "assistant")
-      and m.id != assistant_msg_id
-  )
+      and m.id not in {user_msg_id, assistant_msg_id}
+  )[-_HISTORY_WINDOW:]
   ```
   Pass `history=history` into the `SkillContext(...)` constructor.
 - [x] **Do not pass history to the classifier.** `_classify_intent`
@@ -906,8 +914,26 @@ naturally. No special handling needed.
   latest message: <ctx.user_message>"` when history is non-empty;
   empty history is a passthrough.
 
-**Backend (out-of-story-but-blocking)** — two Story 6.1 bugs surfaced
-when the chat path was finally exercised end-to-end:
+**Backend (out-of-story-but-permitted)** — two Story 6.1 bugs surfaced
+when the chat path was finally exercised end-to-end, plus a small
+agent-prompt addition that enables the frontend's `[label](todo://uuid)`
+link rendering and a low-risk readability refactor:
+
+- `agent/system_prompt.py` gained a `REFERENCING TODOS` directive
+  instructing the agent to render todo references as
+  `[<short label>](todo://<uuid>)` markdown links. The frontend
+  `TodoLink` component (Group C) parses this format on the chunk
+  stream to render hover-to-pad and click-to-pad affordances. Without
+  the system-prompt directive the agent emits bare UUIDs or
+  freeform prose and the link UX is unreachable. Reconciled with the
+  spec via Group A code review D2 (choice A: keep + amend spec).
+- `agent/skills/intent_classifier.py` had its prompt template
+  refactored to use `textwrap.dedent` block strings (consistent with
+  the chat skill). Behaviorally equivalent — same prompt content,
+  same untrusted-data framing — purely a readability win. Group A
+  code review D5 (choice A: keep + amend spec).
+
+The two original Story-6.1 bugs:
 
 - `agent/llm.py` switched from LangChain's `ChatAnthropic` to
   CrewAI's native `LLM`. CrewAI 1.0+ wraps non-native LLM objects via
@@ -1073,6 +1099,15 @@ when the chat path was finally exercised end-to-end:
 - `backend/src/services/chat_service.py` — new
   `list_recent_messages` (DESC + LIMIT + reverse) for the most-
   recent-N context window.
+- `backend/src/agent/system_prompt.py` — added a `REFERENCING TODOS`
+  directive so the agent renders todo references as
+  `[<short label>](todo://<uuid>)` markdown links, which the
+  frontend `TodoLink` parser depends on. Reconciled in Group A code
+  review (D2 / choice A: keep + amend spec).
+- `backend/src/agent/skills/intent_classifier.py` — prompt template
+  refactored to use `textwrap.dedent` block strings (consistent with
+  the chat skill). Behaviorally equivalent. Reconciled in Group A
+  code review (D5 / choice A: keep + amend spec).
 - `backend/tests/agent/test_crew_runner.py` — pass
   `assistant_message_id` to `run_crew` in three tests; assert
   `message_id` in start event.
@@ -1080,6 +1115,47 @@ when the chat path was finally exercised end-to-end:
   long-session most-recent-N test.
 - `backend/tests/services/test_chat_service.py` — three
   `list_recent_messages` tests.
+
+---
+
+### Review Findings — Group A (Backend) — 2026-04-25
+
+**Layers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (full mode)
+**Diff:** `b873531..HEAD` filtered to backend (14 files, ~2000 lines)
+
+#### Decision-needed (6)
+
+- [x] [Review][Decision] Prompt-injection framing in chat skill's transcript block — `_format_task_description` interpolates raw `role: content` lines with no untrusted-data framing or role fencing. The classifier wraps user input with `_CLASSIFIER_UNTRUSTED_DATA_FRAMING`; the chat skill's task description does not. Crafted prior assistant/user content can inject fake turns. Decision: add classifier-style framing block, structured fences (`<message role="...">…</message>`), or accept the system-prompt-level "treat history as untrusted" warning as sufficient. [`backend/src/agent/skills/chat.py:30-44`]
+- [x] [Review][Decision] Out-of-spec `system_prompt.py` directive: `REFERENCING TODOS` block telling the LLM to render todo references as `[label](todo://<uuid>)`. Not in Tasks 1/1b, not in Dev Notes' permitted-gap list, not in File List. Decision: keep + amend spec (treat as AC-11/12 enabler for frontend `TodoLink`), or revert. [`backend/src/agent/system_prompt.py:326-362`]
+- [x] [Review][Decision] `_chunk_words` collapses internal whitespace runs (`line.split()` then `" ".join`) — destroys code-block indentation and multi-space prose. Decision: special-case fenced blocks (stream verbatim), accept the limitation as a known constraint, or normalize to single-space deliberately. [`backend/src/agent/crew_runner.py:70-79`]
+- [x] [Review][Decision] Concurrent `chat()` calls for the same session race on `excluded_ids`-based history filtering — request A's history may include request B's just-committed user row with no assistant reply yet (B's assistant is `pending`, filtered out). Decision: per-session lock for the create-message + read-history block, document as "don't double-send", or accept as best-effort. [`backend/src/api/agent.py:159-194`]
+- [x] [Review][Decision] Out-of-spec `intent_classifier.py` template refactor (backstory + task description rewritten via `textwrap.dedent`) — Task 1b explicitly says "no change to `intent_classifier.py`". Behaviorally equivalent per reviewer. Decision: keep (low-risk readability win) or revert to honor the spec. [`backend/src/agent/skills/intent_classifier.py:224-293`]
+- [x] [Review][Decision] `list_recent_messages` helper deviates from spec's prescribed `list_messages(db, session_id, limit=_HISTORY_WINDOW)` — but spec's call is buggy (ASC + LIMIT returns OLDEST N, not LATEST N); the helper does DESC + reverse correctly. Decision: amend spec to reference `list_recent_messages`, or revert and fix `list_messages` semantics. [`backend/src/services/chat_service.py:447-474`, `backend/src/api/agent.py:410`]
+
+#### Patch (7)
+
+- [x] [Review][Patch] **CRITICAL** — `cancel_event` is registered in `_CANCEL_MAP` but never threaded into `run_crew`; `POST /cancel` calls `event.set()` but the chunk loop never checks `is_set()`. Cancel is a silent no-op — stream continues and assistant row finalises normally. Fix: pass `cancel_event` into `run_crew`, check between chunks (and between word-groups) to stop emitting, mark assistant row `cancelled` on exit. [`backend/src/api/agent.py:197-202`, `backend/src/agent/crew_runner.py:95-167`]
+- [x] [Review][Patch] History tail-slice under-fills the window when the last `_HISTORY_WINDOW + 2` rows include any non-`complete` rows (failed/pending/cancelled streaks). The `+2` slack only covers the placeholder + just-inserted user row. Fix: paginate or fetch a larger buffer and stop once `_HISTORY_WINDOW` complete rows are collected. [`backend/src/api/agent.py:184-194`]
+- [x] [Review][Patch] `_chunk_words` splits on `"\n"` only — `\r\n` line endings drop the trailing `\r` (broken `"".join(chunks) == text` round-trip). Fix: split on `\r?\n` or normalize input upstream. [`backend/src/agent/crew_runner.py:64`]
+- [x] [Review][Patch] Empty-line chunks bypass the `MAX_CHUNKS_PER_RUN` truncation cap — the unconditional `chunks.append("\n")` runs after the cap is reached. Fix: include `len(chunks) >= MAX_CHUNKS_PER_RUN` check before appending the line break and break out. [`backend/src/agent/crew_runner.py:86-89`]
+- [x] [Review][Patch] `run_crew` swallows `KeyError` from missing skill via the broad `except Exception` and reports `recoverable: False` with the raw `KeyError(...)` repr (leaks the bad skill name in the error payload). Fix: pre-check `skill_name in SKILL_REGISTRY` and emit a controlled `unknown_skill` error before the broad-except path. [`backend/src/agent/crew_runner.py:114, 156-165`]
+- [x] [Review][Patch] `intent_classifier.py` `description={...!r}` template runs `repr()` on the user message, which inflates emoji and non-ASCII runs (`"😀"` → `"\U0001F600"`, ~10×) and may unexpectedly blow the prompt budget at the 4000-char input cap. Fix: drop `!r`, escape only what's necessary (newlines), keep length explicit. [`backend/src/agent/skills/intent_classifier.py:73 / diff lines 282-290`]
+- [x] [Review][Patch] `finalise_assistant_message`'s `with SessionLocal() as session:` rolls back on any exception inside `update_message`. If `update_message` raises something other than `ChatMessageNotFoundError` after partial mutation, the broad `except Exception` swallows it but the pending → complete write was already rolled back, leaving the assistant row stuck in `pending` forever. Fix: separate transactions for the success-write and the failure-write, or commit defensively. [`backend/src/api/agent.py:73-105`, `backend/src/services/chat_service.py:160`]
+
+#### Deferred (3) — pre-existing or low-yield
+
+- [x] [Review][Defer] `stream_sse` blocks indefinitely on `event_queue.get()` if the worker thread is killed externally between `run_crew` returning and `finalise_assistant_message` starting (no timeout). Pre-existing pattern from Story 6.1. Defer to future hardening pass. [`backend/src/agent/crew_runner.py:170-176`]
+- [x] [Review][Defer] `crewai.LLM(api_key=settings.anthropic_api_key, ...)` passes the plaintext `str` value (was `SecretStr` previously); CrewAI's `LLM.__repr__` redaction behavior is unverified. Defer pending a check of CrewAI internals. [`backend/src/agent/llm.py:158-162`]
+- [x] [Review][Defer] `pydantic-settings` lower bound loosened from `>=2.13.1` to `>=2.10.1` with no justification in the dev notes. Likely a CrewAI resolver constraint. Defer pending a one-line note in pyproject. [`backend/pyproject.toml:18`]
+
+#### Dismissed (6) — false positives / out of scope
+
+- Stale DB-session snapshot worry — PostgreSQL default isolation is READ COMMITTED, post-commit reads are visible (false alarm).
+- `list_recent_messages` does an extra `get_session` round-trip — intentional 404 safety, perf cost negligible.
+- `list_recent_messages` UUID tiebreak ambiguous — no two messages share microsecond in practice.
+- `_format_task_description` accepts empty `user_message` via direct call — guarded at the API boundary by Pydantic.
+- System-role messages silently dropped from history — no code path creates them yet (premature).
+- Blind Hunter's `{user_message!r}` template-escape worry — self-withdrawn during analysis.
 
 ---
 

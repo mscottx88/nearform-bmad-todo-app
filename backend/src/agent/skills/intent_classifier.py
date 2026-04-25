@@ -67,10 +67,17 @@ def build(ctx: SkillContext) -> Crew:
         verbose=False,
     )
 
+    # Story 6.2 Group A CR P6: drop the `!r` repr-conversion. `repr()`
+    # on the user message inflated emoji and other non-ASCII runs
+    # (`"😀"` → `"\U0001F600"`, ~10× expansion) and added unbalanced
+    # quote noise. ChatRequest already caps `content` at 4000 chars, so
+    # the raw value is bounded; the untrusted-data framing in the
+    # backstory above is what defends against injected instructions —
+    # `repr()` was not pulling its weight for that.
     task = Task(
         description=textwrap.dedent(
             """\
-            User message: {user_message!r}
+            User message: {user_message}
 
             Return the single best skill name from the registry above.
             """

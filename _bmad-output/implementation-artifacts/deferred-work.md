@@ -22,6 +22,14 @@ If this file grows faster than it drains, something's wrong with the process, no
 
 ---
 
+## Deferred from: code review of story 6-2-chat-panel — Group A backend (2026-04-25)
+
+- `[OPEN]` `stream_sse` blocks indefinitely on `event_queue.get()` if the worker thread is killed externally between `run_crew` returning and `finalise_assistant_message` starting (no timeout/watchdog). Pre-existing pattern from Story 6.1. (backend/src/agent/crew_runner.py:170-176)
+- `[OPEN]` `crewai.LLM(api_key=settings.anthropic_api_key, ...)` passes the plaintext `str` value where the previous LangChain wrapper used `SecretStr`. CrewAI's `LLM.__repr__` redaction behavior is unverified — if `verbose=True` ever logs the LLM object, the API key may leak. Verify CrewAI internals or wrap in a redacting type. (backend/src/agent/llm.py:158-162)
+- `[OPEN]` `pydantic-settings` lower bound loosened from `>=2.13.1` to `>=2.10.1` with no justification in dev notes. Likely a CrewAI 1.14 resolver constraint. Add a one-line `# pinned by crewai 1.14 resolver` note or restore the floor if not actually required. (backend/pyproject.toml:18)
+
+---
+
 ## Deferred from: code review of story 4-2-lily-pad-drag-and-spread-out (2026-04-23)
 
 - `[OPEN]` Multi-touch `activeDragAnchor` singleton: two simultaneous pointer drags race through `setActiveDragAnchor` — last-written padId wins; other pads nudge against only one of the two anchors. Multi-touch drag is not a stated requirement. Fix when touch support becomes a real scenario: store anchors in a `Map<pointerId, Anchor>` and aggregate repulsion contributions. (frontend/src/components/pond/LilyPad.tsx, frontend/src/stores/usePondStore.ts)

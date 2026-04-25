@@ -137,7 +137,9 @@ class TestChatEndpoint:
 
         captured: dict[str, Any] = {}
 
-        def _capture_run(ctx: Any, _skill: str, _msg_id: Any) -> Any:
+        def _capture_run(
+            ctx: Any, _skill: str, _msg_id: Any, _cancel_event: Any = None
+        ) -> Any:
             from src.agent.crew_runner import CrewResult  # noqa: PLC0415
 
             captured["history"] = ctx.history
@@ -206,7 +208,9 @@ class TestChatEndpoint:
 
         captured: dict[str, Any] = {}
 
-        def _capture_run(ctx: Any, _skill: str, _msg_id: Any) -> Any:
+        def _capture_run(
+            ctx: Any, _skill: str, _msg_id: Any, _cancel_event: Any = None
+        ) -> Any:
             from src.agent.crew_runner import CrewResult  # noqa: PLC0415
 
             captured["history"] = ctx.history
@@ -414,3 +418,58 @@ class TestFinaliseAssistantMessage:
             "chat",
             CrewResult(success=True, prose="x", error=None),
         )
+
+    # Story 6.2 Group A CR P1: cancelled CrewResult writes status='cancelled'
+    # rather than 'failed' so the row is visually distinct in the UI.
+    def test_cancelled_path_writes_cancelled_status(self, db_session: Session) -> None:
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="",
+            status="pending",
+        )
+        finalise_assistant_message(
+            msg.id,
+            "chat",
+            CrewResult(
+                success=False,
+                prose="partial response that streamed before cancel",
+                error="cancelled",
+                cancelled=True,
+            ),
+        )
+        rows = chat_service.list_messages(db_session, session.id)
+        assert rows[0].status == "cancelled"
+        # Whatever prose did stream is preserved so the user sees what
+        # they got before cancelling, rather than a generic message.
+        assert rows[0].content == "partial response that streamed before cancel"
+
+    def test_cancelled_path_with_no_prose_writes_default_content(
+        self, db_session: Session
+    ) -> None:
+        # Cancel-before-first-chunk: prose is empty; we don't want an
+        # empty bubble in the UI.
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="",
+            status="pending",
+        )
+        finalise_assistant_message(
+            msg.id,
+            "chat",
+            CrewResult(success=False, prose="", error="cancelled", cancelled=True),
+        )
+        rows = chat_service.list_messages(db_session, session.id)
+        assert rows[0].status == "cancelled"
+        assert rows[0].content == "Cancelled."
