@@ -5,6 +5,7 @@ import { PondScene } from './components/pond/PondScene';
 import { CursorFirefly } from './components/effects/CursorFirefly';
 import { ViewportGuard } from './components/ui/ViewportGuard';
 import { TodoInput } from './components/ui/TodoInput';
+import { useGlobalCursorMode } from './hooks/useGlobalCursorMode';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useClosePopupOnEscape } from './hooks/useClosePopupOnEscape';
 import { queryClient } from './api/queryClient';
@@ -25,6 +26,7 @@ function AppContent() {
 
   useKeyboardShortcuts(openInput);
   useClosePopupOnEscape();
+  useGlobalCursorMode();
 
   return (
     <ViewportGuard>

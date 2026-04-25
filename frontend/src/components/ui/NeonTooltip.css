@@ -1,0 +1,75 @@
+/*
+ * NeonTooltip styles. The wrapper is `display: inline-flex` so it
+ * doesn't disrupt the layout of inline triggers (links, buttons inside
+ * a flex row), and the tooltip itself is absolutely positioned
+ * relative to the wrapper. Show/hide is opacity + pointer-events so
+ * the transition is animatable.
+ */
+
+.neon-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.neon-tooltip {
+  position: absolute;
+  z-index: 200; /* above panel sections, below cursor canvas */
+  background: var(--water-deep);
+  border: 1px solid var(--neon-cyan);
+  color: #daffff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 0 10px rgba(0, 238, 255, 0.45);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.neon-tooltip--open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.neon-tooltip--top {
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, 2px);
+}
+.neon-tooltip--top.neon-tooltip--open {
+  transform: translate(-50%, 0);
+}
+
+.neon-tooltip--bottom {
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, -2px);
+}
+.neon-tooltip--bottom.neon-tooltip--open {
+  transform: translate(-50%, 0);
+}
+
+.neon-tooltip--left {
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translate(2px, -50%);
+}
+.neon-tooltip--left.neon-tooltip--open {
+  transform: translate(0, -50%);
+}
+
+.neon-tooltip--right {
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translate(-2px, -50%);
+}
+.neon-tooltip--right.neon-tooltip--open {
+  transform: translate(0, -50%);
+}

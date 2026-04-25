@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAgentStore } from '../../stores/useAgentStore';
+import { usePondStore } from '../../stores/usePondStore';
 import { NeonScrollbar } from '../ui/NeonScrollbar';
 import { AgentComposer } from './AgentComposer';
 import { AgentControlsRow } from './AgentControlsRow';
@@ -111,6 +112,32 @@ export function AgentPanel() {
             padding: 12,
           }}
           scrollRef={chatScrollRef}
+          // Cursor swaps:
+          //   thumb hover → 'grab' (open frog hand)
+          //   thumb drag  → 'grabbing' (closed frog hand)
+          // Restore to 'firefly' on hover-leave / drag-end so the
+          // default firefly returns when the cursor moves off.
+          onThumbHover={(hovered) => {
+            const store = usePondStore.getState();
+            if (hovered) {
+              if (store.cursorMode === 'firefly') {
+                store.setCursorMode('grab');
+              }
+            } else if (store.cursorMode === 'grab') {
+              store.setCursorMode('firefly');
+            }
+          }}
+          onThumbDrag={(dragging) => {
+            const store = usePondStore.getState();
+            if (dragging) {
+              store.setCursorMode('grabbing');
+            } else if (store.cursorMode === 'grabbing') {
+              // After drag-release, return to 'grab' if the cursor
+              // is still over the thumb (the hover handler will be
+              // the next event), otherwise back to 'firefly'.
+              store.setCursorMode('firefly');
+            }
+          }}
         >
           <AgentMessageList
             messages={messages}

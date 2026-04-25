@@ -7,6 +7,7 @@
  */
 
 import { useAgentStore } from '../../stores/useAgentStore';
+import { NeonTooltip } from '../ui/NeonTooltip';
 
 interface Props {
   onNewChat: () => void;
@@ -39,44 +40,52 @@ export function AgentControlsRow({
 
   return (
     <div className="agent-controls-row">
-      <button
-        type="button"
-        className="agent-btn agent-btn--new"
-        onClick={onNewChat}
-        title="Start a new chat"
+      <NeonTooltip
+        text="Start a new chat"
+        placement="top"
+        wrapperClassName="agent-controls-row__new-chat-wrap"
       >
-        + New chat
-      </button>
-      <button
-        type="button"
-        className={`agent-btn agent-btn--sessions${
-          sessionsOpen ? ' agent-btn--active' : ''
-        }`}
-        onClick={onToggleSessions}
-        aria-pressed={sessionsOpen}
-        title="Show sessions"
-      >
-        ☰
-      </button>
-      <button
-        type="button"
-        className={`agent-btn agent-btn--send${
-          isStreaming ? ' agent-btn--stop' : ''
-        }`}
-        onClick={onSendOrStop}
-        disabled={sendDisabled}
-        title={isStreaming ? 'Stop' : 'Send'}
-      >
-        {isStreaming ? '■' : '➤'}
-      </button>
-      <button
-        type="button"
-        className="agent-btn agent-btn--close"
-        onClick={onClose}
-        title="Close panel"
-      >
-        ✕
-      </button>
+        <button
+          type="button"
+          className="agent-btn agent-btn--new"
+          onClick={onNewChat}
+        >
+          + New chat
+        </button>
+      </NeonTooltip>
+      <NeonTooltip text="Show sessions" placement="top">
+        <button
+          type="button"
+          className={`agent-btn agent-btn--sessions${
+            sessionsOpen ? ' agent-btn--active' : ''
+          }`}
+          onClick={onToggleSessions}
+          aria-pressed={sessionsOpen}
+        >
+          ☰
+        </button>
+      </NeonTooltip>
+      <NeonTooltip text={isStreaming ? 'Stop' : 'Send'} placement="top">
+        <button
+          type="button"
+          className={`agent-btn agent-btn--send${
+            isStreaming ? ' agent-btn--stop' : ''
+          }`}
+          onClick={onSendOrStop}
+          disabled={sendDisabled}
+        >
+          {isStreaming ? '■' : '➤'}
+        </button>
+      </NeonTooltip>
+      <NeonTooltip text="Close panel" placement="top">
+        <button
+          type="button"
+          className="agent-btn agent-btn--close"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </NeonTooltip>
     </div>
   );
 }

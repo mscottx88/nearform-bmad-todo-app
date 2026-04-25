@@ -188,7 +188,7 @@ interface PondState {
 
   // Story 4.6 (user feedback): cursor glyph — 'firefly' default;
   // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
-  cursorMode: 'firefly' | 'grab' | 'grabbing';
+  cursorMode: 'firefly' | 'grab' | 'grabbing' | 'point' | 'text' | 'no-access';
 
   // Story 3.4: id of the pad the cursor is currently over, or null.
   // Published by LilyPad's onPointerEnter/Leave and read by PondScene
@@ -364,7 +364,9 @@ interface PondState {
    * renders. Identity-preserving — writes are skipped when the mode
    * is unchanged.
    */
-  setCursorMode: (mode: 'firefly' | 'grab' | 'grabbing') => void;
+  setCursorMode: (
+    mode: 'firefly' | 'grab' | 'grabbing' | 'point' | 'text' | 'no-access',
+  ) => void;
 }
 
 export const usePondStore = create<PondState>((set, get) => ({

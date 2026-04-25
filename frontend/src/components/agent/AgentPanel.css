@@ -126,11 +126,26 @@
   justify-content: flex-start;
 }
 
+.agent-message__bubble-wrap {
+  position: relative;
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-message--user .agent-message__bubble-wrap {
+  align-items: flex-end;
+}
+
+.agent-message--assistant .agent-message__bubble-wrap,
+.agent-message--meta .agent-message__bubble-wrap {
+  align-items: flex-start;
+}
+
 .agent-message__bubble {
   position: relative;
   border-radius: 16px;
   padding: 10px 14px;
-  max-width: 80%;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.45;
@@ -145,20 +160,6 @@
   color: #ffd0f5;
 }
 
-.agent-message--user .agent-message__bubble::after {
-  content: '';
-  position: absolute;
-  right: -6px;
-  bottom: 0;
-  width: 14px;
-  height: 12px;
-  background: rgba(255, 16, 240, 0.12);
-  border-right: 1px solid var(--neon-pink);
-  border-bottom: 1px solid var(--neon-pink);
-  clip-path: polygon(0 0, 100% 100%, 0 100%);
-  box-shadow: 1px 1px 6px rgba(255, 16, 240, 0.4);
-}
-
 .agent-message--assistant .agent-message__bubble {
   background: rgba(0, 238, 255, 0.10);
   border: 1px solid var(--neon-cyan);
@@ -166,18 +167,53 @@
   color: #daffff;
 }
 
-.agent-message--assistant .agent-message__bubble::after {
-  content: '';
-  position: absolute;
-  left: -6px;
-  bottom: 0;
-  width: 14px;
-  height: 12px;
-  background: rgba(0, 238, 255, 0.10);
-  border-left: 1px solid var(--neon-cyan);
-  border-bottom: 1px solid var(--neon-cyan);
-  clip-path: polygon(100% 0, 100% 100%, 0 100%);
-  box-shadow: -1px 1px 6px rgba(0, 238, 255, 0.4);
+/* ── Speech bubble tail (inline SVG, see AgentMessage.tsx BubbleTail) ── */
+
+.agent-message__tail {
+  display: block;
+  /* Top edge overlaps the bubble's bottom border by 1px so the
+     bubble's own border paints over the tail's top, hiding the
+     would-be seam. */
+  margin-top: -1px;
+  /* Pulls the glow filter on the SVG so the tail picks up the same
+     halo as the bubble. drop-shadow honours the alpha of the SVG
+     paths so the soft outer glow reads continuously around both
+     bubble and tail. */
+}
+
+.agent-message--user .agent-message__tail {
+  align-self: flex-end;
+  margin-right: 14px;
+  filter: drop-shadow(0 0 4px rgba(255, 16, 240, 0.55));
+}
+
+.agent-message--assistant .agent-message__tail {
+  align-self: flex-start;
+  margin-left: 14px;
+  filter: drop-shadow(0 0 4px rgba(0, 238, 255, 0.5));
+}
+
+.agent-message--user .agent-message__tail-fill {
+  fill: rgba(255, 16, 240, 0.12);
+}
+
+.agent-message--assistant .agent-message__tail-fill {
+  fill: rgba(0, 238, 255, 0.10);
+}
+
+.agent-message__tail-stroke {
+  fill: none;
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.agent-message--user .agent-message__tail-stroke {
+  stroke: var(--neon-pink);
+}
+
+.agent-message--assistant .agent-message__tail-stroke {
+  stroke: var(--neon-cyan);
 }
 
 /* Meta rows (system / tool) — no tail, smaller font, dimmer glow. */
@@ -200,16 +236,52 @@
   color: #ffc0c0;
 }
 
-.agent-message--failed.agent-message--assistant .agent-message__bubble::after {
-  border-left-color: #ff5050;
-  border-bottom-color: #ff5050;
-  box-shadow: -1px 1px 6px rgba(255, 80, 80, 0.4);
+.agent-message--failed .agent-message__tail {
+  filter: drop-shadow(0 0 4px rgba(255, 80, 80, 0.55));
 }
 
-.agent-message--failed.agent-message--user .agent-message__bubble::after {
-  border-right-color: #ff5050;
-  border-bottom-color: #ff5050;
-  box-shadow: 1px 1px 6px rgba(255, 80, 80, 0.4);
+.agent-message--failed .agent-message__tail-stroke {
+  stroke: #ff5050;
+}
+
+/* ── Inline todo references (TodoLink) ──────────────────────────────── */
+
+.todo-link {
+  display: inline;
+  background: transparent;
+  border: none;
+  padding: 0 2px;
+  margin: 0;
+  font: inherit;
+  color: var(--neon-green);
+  text-decoration: underline;
+  text-decoration-color: rgba(57, 255, 20, 0.5);
+  text-underline-offset: 2px;
+  /* Inherit `cursor: none` from global.css so the OS cursor stays
+     hidden — the custom firefly canvas paints the frog pointing-finger
+     glyph instead (mode='point', see TodoLink.tsx + CursorFirefly.tsx). */
+  cursor: none;
+  transition: color 80ms ease-out, text-shadow 80ms ease-out;
+}
+
+.todo-link:hover,
+.todo-link:focus-visible {
+  color: var(--neon-green);
+  text-decoration-color: var(--neon-green);
+  text-shadow: 0 0 6px rgba(57, 255, 20, 0.7);
+  outline: none;
+}
+
+.todo-link--missing {
+  color: rgba(218, 255, 255, 0.4);
+  text-decoration-style: dashed;
+  text-decoration-color: rgba(218, 255, 255, 0.3);
+  cursor: none;
+}
+
+.todo-link--missing:hover {
+  color: rgba(218, 255, 255, 0.4);
+  text-shadow: none;
 }
 
 .agent-message--cancelled .agent-message__bubble {
@@ -302,7 +374,7 @@
   color: var(--neon-cyan);
   padding: 6px 10px;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: none;
   box-shadow: 0 0 8px rgba(0, 238, 255, 0.25);
   transition:
     background 120ms ease-out,
@@ -321,8 +393,16 @@
 }
 
 .agent-btn--new {
-  flex: 1;
+  width: 100%;
   text-align: left;
+}
+
+/* The new-chat button used to be `flex: 1` on the row directly; after
+   wrapping in NeonTooltip the wrapper is the flex child, so the
+   wrapper takes the grow allocation and the button fills it 100%. */
+.agent-controls-row__new-chat-wrap {
+  flex: 1;
+  display: flex;
 }
 
 .agent-btn--sessions {
@@ -418,7 +498,7 @@
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid rgba(0, 238, 255, 0.12);
-  cursor: pointer;
+  cursor: none;
   font-family: var(--font-sans);
   font-size: 13px;
   color: #daffff;
@@ -450,7 +530,7 @@
   color: transparent;
   font-size: 18px;
   line-height: 1;
-  cursor: pointer;
+  cursor: none;
   padding: 0 4px;
 }
 
@@ -489,6 +569,6 @@
   letter-spacing: 0.04em;
   padding: 4px 10px;
   border-radius: 999px;
-  cursor: pointer;
+  cursor: none;
   box-shadow: 0 0 10px rgba(0, 238, 255, 0.45);
 }

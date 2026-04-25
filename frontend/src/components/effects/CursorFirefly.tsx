@@ -95,6 +95,133 @@ function drawGrabHand(
   ctx.restore();
 }
 
+function drawPointingHand(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  // Frog hand with the index digit extended — tracks the same neon
+  // frog-aesthetic as `drawGrabHand` and `drawGrabbingFist`. Used for
+  // hyperlink-style affordances (e.g. agent-message TodoLink) instead
+  // of the browser's stock pointing-hand cursor, which would clash
+  // with the project's custom-cursor design.
+  //
+  // CRITICAL: cursor hotspot convention — the index FINGERTIP is at
+  // (cx, cy), the actual mouse position. We translate by (cx, cy + 28)
+  // so the rest of the hand drops 28px below; the index tip drawn at
+  // local (0, -28) lands exactly on the cursor coordinates. Without
+  // this offset the user's mouse pointer would sit at the palm with
+  // the fingertip floating 28px above their click point.
+  ctx.save();
+  ctx.translate(cx, cy + 28);
+  ctx.strokeStyle = GRAB_COLOR;
+  ctx.fillStyle = GRAB_COLOR;
+  ctx.lineWidth = 2.0;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.shadowBlur = GRAB_SHADOW;
+  ctx.shadowColor = GRAB_COLOR;
+
+  // Curled digits: 3 short stubs clustered toward the palm.
+  const curled: Array<{ rx: number; ry: number; tx: number; ty: number }> = [
+    { rx: -4, ry: -2, tx: -10, ty: -7 },
+    { rx: 1.5, ry: -2, tx: 9, ty: -8 },
+    { rx: 4, ry: -2, tx: 14, ty: -3 },
+  ];
+  const CURLED_TIP_R = 2.8;
+
+  // Palm — same tiny oval as the open hand.
+  ctx.beginPath();
+  ctx.ellipse(0, 3, 6, 4, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  for (const c of curled) {
+    drawFrogDigit(ctx, c.rx, c.ry, c.tx, c.ty, CURLED_TIP_R);
+  }
+
+  // Extended index — long stem straight up from the palm, slightly
+  // larger toe-pad so it reads as the "pointer". Tip lands at local
+  // (0, -28), which is the cursor's hotspot after the translate
+  // offset above.
+  drawFrogDigit(ctx, -1.5, -2, 0, -28, 4.0);
+
+  ctx.restore();
+}
+
+
+function drawTextCursor(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  // Neon I-beam — vertical stem with short horizontal serifs at the
+  // top and bottom. Used for text-input affordances (e.g. the chat
+  // composer textarea) so the user gets a "you can type here" hint
+  // without falling back to the OS cursor.
+  //
+  // Hotspot convention: dead-centre vertical, dead-centre horizontal —
+  // matches the OS I-beam so click positioning feels native.
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = '#00eeff'; /* --neon-cyan */
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = '#00eeff';
+  // Vertical stem (10px each side of centre = 20px total).
+  ctx.beginPath();
+  ctx.moveTo(0, -10);
+  ctx.lineTo(0, 10);
+  ctx.stroke();
+  // Top serif.
+  ctx.beginPath();
+  ctx.moveTo(-4, -10);
+  ctx.lineTo(4, -10);
+  ctx.stroke();
+  // Bottom serif.
+  ctx.beginPath();
+  ctx.moveTo(-4, 10);
+  ctx.lineTo(4, 10);
+  ctx.stroke();
+  ctx.restore();
+}
+
+
+function drawNoAccessCursor(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  // Neon "no entry" glyph — circle with a diagonal slash through it.
+  // Used for disabled / forbidden affordances (e.g. a TodoLink whose
+  // referenced todo isn't loaded).
+  //
+  // Hotspot convention: dead centre of the circle. The circle is
+  // sized small enough (radius 9) that it doesn't obscure the
+  // underlying element while still reading as a clear deny gesture.
+  const NO_ACCESS_COLOR = '#ff5050';
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = NO_ACCESS_COLOR;
+  ctx.lineWidth = 2.0;
+  ctx.lineCap = 'round';
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = NO_ACCESS_COLOR;
+  // Circle.
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  // Diagonal slash (top-left → bottom-right). 45° offset by sqrt(2)/2
+  // so the slash terminates at the inside of the circle stroke.
+  const r = 9 * 0.707;
+  ctx.beginPath();
+  ctx.moveTo(-r, -r);
+  ctx.lineTo(r, r);
+  ctx.stroke();
+  ctx.restore();
+}
+
+
 function drawGrabbingFist(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -338,10 +465,21 @@ export function CursorFirefly() {
       }
       const heading: number = headingRef.current;
 
-      // 5. Draw the trail. Colour swaps to neon green when in grab /
-      //    grabbing mode so the frog hand leaves a green trail
-      //    instead of the firefly's yellow (user feedback 2026-04-23).
-      const trailColor = mode === 'firefly' ? TRAIL_COLOR : GRAB_COLOR;
+      // 5. Draw the trail. Colour follows the head-glyph family:
+      //    firefly → yellow (default), frog-hand modes → neon green,
+      //    text → cyan, no-access → red. Keeping the trail in the
+      //    same hue as the head glyph reads as a single coherent
+      //    cursor object instead of a hue-mismatched trail.
+      let trailColor: string;
+      if (mode === 'text') {
+        trailColor = '#00eeff';
+      } else if (mode === 'no-access') {
+        trailColor = '#ff5050';
+      } else if (mode === 'firefly') {
+        trailColor = TRAIL_COLOR;
+      } else {
+        trailColor = GRAB_COLOR;
+      }
       for (let i: number = 1; i < TRAIL_LENGTH; i++) {
         const t: number = i / TRAIL_LENGTH;
         const alpha: number = (1 - t) * 0.85;
@@ -360,11 +498,19 @@ export function CursorFirefly() {
       }
 
       // 6. Draw head glyph — firefly by default, frog-hand when the
-      //    cluster drag handle is hovered / being dragged.
+      //    cluster drag handle is hovered / being dragged, frog
+      //    pointing-finger when over a link, neon I-beam over text
+      //    inputs, and a "no entry" glyph for disabled affordances.
       if (mode === 'grab') {
         drawGrabHand(ctx, nodes[0]!.x, nodes[0]!.y);
       } else if (mode === 'grabbing') {
         drawGrabbingFist(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else if (mode === 'point') {
+        drawPointingHand(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else if (mode === 'text') {
+        drawTextCursor(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else if (mode === 'no-access') {
+        drawNoAccessCursor(ctx, nodes[0]!.x, nodes[0]!.y);
       } else {
         drawFirefly(ctx, nodes[0]!.x, nodes[0]!.y, frameRef.current, fireflyColor, heading);
       }

@@ -18,6 +18,54 @@ html, body, #root {
   color: var(--neon-cyan);
 }
 
+/*
+ * The custom firefly canvas paints its own cursor glyph; the OS cursor
+ * MUST stay hidden so the two don't double up. The user-agent
+ * stylesheet specifies `cursor: pointer/text/...` on interactive
+ * elements (button, a, input, textarea, [contenteditable], etc.),
+ * which overrides the inherited `cursor: none` from the html/body
+ * rule above. This blanket selector forces every element to inherit
+ * `none` regardless of what the UA sheet does.
+ *
+ * Specific elements that need a different OS cursor (e.g. video
+ * scrubbers, native form controls during a future a11y pass) can
+ * still opt out with their own `cursor:` rule.
+ */
+*,
+*::before,
+*::after,
+button,
+a,
+input,
+textarea,
+select,
+[role="button"],
+[contenteditable] {
+  cursor: none;
+}
+
+/*
+ * Disabled / readonly form controls get their own UA-stylesheet rules
+ * (`cursor: not-allowed` on most browsers, `cursor: default` on a few)
+ * with an attribute selector that beats the bare-tag selector above.
+ * The custom `no-access` cursor glyph drawn on the firefly canvas
+ * already conveys the disabled state — the OS not-allowed icon is
+ * redundant and would double up.
+ */
+button[disabled],
+button:disabled,
+input[disabled],
+input:disabled,
+input[readonly],
+textarea[disabled],
+textarea:disabled,
+textarea[readonly],
+select[disabled],
+select:disabled,
+[aria-disabled="true"] {
+  cursor: none;
+}
+
 ::selection {
   background: var(--neon-pink);
   color: var(--pond-dark);
