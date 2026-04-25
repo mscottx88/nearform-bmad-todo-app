@@ -1,0 +1,90 @@
+/*
+ * Bottom-left affordance footer. Stays subtle so it doesn't compete
+ * with the pond scene or the chat panel; reads as a quiet "here's
+ * what you can do" prompt.
+ *
+ * Z-index sits BELOW the chat panel (z-index 100) and the cursor
+ * canvas (--z-cursor 2147483647) but ABOVE the R3F canvas so the
+ * hints float over the scene.
+ */
+.kbd-hints {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: row;
+  gap: 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: rgba(128, 255, 255, 0.55);
+  text-shadow: 0 0 5px rgba(0, 238, 255, 0.3);
+  pointer-events: none;
+  user-select: none;
+}
+
+.kbd-hints__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kbd-hints__group-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(128, 255, 255, 0.4);
+  margin-bottom: 2px;
+}
+
+.kbd-hints__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kbd-hints__list li {
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kbd-hints__key {
+  display: inline-block;
+  min-width: 28px;
+  padding: 1px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #eaffff;
+  background: rgba(0, 238, 255, 0.08);
+  border: 1px solid rgba(128, 255, 255, 0.45);
+  border-radius: 4px;
+  box-shadow:
+    0 0 5px rgba(0, 238, 255, 0.22),
+    inset 0 0 4px rgba(0, 238, 255, 0.12);
+  line-height: 1.4;
+  text-align: center;
+}
+
+.kbd-hints__desc {
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+/* Mobile / narrow viewport: stack the two groups vertically and shrink
+   so the hint footer doesn't dominate the screen. */
+@media (max-width: 640px) {
+  .kbd-hints {
+    flex-direction: column;
+    gap: 8px;
+    font-size: 10px;
+  }
+  .kbd-hints__key {
+    font-size: 10px;
+    min-width: 24px;
+  }
+}

@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { AgentPanel } from './components/agent/AgentPanel';
 import { PondScene } from './components/pond/PondScene';
 import { CursorFirefly } from './components/effects/CursorFirefly';
+import { KeyboardShortcutsHint } from './components/ui/KeyboardShortcutsHint';
 import { ViewportGuard } from './components/ui/ViewportGuard';
 import { TodoInput } from './components/ui/TodoInput';
 import { useGlobalCursorMode } from './hooks/useGlobalCursorMode';
@@ -33,6 +34,7 @@ function AppContent() {
       <PondScene />
       <TodoInput isOpen={inputOpen} initialValue={inputInitial} onClose={closeInput} />
       <AgentPanel />
+      <KeyboardShortcutsHint />
       <CursorFirefly />
     </ViewportGuard>
   );

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/global.css'
 import App from './App.tsx'
+import { registerHelpCommand } from './utils/helpCommand'
 import { registerVisibilityCommands } from './utils/visibilityCommands'
 import { registerSpreadOutCommand } from './utils/spreadOutCommand'
 import { queryClient } from './api/queryClient'
@@ -19,6 +20,13 @@ registerVisibilityCommands()
 // (see `todosQueryKey` in todoApi.ts) — we flatten across every
 // cached triple and dedupe by id so the command works regardless of
 // which visibility mode the user is currently in.
+// Story 6.2: register `/help` so it appears in the slash-command
+// autocomplete dropdown. The actual handling of `/help` and
+// `/help <text>` is a parser carve-out in TodoInput.tsx that runs
+// BEFORE the registry walk; the registry's `execute()` is a
+// defensive fallback path.
+registerHelpCommand()
+
 registerSpreadOutCommand((): readonly Todo[] => {
   const entries = queryClient.getQueriesData<Todo[]>({ queryKey: TODOS_KEY })
   const seen = new Set<string>()

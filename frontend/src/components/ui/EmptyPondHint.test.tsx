@@ -14,10 +14,11 @@ describe('EmptyPondHint', () => {
     expect(screen.getByLabelText('just start typing...')).toBeInTheDocument();
   });
 
-  it('renders shortcut instructions for Enter and /', () => {
+  it('does NOT render the keyboard shortcuts (those moved to KeyboardShortcutsHint)', () => {
     render(<EmptyPondHint />);
-    const shortcuts = screen.getByLabelText('keyboard shortcuts');
-    expect(shortcuts).toHaveTextContent(/Press\s*Enter\s*to create your first task/i);
-    expect(shortcuts).toHaveTextContent(/Press\s*\/\s*to use a slash command/i);
+    // The shortcut list used to live here under aria-label="keyboard shortcuts".
+    // It moved to the always-visible KeyboardShortcutsHint component so
+    // users with existing todos can see them too.
+    expect(screen.queryByLabelText(/keyboard shortcuts/i)).toBeNull();
   });
 });
