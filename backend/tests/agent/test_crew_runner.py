@@ -28,8 +28,12 @@ class TestChunkWords:
     def test_splits_into_groups(self) -> None:
         text = "one two three four five six seven eight nine ten"
         chunks = _chunk_words(text)
-        joined = " ".join(chunks)
-        assert joined == text
+        # Story 6.2: chunks now carry their own leading whitespace so
+        # raw concatenation reconstructs the original prose. Previously
+        # the test joined with " " — that masked the bug where the
+        # frontend's byte-level concat produced "onetwo" instead of
+        # "one two".
+        assert "".join(chunks) == text
 
     def test_empty_string(self) -> None:
         assert _chunk_words("") == []
@@ -43,13 +47,8 @@ class TestChunkWords:
         chunks = _chunk_words("first line here\nsecond line here")
         # The "\n" chunk must appear between the two lines.
         assert "\n" in chunks
-        nl_idx = chunks.index("\n")
-        # Words from the first line precede the newline; words from the
-        # second line follow it.
-        before = " ".join(chunks[:nl_idx])
-        after = " ".join(c for c in chunks[nl_idx + 1 :] if c != "\n")
-        assert before == "first line here"
-        assert after == "second line here"
+        # Story 6.2: raw concat must reconstruct exactly.
+        assert "".join(chunks) == "first line here\nsecond line here"
 
     def test_preserves_blank_line_between_paragraphs(self) -> None:
         # `"a\n\nb"` produces three lines: "a", "", "b". The empty line
@@ -57,6 +56,30 @@ class TestChunkWords:
         # mark the blank-line boundary.
         chunks = _chunk_words("a\n\nb")
         assert chunks.count("\n") == 2
+
+    # Story 6.2: explicit guard for the run-together-words bug. Two
+    # adjacent chunks on the same line MUST round-trip with the inter-
+    # chunk space preserved when concatenated raw.
+    def test_chunks_concatenate_with_correct_word_spacing(self) -> None:
+        text = "I'm sorry but I don't have access to weather information for Tumwater WA"
+        chunks = _chunk_words(text)
+        assert "".join(chunks) == text
+        # Sanity: there is more than one chunk so we're actually
+        # exercising the boundary case.
+        word_chunks = [c for c in chunks if c != "\n"]
+        assert len(word_chunks) > 1
+
+    # Story 6.2: the chunk after a "\n" must NOT pick up a leading
+    # space — that would surface as a leading whitespace at the start
+    # of every line in the rendered chat bubble.
+    def test_first_chunk_after_newline_has_no_leading_space(self) -> None:
+        chunks = _chunk_words("first line here\nsecond line here")
+        nl_idx = chunks.index("\n")
+        # The chunk immediately after "\n" starts with a non-space
+        # character (the first word of line two). Chunk-size is
+        # random.randint(2, 5) so the exact word grouping varies, but
+        # the leading-space invariant is deterministic.
+        assert not chunks[nl_idx + 1].startswith(" ")
 
 
 def _mock_skill(crew: MagicMock) -> MagicMock:
@@ -106,7 +129,10 @@ class TestRunCrew:
             e for e in events if isinstance(e, dict) and e.get("type") == "chunk"
         ]
         assert len(chunk_events) >= 1
-        all_text = " ".join(e["text"] for e in chunk_events)
+        # Story 6.2: chunks self-include leading whitespace so the SSE
+        # consumer can do byte-level concat without losing word
+        # boundaries.
+        all_text = "".join(e["text"] for e in chunk_events)
         assert all_text == prose
 
         non_none = [e for e in events if isinstance(e, dict)]

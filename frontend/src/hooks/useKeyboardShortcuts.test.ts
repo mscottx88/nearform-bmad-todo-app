@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
+import { useAgentStore } from '../stores/useAgentStore';
 import { usePondStore } from '../stores/usePondStore';
 
 function dispatch(key: string, target?: EventTarget) {
@@ -127,5 +128,72 @@ describe('useKeyboardShortcuts', () => {
     dispatch('Enter');
     dispatch('/');
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  // Story 6.2 AC 1: F1 toggles the agent panel via the Zustand store —
+  // the kbd hook is the single source of truth for the F1 binding so
+  // it can apply the same input-focus filter as Enter and `/`.
+  it('toggles the agent panel on F1 (story 6.2 AC 1)', () => {
+    useAgentStore.setState({
+      panelOpen: false,
+      activeSessionId: null,
+      sessions: [],
+      messages: [],
+      inputDraft: '',
+      streamingMessageId: null,
+      streamingBuffer: '',
+    });
+    const onOpen = vi.fn();
+    const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
+
+    dispatch('F1');
+    expect(useAgentStore.getState().panelOpen).toBe(true);
+    dispatch('F1');
+    expect(useAgentStore.getState().panelOpen).toBe(false);
+    // F1 doesn't drive the TodoInput open callback.
+    expect(onOpen).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('preventDefault is called on the F1 path (suppress browser native help)', () => {
+    useAgentStore.setState({
+      panelOpen: false,
+      activeSessionId: null,
+      sessions: [],
+      messages: [],
+      inputDraft: '',
+      streamingMessageId: null,
+      streamingBuffer: '',
+    });
+    const onOpen = vi.fn();
+    const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
+
+    const event = new KeyboardEvent('keydown', { key: 'F1', cancelable: true });
+    const preventSpy = vi.spyOn(event, 'preventDefault');
+    window.dispatchEvent(event);
+
+    expect(preventSpy).toHaveBeenCalled();
+    unmount();
+  });
+
+  it('F1 inside an input element is NOT captured', () => {
+    useAgentStore.setState({
+      panelOpen: false,
+      activeSessionId: null,
+      sessions: [],
+      messages: [],
+      inputDraft: '',
+      streamingMessageId: null,
+      streamingBuffer: '',
+    });
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    const onOpen = vi.fn();
+    const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
+    dispatch('F1', input);
+    expect(useAgentStore.getState().panelOpen).toBe(false);
+    unmount();
+    document.body.removeChild(input);
   });
 });

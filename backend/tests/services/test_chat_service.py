@@ -169,3 +169,43 @@ class TestChatService:
         # limit=0 should be bumped to MIN (1), not return [] silently.
         messages = chat_service.list_messages(db_session, session.id, limit=0)
         assert len(messages) == 1
+
+    # Story 6.2 AC 12: list_recent_messages returns the MOST RECENT N
+    # messages in chronological order — guards against the bug where
+    # `list_messages(... limit=N)` would return the OLDEST N rows for
+    # sessions longer than the window (silent context-drop for the
+    # agent prompt).
+    def test_list_recent_messages_returns_latest_window_in_order(
+        self, db_session: Session
+    ) -> None:
+        session = chat_service.create_session(db_session)
+        for i in range(8):
+            chat_service.create_message(
+                db_session, session.id, role="user", content=f"m{i}"
+            )
+
+        recent = chat_service.list_recent_messages(db_session, session.id, limit=3)
+        # Exactly the LAST 3, oldest-first.
+        assert [m.content for m in recent] == ["m5", "m6", "m7"]
+
+    def test_list_recent_messages_clamps_limit_to_200(self, db_session: Session) -> None:
+        session = chat_service.create_session(db_session)
+        for i in range(4):
+            chat_service.create_message(
+                db_session, session.id, role="user", content=f"m{i}"
+            )
+        recent = chat_service.list_recent_messages(
+            db_session, session.id, limit=10_000_000
+        )
+        assert len(recent) == 4
+
+    def test_list_recent_messages_clamps_zero_limit_to_min(
+        self, db_session: Session
+    ) -> None:
+        session = chat_service.create_session(db_session)
+        chat_service.create_message(db_session, session.id, role="user", content="m0")
+        chat_service.create_message(db_session, session.id, role="user", content="m1")
+        recent = chat_service.list_recent_messages(db_session, session.id, limit=0)
+        # Min clamp is 1 → most recent single row only.
+        assert len(recent) == 1
+        assert recent[0].content == "m1"

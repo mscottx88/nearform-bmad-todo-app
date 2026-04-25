@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useCreateTodo } from '../../api/todoApi';
+import { useAgentStore } from '../../stores/useAgentStore';
 import { usePondStore } from '../../stores/usePondStore';
+import { parseHelpCommand } from '../../utils/helpCommand';
 import {
   availableCommands,
   parseSlashCommands,
@@ -141,6 +143,20 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
     if (e.key === 'Enter') {
       const trimmed = value.trim();
       if (!trimmed) return;
+
+      // Story 6.2 AC 2: `/help` and `/help <text>` carve-out. Runs BEFORE
+      // the registry walker so the help branch never falls into the
+      // toggle-command framework. On match, open the agent panel with
+      // the prefill (if any), reset the composer, and close TodoInput.
+      const help = parseHelpCommand(trimmed);
+      if (help !== null) {
+        const agent = useAgentStore.getState();
+        agent.openPanel();
+        agent.setDraft(help.prefill);
+        setValue('');
+        onClose();
+        return;
+      }
 
       // Slash-command chain (AC #4). Parse against the *real* world
       // (not the virtual walk) — `parseSlashCommands` does its own

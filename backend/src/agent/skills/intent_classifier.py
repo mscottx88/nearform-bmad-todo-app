@@ -1,3 +1,5 @@
+import textwrap
+
 from crewai import Agent, Crew, Process, Task
 
 from src.agent.skills.registry import SkillContext
@@ -25,13 +27,33 @@ def build(ctx: SkillContext) -> Crew:
         if name != "intent_classifier"
     )
 
+    # Indented triple-quoted string + textwrap.dedent so the source
+    # reads naturally without leaking indentation into the prompt the
+    # LLM sees. Interpolation values (skill_list, untrusted-data
+    # framing) are filled via .format AFTER dedent because dedent
+    # inspects only constant prefix whitespace and would otherwise
+    # treat the leading spaces inside our format placeholders as
+    # significant.
     backstory = (
-        f"{_CLASSIFIER_UNTRUSTED_DATA_FRAMING}\n\n"
-        "You are an intent classifier. You have NO tools. Your only job "
-        "is to read the user message and return exactly one skill name "
-        "from the registry below.\n\n"
-        f"Available skills:\n{skill_list}\n\n"
-        "If uncertain, return 'chat'."
+        textwrap.dedent(
+            """\
+        {framing}
+
+        You are an intent classifier. You have NO tools. Your only job
+        is to read the user message and return exactly one skill name
+        from the registry below.
+
+        Available skills:
+        {skill_list}
+
+        If uncertain, return 'chat'.
+        """
+        )
+        .format(
+            framing=_CLASSIFIER_UNTRUSTED_DATA_FRAMING,
+            skill_list=skill_list,
+        )
+        .rstrip()
     )
 
     agent = Agent(
@@ -46,10 +68,15 @@ def build(ctx: SkillContext) -> Crew:
     )
 
     task = Task(
-        description=(
-            f"User message: {ctx.user_message!r}\n\n"
-            "Return the single best skill name from the registry above."
-        ),
+        description=textwrap.dedent(
+            """\
+            User message: {user_message!r}
+
+            Return the single best skill name from the registry above.
+            """
+        )
+        .format(user_message=ctx.user_message)
+        .rstrip(),
         expected_output="A bare skill name string (e.g. 'chat')",
         agent=agent,
     )

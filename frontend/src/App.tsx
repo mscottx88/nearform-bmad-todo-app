@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { AgentPanel } from './components/agent/AgentPanel';
 import { PondScene } from './components/pond/PondScene';
 import { CursorFirefly } from './components/effects/CursorFirefly';
 import { ViewportGuard } from './components/ui/ViewportGuard';
@@ -29,6 +30,7 @@ function AppContent() {
     <ViewportGuard>
       <PondScene />
       <TodoInput isOpen={inputOpen} initialValue={inputInitial} onClose={closeInput} />
+      <AgentPanel />
       <CursorFirefly />
     </ViewportGuard>
   );

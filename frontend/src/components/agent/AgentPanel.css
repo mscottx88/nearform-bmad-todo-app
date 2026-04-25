@@ -1,0 +1,494 @@
+/*
+ * Story 6.2 AgentPanel styles. All colour values come from
+ * neon-tokens.css custom properties — never hardcode hex/rgb here.
+ *
+ * Stacking: panel sits at z-index 100 — above the R3F canvas (z-index 1)
+ * but well below the firefly cursor (z-index var(--z-cursor) =
+ * 2147483647), so the custom cursor stays visible over the panel.
+ */
+
+.agent-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 440px;
+  max-width: 100vw;
+  background: var(--water-deep);
+  border-left: 1px solid var(--neon-cyan);
+  box-shadow: -2px 0 16px rgba(0, 238, 255, 0.25);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  font-family: var(--font-sans);
+  color: #daffff;
+  /* Slide-in animation. The panel mounts when panelOpen flips true,
+     so a transform-only transition is enough — no separate fade. */
+  animation: agent-panel-slide-in 240ms ease-out;
+}
+
+@media (max-width: 480px) {
+  .agent-panel {
+    width: 100vw;
+    border-left: none;
+  }
+}
+
+@keyframes agent-panel-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ── Three sections, top → bottom ──────────────────────────────────────── */
+
+.agent-panel__section {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.agent-panel__section--oracle {
+  flex: 0 0 auto;
+  /* 16:10 inside the 440-px panel ≈ 275px tall when full-width.
+     Use aspect-ratio so it scales correctly in the mobile full-width
+     layout too. */
+  aspect-ratio: 16 / 10;
+  padding: 8px;
+}
+
+.agent-panel__oracle {
+  flex: 1;
+  border: 1px solid var(--neon-cyan);
+  background: var(--water-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  box-shadow: 0 0 8px rgba(0, 238, 255, 0.25) inset;
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.agent-panel__oracle-placeholder {
+  color: rgba(218, 255, 255, 0.45);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.agent-panel__section--chat {
+  flex: 1 1 auto;
+  min-height: 0; /* lets NeonScrollbar's inner div actually scroll */
+  position: relative;
+}
+
+.agent-panel__chat-scroll {
+  width: 100%;
+  height: 100%;
+}
+
+.agent-panel__section--composer {
+  flex: 0 0 auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-panel__divider {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(0, 238, 255, 0.4),
+    transparent
+  );
+  flex: 0 0 auto;
+}
+
+/* ── Speech bubbles (AC 4) ─────────────────────────────────────────────── */
+
+.agent-message {
+  display: flex;
+  width: 100%;
+}
+
+.agent-message--user {
+  justify-content: flex-end;
+}
+
+.agent-message--assistant,
+.agent-message--meta {
+  justify-content: flex-start;
+}
+
+.agent-message__bubble {
+  position: relative;
+  border-radius: 16px;
+  padding: 10px 14px;
+  max-width: 80%;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-message--user .agent-message__bubble {
+  background: rgba(255, 16, 240, 0.12);
+  border: 1px solid var(--neon-pink);
+  box-shadow: 0 0 10px rgba(255, 16, 240, 0.45);
+  color: #ffd0f5;
+}
+
+.agent-message--user .agent-message__bubble::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: 0;
+  width: 14px;
+  height: 12px;
+  background: rgba(255, 16, 240, 0.12);
+  border-right: 1px solid var(--neon-pink);
+  border-bottom: 1px solid var(--neon-pink);
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  box-shadow: 1px 1px 6px rgba(255, 16, 240, 0.4);
+}
+
+.agent-message--assistant .agent-message__bubble {
+  background: rgba(0, 238, 255, 0.10);
+  border: 1px solid var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(0, 238, 255, 0.4);
+  color: #daffff;
+}
+
+.agent-message--assistant .agent-message__bubble::after {
+  content: '';
+  position: absolute;
+  left: -6px;
+  bottom: 0;
+  width: 14px;
+  height: 12px;
+  background: rgba(0, 238, 255, 0.10);
+  border-left: 1px solid var(--neon-cyan);
+  border-bottom: 1px solid var(--neon-cyan);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  box-shadow: -1px 1px 6px rgba(0, 238, 255, 0.4);
+}
+
+/* Meta rows (system / tool) — no tail, smaller font, dimmer glow. */
+.agent-message--meta .agent-message__bubble {
+  background: transparent;
+  border: 1px dashed rgba(0, 238, 255, 0.25);
+  box-shadow: none;
+  color: rgba(218, 255, 255, 0.6);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+}
+
+/* Failed bubbles flip to red-tinted border (AC 5). */
+.agent-message--failed .agent-message__bubble {
+  border-color: #ff5050;
+  box-shadow: 0 0 10px rgba(255, 80, 80, 0.45);
+  color: #ffc0c0;
+}
+
+.agent-message--failed.agent-message--assistant .agent-message__bubble::after {
+  border-left-color: #ff5050;
+  border-bottom-color: #ff5050;
+  box-shadow: -1px 1px 6px rgba(255, 80, 80, 0.4);
+}
+
+.agent-message--failed.agent-message--user .agent-message__bubble::after {
+  border-right-color: #ff5050;
+  border-bottom-color: #ff5050;
+  box-shadow: 1px 1px 6px rgba(255, 80, 80, 0.4);
+}
+
+.agent-message--cancelled .agent-message__bubble {
+  opacity: 0.6;
+}
+
+/* ── Thinking indicator (AC 5) ─────────────────────────────────────────── */
+
+.agent-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.agent-thinking__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  box-shadow: 0 0 6px rgba(0, 238, 255, 0.8);
+  animation: agent-thinking-pulse 1.2s ease-in-out infinite;
+}
+
+.agent-thinking__dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.agent-thinking__dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes agent-thinking-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── Composer (AC 8) ───────────────────────────────────────────────────── */
+
+.agent-composer {
+  width: 100%;
+  resize: none;
+  overflow-y: auto;
+  background: var(--water-surface);
+  border: 1px solid rgba(0, 238, 255, 0.4);
+  border-radius: 6px;
+  color: #daffff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 10px;
+  outline: none;
+  transition:
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.agent-composer:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0, 238, 255, 0.5);
+}
+
+.agent-composer::placeholder {
+  color: rgba(218, 255, 255, 0.4);
+}
+
+/* ── Controls strip ────────────────────────────────────────────────────── */
+
+.agent-controls-row {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+
+.agent-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: transparent;
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(0, 238, 255, 0.25);
+  transition:
+    background 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.agent-btn:hover:not(:disabled) {
+  background: rgba(0, 238, 255, 0.12);
+  box-shadow: 0 0 12px rgba(0, 238, 255, 0.55);
+}
+
+.agent-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.agent-btn--new {
+  flex: 1;
+  text-align: left;
+}
+
+.agent-btn--sessions {
+  font-size: 16px;
+  padding: 4px 10px;
+}
+
+.agent-btn--active {
+  background: rgba(0, 238, 255, 0.18);
+}
+
+.agent-btn--send {
+  font-size: 14px;
+  padding: 4px 12px;
+}
+
+.agent-btn--stop {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+  box-shadow: 0 0 8px rgba(255, 16, 240, 0.4);
+}
+
+.agent-btn--stop:hover:not(:disabled) {
+  background: rgba(255, 16, 240, 0.15);
+  box-shadow: 0 0 12px rgba(255, 16, 240, 0.65);
+}
+
+.agent-btn--close {
+  font-size: 14px;
+  padding: 4px 10px;
+}
+
+.agent-btn--confirm-delete {
+  border-color: #ff5050;
+  color: #ff5050;
+  box-shadow: 0 0 8px rgba(255, 80, 80, 0.4);
+}
+
+.agent-btn--cancel {
+  border-color: rgba(218, 255, 255, 0.4);
+  color: rgba(218, 255, 255, 0.7);
+  box-shadow: none;
+}
+
+/* ── Sessions overlay (AC 7) ───────────────────────────────────────────── */
+
+.agent-sessions-menu {
+  position: absolute;
+  inset: 0;
+  background: var(--water-deep);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(0, 238, 255, 0.4);
+  animation: agent-sessions-slide-down 200ms ease-out;
+}
+
+@keyframes agent-sessions-slide-down {
+  from {
+    transform: translateY(-12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.agent-sessions-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--neon-cyan);
+  border-bottom: 1px solid rgba(0, 238, 255, 0.25);
+}
+
+.agent-sessions-menu__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.agent-sessions-menu__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0, 238, 255, 0.12);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: #daffff;
+}
+
+.agent-sessions-menu__row:hover {
+  background: rgba(0, 238, 255, 0.06);
+}
+
+.agent-sessions-menu__row--active {
+  background: rgba(0, 238, 255, 0.12);
+}
+
+.agent-sessions-menu__title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-sessions-menu__time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgba(218, 255, 255, 0.5);
+}
+
+.agent-sessions-menu__delete {
+  background: transparent;
+  border: none;
+  color: transparent;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.agent-sessions-menu__row:hover .agent-sessions-menu__delete {
+  color: #ff5050;
+  text-shadow: 0 0 6px rgba(255, 80, 80, 0.6);
+}
+
+.agent-sessions-menu__confirm {
+  display: flex;
+  gap: 6px;
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+
+.agent-sessions-menu__empty {
+  padding: 16px;
+  text-align: center;
+  color: rgba(218, 255, 255, 0.45);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ── New-messages pill (AC 6) ──────────────────────────────────────────── */
+
+.agent-panel__new-messages-pill {
+  position: sticky;
+  bottom: 8px;
+  align-self: center;
+  background: var(--water-deep);
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(0, 238, 255, 0.45);
+}

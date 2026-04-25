@@ -50,6 +50,16 @@ def _chunk_words(text: str) -> list[str]:
     line on the client. We now split on `\\n` first and emit each line
     break as its own chunk so the SSE consumer can reconstruct paragraph
     structure by concatenating the texts.
+
+    Story 6.2 fix: each non-first chunk on a line is prefixed with a
+    leading space so raw concatenation of every chunk reconstructs the
+    original prose with word boundaries intact. The previous shape
+    (``"hello"``, ``"world"``) concatenated to ``"helloworld"`` because
+    the SSE consumer in `useAgentSse` does a byte-level stitch — not a
+    space-joined merge — which surfaced as run-together output in the
+    chat panel (e.g. ``"don'thave access"``). Newline chunks reset the
+    "first chunk on line" flag so the chunk after a `\\n` does NOT pick
+    up an unwanted leading space.
     """
     lines = text.split("\n")
     chunks: list[str] = []
@@ -59,13 +69,21 @@ def _chunk_words(text: str) -> list[str]:
             break
         words = line.split()
         idx = 0
+        is_first_chunk_on_line = True
         while idx < len(words):
             if len(chunks) >= MAX_CHUNKS_PER_RUN:
                 truncated = True
                 break
             size = random.randint(2, 5)  # noqa: S311
             group = words[idx : idx + size]
-            chunks.append(" ".join(group))
+            text_part = " ".join(group)
+            # Restore the inter-chunk space the splitter consumed so
+            # `"".join(chunks)` round-trips to the original prose
+            # (modulo whitespace runs collapsed to single spaces).
+            if not is_first_chunk_on_line:
+                text_part = " " + text_part
+            chunks.append(text_part)
+            is_first_chunk_on_line = False
             idx += size
         if not truncated and i < len(lines) - 1:
             chunks.append("\n")

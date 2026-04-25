@@ -156,7 +156,10 @@ def chat(
             status_code=400,
         )
 
-    chat_service.create_message(db, session_id, role="user", content=body.content)
+    user_msg = chat_service.create_message(
+        db, session_id, role="user", content=body.content
+    )
+    user_msg_id = user_msg.id
     assistant_msg = chat_service.create_message(
         db, session_id, role="assistant", content="", status="pending"
     )
@@ -168,18 +171,27 @@ def chat(
 
     # Story 6.2 AC 12: load recent transcript for the chat skill. We
     # query AFTER inserting the user + assistant placeholder rows so
-    # `list_messages` returns them too, then filter the placeholder out.
-    # Older messages with status != 'complete' (failed, cancelled,
-    # streaming) are also dropped — the agent shouldn't see partial /
-    # broken turns when reasoning about context.
-    raw_history = chat_service.list_messages(db, session_id, limit=_HISTORY_WINDOW)
+    # the new turn is in scope, then filter both of them out (the
+    # latest user message is fed in separately as the Task description's
+    # "User's latest message:" line — including it twice wastes tokens;
+    # the assistant placeholder is `status='pending'` and isn't useful
+    # context). `list_recent_messages` returns the MOST RECENT N rows
+    # in chronological order — crucial for sessions longer than the
+    # window where plain `list_messages(... limit=N)` would return the
+    # OLDEST N rows instead of the LATEST N. We fetch
+    # `_HISTORY_WINDOW + 2` to absorb the two filtered rows so the
+    # agent still receives a full window's worth of useful context.
+    raw_history = chat_service.list_recent_messages(
+        db, session_id, limit=_HISTORY_WINDOW + 2
+    )
+    excluded_ids = {user_msg_id, assistant_msg_id}
     history = tuple(
         m
         for m in raw_history
         if m.status == "complete"
         and m.role in ("user", "assistant")
-        and m.id != assistant_msg_id
-    )
+        and m.id not in excluded_ids
+    )[-_HISTORY_WINDOW:]
 
     q: queue.Queue[dict[str, Any] | None] = queue.Queue()
     cancel_event = threading.Event()

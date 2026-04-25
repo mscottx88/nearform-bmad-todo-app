@@ -172,16 +172,88 @@ class TestChatEndpoint:
         # Tuple, not list — SkillContext is frozen.
         assert isinstance(history, tuple)
         # First-turn pair survived; failed row filtered out; in-flight
-        # assistant placeholder filtered out; just-inserted user message
-        # for "second turn" is included (it's `complete`, status default).
+        # assistant placeholder filtered out; AND the just-inserted user
+        # message ("second turn") is filtered out — the chat skill feeds
+        # `ctx.user_message` separately as "User's latest message:" so
+        # including it in the transcript would double it up.
         roles_and_content = [(m.role, m.content) for m in history]
         assert ("user", "first turn") in roles_and_content
         assert ("assistant", "first reply") in roles_and_content
         assert ("assistant", "oops") not in roles_and_content
-        # The pending placeholder for THIS turn must not appear.
+        assert ("user", "second turn") not in roles_and_content
+        # All surviving rows are complete user/assistant turns.
         for m in history:
             assert m.status == "complete"
             assert m.role in ("user", "assistant")
+
+    # Story 6.2 AC 12: when a session is longer than the history window,
+    # the chat handler must use the MOST-RECENT-N strategy. Otherwise
+    # the agent gets the oldest 20 messages and silently loses context
+    # on long-running conversations.
+    def test_chat_history_picks_latest_messages_for_long_sessions(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        from src.api.agent import _HISTORY_WINDOW  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        # Seed the session with strictly more than the history window so
+        # the OLDEST-N vs LATEST-N branches diverge.
+        seed_count = _HISTORY_WINDOW + 5
+        for i in range(seed_count):
+            chat_service.create_message(
+                db_session, session.id, role="user", content=f"old-{i}"
+            )
+
+        captured: dict[str, Any] = {}
+
+        def _capture_run(ctx: Any, _skill: str, _msg_id: Any) -> Any:
+            from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+
+            captured["history"] = ctx.history
+            return CrewResult(success=True, prose="ok", error=None)
+
+        def _fake_stream(_q: Any) -> Iterator[str]:
+            yield 'data: {"type":"done"}\n\n'
+
+        class _ImmediateThread:
+            def __init__(self, target: Any, daemon: bool = False) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        with (
+            patch("src.api.agent.threading.Thread", _ImmediateThread),
+            patch("src.api.agent._classify_intent", return_value="chat"),
+            patch("src.api.agent.get_llm_for_agent", return_value=MagicMock()),
+            patch("src.api.agent.run_crew", side_effect=_capture_run),
+            patch("src.api.agent.stream_sse", side_effect=_fake_stream),
+        ):
+            resp = client.post(
+                f"/api/agent/sessions/{session.id}/chat",
+                json={"content": "the latest user turn"},
+            )
+        assert resp.status_code == 200
+
+        history = captured["history"]
+        # Window is filled — the chat handler fetches WINDOW + 2 to
+        # absorb the latest user message and the assistant placeholder
+        # that get filtered out, so the surviving history is exactly
+        # `_HISTORY_WINDOW` rows of useful context.
+        assert len(history) == _HISTORY_WINDOW
+        contents = [m.content for m in history]
+        # The OLDEST seeded message must NOT appear (out of window).
+        assert "old-0" not in contents
+        # The latest user turn was filtered out (handed to the skill
+        # via ctx.user_message separately).
+        assert "the latest user turn" not in contents
+        # The most-recent seeded rows are inside the window.
+        assert f"old-{seed_count - 1}" in contents
+        # Specifically: the surviving messages are old-{seed_count -
+        # _HISTORY_WINDOW} through old-{seed_count - 1}, in order.
+        expected_first_in_window = f"old-{seed_count - _HISTORY_WINDOW}"
+        assert contents[0] == expected_first_in_window
+        assert contents[-1] == f"old-{seed_count - 1}"
 
 
 # Story 6.1 CR Group E TP3: P29 GET /sessions/{id} endpoint.

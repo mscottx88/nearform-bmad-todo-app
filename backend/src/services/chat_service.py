@@ -67,6 +67,36 @@ def list_messages(
     return [ChatMessageResponse.model_validate(r) for r in rows]
 
 
+def list_recent_messages(
+    db: Session,
+    session_id: uuid.UUID,
+    limit: int,
+) -> list[ChatMessageResponse]:
+    """Return the MOST RECENT `limit` messages, oldest → newest.
+
+    Story 6.2 AC 12: the chat handler needs the last N messages as a
+    sliding context window — `list_messages` orders ASC + LIMIT, which
+    silently returns the OLDEST N when the session has more than `limit`
+    rows (exactly the opposite of what we want for context). This helper
+    queries DESC + LIMIT then flips back to chronological order so the
+    transcript reads naturally when prepended to the agent prompt.
+    """
+    get_session(db, session_id)
+    effective_limit = max(_LIST_MESSAGES_MIN, min(limit, _LIST_MESSAGES_HARD_CAP))
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        # Tiebreak on `id` for determinism when two rows share a
+        # microsecond-precision created_at (mirrors `list_sessions`'
+        # post-CR ordering — same problem, same solution).
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+        .limit(effective_limit)
+        .all()
+    )
+    rows.reverse()
+    return [ChatMessageResponse.model_validate(r) for r in rows]
+
+
 def create_message(
     db: Session,
     session_id: uuid.UUID,

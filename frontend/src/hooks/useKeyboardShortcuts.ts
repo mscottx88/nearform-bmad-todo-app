@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useAgentStore } from '../stores/useAgentStore';
 import { usePondStore } from '../stores/usePondStore';
 
 // Story 3.3: the callback now receives the initial input value — the
@@ -49,6 +50,16 @@ export function useKeyboardShortcuts(onOpenInput: OpenInputCallback) {
         e.preventDefault();
         e.stopImmediatePropagation();
         onOpenInput('/');
+        return;
+      }
+
+      // Story 6.2 AC 1: F1 toggles the agent chat panel. preventDefault
+      // suppresses the browser's native F1 help shortcut. Same input-
+      // focus filter as Enter / `/` above so F1 inside TodoInput,
+      // textarea, contenteditable, etc. is NOT captured.
+      if (e.key === 'F1') {
+        e.preventDefault();
+        useAgentStore.getState().togglePanel();
         return;
       }
     };

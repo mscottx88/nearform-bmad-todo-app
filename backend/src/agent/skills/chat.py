@@ -1,3 +1,5 @@
+import textwrap
+
 from crewai import Crew, Process, Task
 
 from src.agent.skills.base import build_base_agent
@@ -18,12 +20,28 @@ def _format_task_description(ctx: SkillContext) -> str:
     to call `GetChatHistoryTool` on every turn for short follow-ups
     like "and what about that one?". `GetChatHistoryTool` stays
     registered for deeper-than-window lookups.
+
+    Prompt blocks use indented triple-quoted strings + `textwrap.dedent`
+    so the source-code indentation reads naturally without leaking into
+    the prompt the LLM sees. Anything inside `{...}` interpolation
+    (transcript, latest message) bypasses dedent's leading-whitespace
+    detection because dedent inspects only constant-string lines.
     """
     if not ctx.history:
         return ctx.user_message
-    transcript_lines = [f"{m.role}: {m.content}" for m in ctx.history]
-    transcript_block = "Conversation so far:\n" + "\n".join(transcript_lines)
-    return f"{transcript_block}\n\nUser's latest message: {ctx.user_message}"
+    transcript_lines = "\n".join(f"{m.role}: {m.content}" for m in ctx.history)
+    template = textwrap.dedent(
+        """\
+        Conversation so far:
+        {transcript_lines}
+
+        User's latest message: {user_message}
+        """
+    ).rstrip()
+    return template.format(
+        transcript_lines=transcript_lines,
+        user_message=ctx.user_message,
+    )
 
 
 def build(ctx: SkillContext) -> Crew:
