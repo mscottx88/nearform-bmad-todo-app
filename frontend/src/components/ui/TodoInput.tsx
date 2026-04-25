@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { useCreateTodo } from '../../api/todoApi';
@@ -12,7 +12,6 @@ import {
   worldFromVisibility,
   type SlashCommand,
 } from '../../utils/slashCommands';
-import { NeonScrollbar } from './NeonScrollbar';
 import './TodoInput.css';
 
 interface TodoInputProps {
@@ -37,21 +36,7 @@ function generatePosition(): { positionX: number; positionY: number } {
 }
 
 export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps) {
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  // Separate state-backed ref so NeonScrollbar (overlay mode) re-runs
-  // its layout effects when the textarea actually mounts. A plain
-  // useRef would still hold null on the first render and the
-  // scrollbar tracks would never bind. Pattern lifted from
-  // InfoPopup's edit-mode textarea wiring.
-  const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
-  // useCallback so React doesn't see a fresh ref function on every
-  // render (which would call setTextareaRefs(null) then
-  // setTextareaRefs(el) on each render — churning state and
-  // forcing NeonScrollbar to reattach its observers every cycle).
-  const setTextareaRefs = useCallback((el: HTMLTextAreaElement | null) => {
-    inputRef.current = el;
-    setTextareaEl(el);
-  }, []);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [dissolving, setDissolving] = useState(false);
   const [value, setValue] = useState(initialValue);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -88,20 +73,6 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
     }
   }, [isOpen, initialValue]);
 
-  // Auto-grow the textarea so it shrinks back to a single line on
-  // empty / one-line content and grows up to its CSS `max-height`
-  // (30vh) cap as the user types. Beyond the cap the textarea
-  // scrolls internally and the NeonScrollbar overlay's thumb
-  // appears — without this resetting/measuring the textarea would
-  // stay stuck at the `rows={1}` intrinsic height with internal
-  // scroll always active, which is jarring for short input.
-  useEffect(() => {
-    const el = inputRef.current;
-    if (el === null) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
-
   // Compute virtual world + fragment (AC #9) — each keystroke walks
   // every complete token forward and the dropdown filters on the
   // accumulated virtual state.
@@ -130,11 +101,11 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
 
   if (!isOpen && !dissolving) return null;
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       onClose();
       return;
@@ -170,10 +141,6 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
     }
 
     if (e.key === 'Enter') {
-      // Shift+Enter and Ctrl+Enter insert a literal newline (the
-      // textarea's native default). Plain Enter submits.
-      if (e.shiftKey || e.ctrlKey) return;
-      e.preventDefault();
       const trimmed = value.trim();
       if (!trimmed) return;
 
@@ -221,29 +188,18 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
   return createPortal(
     <div className="todo-input-overlay">
       <div className="todo-input-shell">
-        <div className="todo-input__textbox">
-          <textarea
-            ref={setTextareaRefs}
-            className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
-            placeholder="what's on your mind..."
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onBlur={onClose}
-            rows={1}
-          />
-          {/*
-            Overlay-mode NeonScrollbar paints the cyan thumb against the
-            textarea's native scrollTop/scrollHeight. The native
-            scrollbar is hidden by global.css's `::-webkit-scrollbar
-            { display: none }`, so without this overlay the user can
-            scroll past the 30vh max-height but has no visual
-            indicator that there's hidden content above/below.
-          */}
-          <NeonScrollbar color="cyan" scrollElement={textareaEl} />
-        </div>
+        <input
+          ref={inputRef}
+          className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
+          type="text"
+          placeholder="what's on your mind..."
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onBlur={onClose}
+        />
         <span className="todo-input-hint" aria-hidden="true">
-          enter to save · shift+enter for new line · esc to dismiss
+          enter to save · esc to dismiss
         </span>
         {showDropdown && (
           <ul
