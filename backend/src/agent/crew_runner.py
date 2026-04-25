@@ -3,11 +3,27 @@ import queue
 import random
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from src.agent.skills.registry import SKILL_REGISTRY, SkillContext
 
 AGENT_CHUNK_DELAY_MS: int = 50
+
+
+@dataclass(frozen=True)
+class CrewResult:
+    """Outcome of `run_crew` for the API layer to finalise the assistant row.
+
+    Story 6.1 CR P24 introduced this so the wrapper in `api/agent.py` can
+    write `content=prose, status='complete'` on success or
+    `content='Agent run failed', status='failed', error=...` on failure
+    — without the wrapper having to inspect the streamed event queue.
+    """
+
+    success: bool
+    prose: str
+    error: str | None
 
 
 def _chunk_words(text: str) -> list[str]:
@@ -35,21 +51,16 @@ def _chunk_words(text: str) -> list[str]:
     return chunks
 
 
-def run_crew(ctx: SkillContext, skill_name: str) -> None:
+def run_crew(ctx: SkillContext, skill_name: str) -> CrewResult:
     """Run the crew in a daemon thread, emitting SSE events via ctx.event_queue.
 
-    Story 6.1 CR P16: the terminal `None` sentinel is now enqueued in a
-    `finally` block so it is guaranteed even if the `except` handler
-    itself raises (e.g. queue op fails, `str(exc)` raises on an exotic
-    exception). Without this, `stream_sse` would block forever on
-    `queue.get()` and hang the HTTP worker.
-
-    Story 6.1 CR P20: an empty LLM response now surfaces as an
-    `agent_empty_response` error event instead of emitting an empty-text
-    chunk followed by `done` (which the client would render as a blank
-    assistant bubble).
+    Returns a `CrewResult` so the calling wrapper can finalise the
+    assistant DB row (Story 6.1 CR P24). The terminal `None` sentinel is
+    enqueued in a `finally` block (P16). An empty LLM response surfaces
+    as `agent_empty_response` and is reported as a failed result (P20).
     """
     q: queue.Queue[dict[str, Any] | None] = ctx.event_queue
+    prose = ""
     try:
         spec = SKILL_REGISTRY[skill_name]
         crew = spec.builder(ctx)
@@ -76,7 +87,7 @@ def run_crew(ctx: SkillContext, skill_name: str) -> None:
                     "recoverable": True,
                 }
             )
-            return
+            return CrewResult(success=False, prose="", error="agent returned no content")
 
         # Cap total simulated typing at 3 seconds.
         raw_delay_s = AGENT_CHUNK_DELAY_MS / 1000.0
@@ -90,6 +101,7 @@ def run_crew(ctx: SkillContext, skill_name: str) -> None:
             time.sleep(actual_delay_s)
 
         q.put({"type": "done"})
+        return CrewResult(success=True, prose=prose, error=None)
 
     except Exception as exc:  # noqa: BLE001
         q.put(
@@ -100,6 +112,7 @@ def run_crew(ctx: SkillContext, skill_name: str) -> None:
                 "recoverable": False,
             }
         )
+        return CrewResult(success=False, prose="", error=str(exc))
     finally:
         q.put(None)
 

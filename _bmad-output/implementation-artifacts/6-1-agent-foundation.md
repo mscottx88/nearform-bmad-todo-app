@@ -566,6 +566,25 @@ Wire the router into [backend/src/main.py](backend/src/main.py): `from src.api.a
 - [x] [Review][Defer] `stream_sse` uses `queue.get()` with no timeout — can hang if the producer thread dies BEFORE entering the `try:` block (e.g. interpreter-level failure). Add a watchdog timeout with a heartbeat pattern.
 - [x] [Review][Defer] `search_service.hybrid_search` doesn't accept a `limit` param; `SearchTodosTool` slices `response.results[:limit]` client-side. Push the cap into the service signature in a future story that owns `search_service`.
 
+### Review Findings (Group D — API + wiring) — 2026-04-24
+
+- [x] [Review][Patch] `cancel_chat` is no longer a global kill-switch. `_CANCEL_MAP` is now a two-level `dict[session_id, dict[message_id, Event]]`; cancel only sets the events bound to the supplied session, leaving every other session untouched [backend/src/api/agent.py]
+- [x] [Review][Patch] `_run_and_finalise` now writes the assistant DB row on BOTH success and failure paths. `run_crew` returns a `CrewResult` dataclass; the wrapper calls `chat_service.update_message(content=prose, status='complete', skill=resolved_skill)` on success or `content='Agent run failed.', status='failed', error=str(exc)` on failure. Previously the success path was an unimplemented TODO and rows stayed `status='pending'` with empty content forever (AC 10 violation) [backend/src/api/agent.py, backend/src/agent/crew_runner.py]
+- [x] [Review][Patch] Reject `body.skill == "intent_classifier"` (and any future internal-only skills via `_INTERNAL_SKILLS`). Internal routing primitive can no longer be invoked as a user-facing skill [backend/src/api/agent.py]
+- [x] [Review][Patch] `_classify_intent` uses `SKILL_REGISTRY["intent_classifier"].builder` via the registry already imported at module top. Dropped the local-import workaround + dead `# isort: skip_file` comment [backend/src/api/agent.py]
+- [x] [Review][Patch] `_CANCEL_MAP` mutations now go through a `threading.Lock`. The chat handler, the worker thread's `finally`, and `cancel_chat` all touch the dict concurrently; without the lock, `RuntimeError: dictionary changed size during iteration` was reachable [backend/src/api/agent.py]
+- [x] [Review][Patch] Failure-path `update_message` no longer leaks `str(exc)` into the user-visible `content` column (LLM-client exceptions can carry the prompt / API key). Generic `"Agent run failed."` goes into `content`; raw exception text only into `error` [backend/src/api/agent.py]
+- [x] [Review][Patch] Added `GET /api/agent/sessions/{id}` endpoint required by AC 2 — returns `ChatSessionResponse` or 404 via `ChatSessionNotFoundError` [backend/src/api/agent.py]
+
+- [x] [Review][Defer] `cancel_event` is now stored under the correct session key but still not plumbed into `SkillContext` / read by `run_crew` — even after fixing the global-cancel bug, `event.set()` has no effect on the running crew thread. Same root cause as Group C D-23 (no cancellation plumbing through SkillContext); fix together when cancellation is wired end-to-end.
+- [x] [Review][Defer] User+assistant inserts are not transactional — assistant-insert failure leaves a user-message orphan on retry. Spec language ("both committed before thread starts") is satisfied via two consecutive commits, but a single transaction would be safer if real failures appear.
+- [x] [Review][Defer] `_CANCEL_MAP` outer entries can leak if the worker thread is killed before its `finally` runs (process SIGKILL, hard interpreter exit). Add a TTL sweeper if leak becomes observable.
+- [x] [Review][Defer] Routes have no auth / per-user scoping — any UUID-aware client can read/delete/chat any session. Subsumes Group C D-24; out of epic scope.
+- [x] [Review][Defer] `_run_and_finalise` daemon thread has no LLM-call timeout — a hung CrewAI call leaves the SSE connection open indefinitely.
+- [x] [Review][Defer] Worker-thread `update_message` failures (other than `ChatMessageNotFoundError`) bubble unhandled — daemon thread dies with traceback to stderr, no DB record of the failure. Add a final fallback that just logs.
+- [x] [Review][Defer] `body.skill` accepts only exact lowercase matches — no `strip()`/`lower()` normalisation. Asymmetric with the whitespace-only validator on `content`.
+- [x] [Review][Defer] `lifespan` is `async def` for FastAPI's framework contract — pre-existing; the warning addition perpetuates it. Constitutional principle is "body must be sync", which holds.
+
 ---
 
 ## Dev Notes
