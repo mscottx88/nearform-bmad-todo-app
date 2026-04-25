@@ -172,30 +172,6 @@ export function PondCamera() {
     };
   }, [gl, handlePointerDown, handlePointerUp, handleWheel, handlePointerMove, handleMmbOrCancel]);
 
-  // Story 6.2 polish: also accept Shift+RMB-Drag for camera rotation
-  // alongside the OrbitControls built-in Ctrl+RMB swap. Mac browsers
-  // map Ctrl+click to a context menu on some configurations, making
-  // the Ctrl modifier awkward — Shift is universally available on
-  // both Mac and Windows. We swap `mouseButtons.RIGHT` between PAN
-  // and ROTATE based on the live Shift state; OrbitControls reads
-  // this object on every mousedown, so the swap takes effect on
-  // the very next drag.
-  useEffect(() => {
-    const sync = (e: KeyboardEvent) => {
-      const ctrls = controlsRef.current;
-      if (!ctrls) return;
-      ctrls.mouseButtons.RIGHT = e.shiftKey
-        ? THREE.MOUSE.ROTATE
-        : THREE.MOUSE.PAN;
-    };
-    window.addEventListener('keydown', sync);
-    window.addEventListener('keyup', sync);
-    return () => {
-      window.removeEventListener('keydown', sync);
-      window.removeEventListener('keyup', sync);
-    };
-  }, []);
-
   useFrame(() => {
     const controls = controlsRef.current;
     if (!controls) return;
@@ -318,9 +294,14 @@ export function PondCamera() {
       // Story 4.2: LEFT is intentionally omitted so plain left-
       // button drag is always a pad interaction (click or drag), never
       // a camera pan. RIGHT is bound to PAN as the primary navigation
-      // gesture; OrbitControls' built-in modifier swap on the PAN
-      // button means Ctrl+RMB drag becomes ROTATE (adjust yaw / tilt).
-      // So: plain RMB = pan, Ctrl+RMB = rotate.
+      // gesture. OrbitControls' built-in modifier handler treats
+      // Ctrl, Meta, AND Shift as the "swap" key on the PAN button,
+      // so any of those + RMB-drag rotates the camera (adjust yaw /
+      // tilt) — see three-stdlib OrbitControls onMouseDown, case
+      // MOUSE.PAN. So: plain RMB = pan, Shift/Ctrl/Meta + RMB =
+      // rotate. We surface only the Shift form in the on-screen hint
+      // because Ctrl conflicts with the right-click menu on some
+      // Mac configurations.
       mouseButtons={{
         RIGHT: THREE.MOUSE.PAN,
       }}
