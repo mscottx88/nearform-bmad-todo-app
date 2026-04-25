@@ -22,6 +22,15 @@ If this file grows faster than it drains, something's wrong with the process, no
 
 ---
 
+## Deferred from: code review of story 6-2-chat-panel — Group B frontend chat (2026-04-25)
+
+- `[OPEN]` `useAgentSse` has no idle-timeout on the SSE stream. A hung backend holding the connection open without sending bytes leaves the chat bubble in `streaming` state forever; only manual cancel saves the user. Add a configurable read-timeout / heartbeat check when the hardening pass for SSE plumbing happens. (frontend/src/hooks/useAgentSse.ts)
+- `[OPEN]` Persist schema for `useAgentStore` is `name: 'agent-store-v1'` with no `version` / `migrate` / `merge` callbacks. Future shape changes will silently merge stale localStorage blobs into the new schema (potential runtime crash on type drift). Add versioning when the first breaking change actually lands. (frontend/src/stores/useAgentStore.ts:partialize)
+- `[OPEN]` `parseAgentMessage` doesn't handle URL-encoded UUIDs in `todo://%XX...` form — the system prompt instructs the agent to emit raw UUIDs. Defer until observed in the wild. (frontend/src/utils/parseAgentMessage.ts:TODO_LINK_RE)
+- `[OPEN]` `AgentSessionsMenu` clears the confirm-delete state on row A silently when the user clicks × on row B. Probably intentional (one-confirm-at-a-time policy), but no visual feedback that the prior confirm was dismissed. Cosmetic. (frontend/src/components/agent/AgentSessionsMenu.tsx:onDeleteClick)
+
+---
+
 ## Deferred from: code review of story 6-2-chat-panel — Group A backend (2026-04-25)
 
 - `[OPEN]` `stream_sse` blocks indefinitely on `event_queue.get()` if the worker thread is killed externally between `run_crew` returning and `finalise_assistant_message` starting (no timeout/watchdog). Pre-existing pattern from Story 6.1. (backend/src/agent/crew_runner.py:170-176)

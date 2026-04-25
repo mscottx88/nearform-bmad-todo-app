@@ -67,11 +67,14 @@ interface PersistedShape {
  *  inserted before the first SSE `start` event arrives. The server's
  *  real assistant_message_id replaces this on `start`. */
 const OPTIMISTIC_ASSISTANT_PREFIX = 'optimistic-assistant-';
+const OPTIMISTIC_USER_PREFIX = 'optimistic-user-';
 
-function makeOptimisticId(): string {
-  return `${OPTIMISTIC_ASSISTANT_PREFIX}${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`;
+function makeOptimisticId(prefix: string): string {
+  // Story 6.2 Group B CR P10: include a random suffix on BOTH user and
+  // assistant optimistic ids — two sends within the same millisecond
+  // would otherwise collide as React keys (assistant id already had a
+  // random suffix; user id used to be timestamp-only).
+  return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Outside of state because abort handles aren't serialisable; we only
@@ -79,6 +82,37 @@ function makeOptimisticId(): string {
 let activeStreamHandle: AgentChatStreamHandle | null = null;
 /** The optimistic id that the next `start` event should rebind. */
 let pendingOptimisticAssistantId: string | null = null;
+/**
+ * Story 6.2 Group B CR P3: monotonically increasing token. Each
+ * `sendMessage` call captures `myStreamId = ++activeStreamId`. SSE
+ * callbacks for that stream gate on `myStreamId === activeStreamId` —
+ * if the token has been bumped (by a newer send, by `cancelStreaming`,
+ * or by `switchSession`), the callback bails. Solves the race where
+ * a previous stream's events leak into a new session/send.
+ *
+ * Also closes Group B CR P2 (start-after-cancel reanimation): cancel
+ * bumps the token, so any late-arriving `start` event from the
+ * cancelled stream is dropped at the gate before it can rebind the
+ * optimistic id and re-enter streaming state.
+ */
+let activeStreamId = 0;
+
+/** Story 6.2 Group B CR P5: monotonically increasing token for
+ *  message-list loads. `switchSession` and `loadActiveMessages` each
+ *  capture a token; the response is applied only if the token still
+ *  matches. Without this, rapid A → B switches where A's getMessages
+ *  resolves last would paint A's messages while `activeSessionId === 'b'`. */
+let activeMessagesLoadId = 0;
+
+function abortActiveStream(): void {
+  // Story 6.2 Group B CR P1: pulled out so `switchSession` can call
+  // it too. Bumps the token to invalidate any in-flight callbacks
+  // from the prior stream.
+  activeStreamId++;
+  activeStreamHandle?.abort();
+  activeStreamHandle = null;
+  pendingOptimisticAssistantId = null;
+}
 
 export const useAgentStore = create<AgentState>()(
   persist(
@@ -98,7 +132,20 @@ export const useAgentStore = create<AgentState>()(
 
       refreshSessions: async () => {
         const sessions = await agentApi.listSessions();
-        set({ sessions });
+        set((s) => {
+          // Story 6.2 Group B CR P6: if a persisted `activeSessionId`
+          // points at a session that's been deleted server-side, drop
+          // it so `loadActiveMessages` doesn't 404. Falls back to
+          // null; `AgentPanel` mount-effect creates a fresh session
+          // on first send.
+          const activeStillExists =
+            s.activeSessionId !== null &&
+            sessions.some((sess) => sess.id === s.activeSessionId);
+          if (!activeStillExists && s.activeSessionId !== null) {
+            return { sessions, activeSessionId: null, messages: [] };
+          }
+          return { sessions };
+        });
       },
 
       newSession: async () => {
@@ -114,6 +161,18 @@ export const useAgentStore = create<AgentState>()(
       },
 
       switchSession: async (id) => {
+        // Story 6.2 Group B CR P1: the old code cleared messages and
+        // streaming flags but did NOT abort the active stream — the
+        // previous session's reader kept running, leaking chunks into
+        // a `streamingMessageId` that no longer pointed at any
+        // visible message. Abort up front + invalidate the token so
+        // the prior stream's callbacks bail at their first event.
+        abortActiveStream();
+
+        // Story 6.2 Group B CR P5: capture a request token so a
+        // late-arriving `getMessages` from a SUPERSEDED switch can't
+        // overwrite the new session's messages.
+        const requestId = ++activeMessagesLoadId;
         set({
           activeSessionId: id,
           messages: [],
@@ -121,6 +180,7 @@ export const useAgentStore = create<AgentState>()(
           streamingBuffer: '',
         });
         const messages = await agentApi.getMessages(id);
+        if (requestId !== activeMessagesLoadId) return;
         set({ messages });
       },
 
@@ -142,8 +202,20 @@ export const useAgentStore = create<AgentState>()(
       loadActiveMessages: async () => {
         const id = get().activeSessionId;
         if (id === null) return;
-        const messages = await agentApi.getMessages(id);
-        set({ messages });
+        // P5: same token gate as `switchSession` — a rehydrate that
+        // races with a switch shouldn't paint the wrong session.
+        const requestId = ++activeMessagesLoadId;
+        try {
+          const messages = await agentApi.getMessages(id);
+          if (requestId !== activeMessagesLoadId) return;
+          if (get().activeSessionId !== id) return;
+          set({ messages });
+        } catch {
+          // P6: if the session vanished between rehydrate and load
+          // (e.g. deleted in another tab), don't bubble — let the
+          // panel remain empty and the next `refreshSessions` will
+          // clear `activeSessionId`.
+        }
       },
 
       sendMessage: async (content) => {
@@ -156,9 +228,14 @@ export const useAgentStore = create<AgentState>()(
           if (sessionId === null) return;
         }
 
+        // P3: capture per-stream token. SSE callbacks compare against
+        // the global `activeStreamId`; if a newer send / cancel /
+        // switch has bumped the token, this stream's callbacks bail.
+        const myStreamId = ++activeStreamId;
+
         const nowIso = new Date().toISOString();
-        const optimisticUserId = `optimistic-user-${Date.now()}`;
-        const optimisticAssistantId = makeOptimisticId();
+        const optimisticUserId = makeOptimisticId(OPTIMISTIC_USER_PREFIX);
+        const optimisticAssistantId = makeOptimisticId(OPTIMISTIC_ASSISTANT_PREFIX);
         pendingOptimisticAssistantId = optimisticAssistantId;
 
         const userMsg: ChatMessage = {
@@ -196,8 +273,14 @@ export const useAgentStore = create<AgentState>()(
             sessionId,
             content: trimmed,
             skill: null,
-            onEvent: (event) => get().ingestSseEvent(event),
+            onEvent: (event) => {
+              // P3 + P2 token gate: drop any event whose stream has
+              // been superseded (newer send, cancel, or switch).
+              if (myStreamId !== activeStreamId) return;
+              get().ingestSseEvent(event);
+            },
             onClose: (reason, err) => {
+              if (myStreamId !== activeStreamId) return;
               activeStreamHandle = null;
               pendingOptimisticAssistantId = null;
               if (reason === 'error' && err) {
@@ -231,7 +314,14 @@ export const useAgentStore = create<AgentState>()(
               set({ streamingMessageId: null, streamingBuffer: '' });
             },
           });
+          // If the token was bumped during the await (cancel / switch
+          // landed before fetch resolved), abort the freshly-returned
+          // handle instead of letting it leak.
+          if (myStreamId !== activeStreamId) {
+            activeStreamHandle?.abort();
+          }
         } catch (err) {
+          if (myStreamId !== activeStreamId) return;
           activeStreamHandle = null;
           pendingOptimisticAssistantId = null;
           const message = err instanceof Error ? err.message : String(err);
@@ -259,12 +349,22 @@ export const useAgentStore = create<AgentState>()(
           // address the same row when the optimistic id collides.
           const optimisticId = pendingOptimisticAssistantId;
           if (optimisticId === null) return;
-          set((s) => ({
-            messages: s.messages.map((m) =>
-              m.id === optimisticId ? { ...m, id: event.message_id } : m,
-            ),
-            streamingMessageId: event.message_id,
-          }));
+          set((s) => {
+            // Story 6.2 Group B CR P2: don't rebind a bubble that's
+            // already in a terminal state (cancelled / failed). A
+            // late-arriving `start` from a cancelled stream would
+            // otherwise undo the cancel by re-entering streaming.
+            const target = s.messages.find((m) => m.id === optimisticId);
+            if (target && target.status !== 'streaming') {
+              return {};
+            }
+            return {
+              messages: s.messages.map((m) =>
+                m.id === optimisticId ? { ...m, id: event.message_id } : m,
+              ),
+              streamingMessageId: event.message_id,
+            };
+          });
           pendingOptimisticAssistantId = null;
           return;
         }
@@ -319,11 +419,17 @@ export const useAgentStore = create<AgentState>()(
       },
 
       cancelStreaming: async () => {
+        // Story 6.2 Group B CR P12: short-circuit if there's nothing
+        // to cancel. Without this, clicking Stop after `done` already
+        // cleared streaming state still fires a server-side cancel —
+        // spamming the backend for completed runs.
+        if (activeStreamHandle === null && get().streamingMessageId === null) {
+          return;
+        }
         const sessionId = get().activeSessionId;
-        // Abort the local fetch so the bubble stops appending chunks
-        // immediately — the server-side cancel is best-effort.
-        activeStreamHandle?.abort();
-        activeStreamHandle = null;
+        // Abort the local fetch + bump the token so any late-arriving
+        // events from the cancelled stream bail at the onEvent gate.
+        abortActiveStream();
         set((s) => {
           const id = s.streamingMessageId;
           if (id === null) return { streamingMessageId: null, streamingBuffer: '' };
@@ -336,11 +442,10 @@ export const useAgentStore = create<AgentState>()(
           };
         });
         if (sessionId !== null) {
-          // Story 6.1 deferred: the server's cancel_event isn't fully
-          // plumbed into run_crew yet, so the worker keeps running and
-          // finalises the assistant row to `complete`. The frontend
-          // already stopped reading via abort(); this server call is
-          // a forward-compatibility hook for when the plumb lands.
+          // Group A CR P1 wired cancel_event into run_crew so this
+          // call now actually short-circuits the worker thread; the
+          // assistant row reaches DB status='cancelled' rather than
+          // streaming on through to 'complete'.
           try {
             await agentApi.cancelChat(sessionId);
           } catch {

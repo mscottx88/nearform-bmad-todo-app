@@ -70,4 +70,157 @@ describe('parseAgentMessage', () => {
     const result = parseAgentMessage(`[a](todo://${UUID_A}) suffix`);
     expect(result[result.length - 1]).toEqual({ kind: 'text', text: ' suffix' });
   });
+
+  // Story 6.2 Group B post-CR polish: basic inline markdown.
+  describe('inline markdown', () => {
+    it('renders **bold** as a bold segment', () => {
+      expect(parseAgentMessage('try the **Computer Backup** first')).toEqual([
+        { kind: 'text', text: 'try the ' },
+        { kind: 'bold', text: 'Computer Backup' },
+        { kind: 'text', text: ' first' },
+      ]);
+    });
+
+    it('renders *italic* as an italic segment', () => {
+      expect(parseAgentMessage('use *concise* labels')).toEqual([
+        { kind: 'text', text: 'use ' },
+        { kind: 'italic', text: 'concise' },
+        { kind: 'text', text: ' labels' },
+      ]);
+    });
+
+    it('renders `code` as an inline-code segment', () => {
+      expect(parseAgentMessage('look at `crew_runner.py` line 42')).toEqual([
+        { kind: 'text', text: 'look at ' },
+        { kind: 'code', text: 'crew_runner.py' },
+        { kind: 'text', text: ' line 42' },
+      ]);
+    });
+
+    it('does not split **bold** into mismatched italic markers', () => {
+      // Without the bold-first priority, this would mis-tokenize as
+      // italic + plain + italic.
+      const result = parseAgentMessage('**Pro Tip:**');
+      expect(result).toEqual([{ kind: 'bold', text: 'Pro Tip:' }]);
+    });
+
+    it('handles bold-then-todo-link mixed content', () => {
+      const result = parseAgentMessage(
+        `**Laundry** — batch with [folding](todo://${UUID_A}).`,
+      );
+      expect(result).toEqual([
+        { kind: 'bold', text: 'Laundry' },
+        { kind: 'text', text: ' — batch with ' },
+        { kind: 'todo-link', label: 'folding', todoId: UUID_A },
+        { kind: 'text', text: '.' },
+      ]);
+    });
+
+    it('falls through unclosed **bold opener as plain text', () => {
+      // While streaming, a half-arrived `**foo` should NOT swallow
+      // the rest of the bubble. Returns plain text until the closer
+      // arrives in a subsequent chunk.
+      expect(parseAgentMessage('halfway **through the')).toEqual([
+        { kind: 'text', text: 'halfway **through the' },
+      ]);
+    });
+
+    it('does not italicise mid-word arithmetic asterisks', () => {
+      // `a*b*c` (typical arithmetic) must NOT render as `a` + italic
+      // `b` + `c`. The word-boundary guard on the italic opener
+      // requires whitespace/punctuation before the leading `*`.
+      expect(parseAgentMessage('result is a*b*c here')).toEqual([
+        { kind: 'text', text: 'result is a*b*c here' },
+      ]);
+    });
+
+    it('renders multiple bold spans on the same line', () => {
+      expect(parseAgentMessage('**A** and **B**')).toEqual([
+        { kind: 'bold', text: 'A' },
+        { kind: 'text', text: ' and ' },
+        { kind: 'bold', text: 'B' },
+      ]);
+    });
+
+    it('aborts an inline opener that crosses a newline', () => {
+      // An opener-without-closer-on-same-line falls through as plain
+      // text — emphasis spanning paragraphs almost always means the
+      // LLM forgot to close, and treating it literally keeps the
+      // bubble readable.
+      expect(parseAgentMessage('start **bold\nnext line ends here**')).toEqual([
+        { kind: 'text', text: 'start **bold\nnext line ends here**' },
+      ]);
+    });
+  });
+
+  // Story 6.2 Group B post-CR polish: block-level markdown.
+  describe('block-level markdown', () => {
+    it('renders `# Title` as an h1 heading', () => {
+      expect(parseAgentMessage('# Pro Tip')).toEqual([
+        { kind: 'heading', level: 1, text: 'Pro Tip' },
+      ]);
+    });
+
+    it('renders `## Title` as an h2 heading', () => {
+      expect(parseAgentMessage('## Computer Backups')).toEqual([
+        { kind: 'heading', level: 2, text: 'Computer Backups' },
+      ]);
+    });
+
+    it('renders `### Title` as an h3 heading', () => {
+      expect(parseAgentMessage('### Sub-section')).toEqual([
+        { kind: 'heading', level: 3, text: 'Sub-section' },
+      ]);
+    });
+
+    it('renders `---` on its own line as a horizontal rule', () => {
+      expect(parseAgentMessage('---')).toEqual([{ kind: 'hr' }]);
+    });
+
+    it('tolerates trailing whitespace and longer dash runs in `---`', () => {
+      expect(parseAgentMessage('-----  ')).toEqual([{ kind: 'hr' }]);
+    });
+
+    it('does NOT render `####` (4 hashes) as a heading', () => {
+      // Only h1-h3 are supported; `####` should fall through as
+      // plain text rather than rendering as h4 (which we don't
+      // style) or being silently dropped.
+      expect(parseAgentMessage('#### Too deep')).toEqual([
+        { kind: 'text', text: '#### Too deep' },
+      ]);
+    });
+
+    it('does NOT render `#hashtag` (no space) as a heading', () => {
+      // Heading requires a space after the `#` markers, otherwise
+      // an inline `#hashtag` would be eaten.
+      expect(parseAgentMessage('use #hashtag here')).toEqual([
+        { kind: 'text', text: 'use #hashtag here' },
+      ]);
+    });
+
+    it('mixes block headings with inline-formatted prose', () => {
+      const content = `## Tasks
+Use **automated backup** software.
+---
+That's the plan.`;
+      const result = parseAgentMessage(content);
+      expect(result).toEqual([
+        { kind: 'heading', level: 2, text: 'Tasks' },
+        { kind: 'text', text: 'Use ' },
+        { kind: 'bold', text: 'automated backup' },
+        { kind: 'text', text: ' software.' },
+        { kind: 'hr' },
+        { kind: 'text', text: "That's the plan." },
+      ]);
+    });
+
+    it('preserves newlines BETWEEN consecutive prose lines', () => {
+      // Two non-block lines should still render with a line break
+      // between them when the result is concatenated as text.
+      const result = parseAgentMessage('first line\nsecond line');
+      expect(result).toEqual([
+        { kind: 'text', text: 'first line\nsecond line' },
+      ]);
+    });
+  });
 });

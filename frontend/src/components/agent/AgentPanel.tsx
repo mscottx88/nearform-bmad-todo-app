@@ -34,13 +34,14 @@ export function AgentPanel() {
   const closePanel = useAgentStore((s) => s.closePanel);
   const messages = useAgentStore((s) => s.messages);
   const streamingMessageId = useAgentStore((s) => s.streamingMessageId);
-  const draft = useAgentStore((s) => s.inputDraft);
-  const setDraft = useAgentStore((s) => s.setDraft);
+  // P9: `draft` and `setDraft` are no longer pulled via selectors —
+  // the Escape handler reads via `getState()` to avoid re-subscribing
+  // on every keystroke; `handleSend` does the same. The render path
+  // doesn't otherwise need to react to draft changes.
   const sendMessage = useAgentStore((s) => s.sendMessage);
   const refreshSessions = useAgentStore((s) => s.refreshSessions);
   const newSession = useAgentStore((s) => s.newSession);
   const loadActiveMessages = useAgentStore((s) => s.loadActiveMessages);
-  const activeSessionId = useAgentStore((s) => s.activeSessionId);
 
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -49,28 +50,45 @@ export function AgentPanel() {
   // Refresh sessions + load active messages on open. The store's
   // `panelOpen` flips synchronously; we react to that here so the
   // network call only fires once per false→true transition.
+  //
+  // Story 6.2 Group B CR P6: previously these two calls fired in
+  // parallel — `loadActiveMessages` could 404 on a persisted-but-
+  // server-deleted session before `refreshSessions` got a chance to
+  // clear `activeSessionId`. Sequence them so refresh validates the
+  // persisted id first; loadActiveMessages then reads the post-
+  // validation state via getState().
   useEffect(() => {
     if (!panelOpen) return;
-    void refreshSessions();
-    if (activeSessionId !== null) {
-      void loadActiveMessages();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void (async () => {
+      await refreshSessions();
+      if (useAgentStore.getState().activeSessionId !== null) {
+        await loadActiveMessages();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panelOpen-only
   }, [panelOpen]);
 
   // Escape handling — see AC 1. Listen at the panel root so the panel
   // doesn't intercept Escape when it's closed (mounted-but-hidden via
   // the slide animation). The composer's own focused-empty branch is
   // kept here too so this single handler is the one source of truth.
+  //
+  // Story 6.2 Group B CR P9: read `inputDraft` via `getState()` inside
+  // the handler instead of subscribing via the `draft` selector and
+  // listing it in the deps array. The previous shape unbound and
+  // rebound the global keydown listener on every keystroke (since
+  // `draft` changes on every character), wasting work and creating a
+  // brief window where Escape during the listener swap could be missed.
   useEffect(() => {
     if (!panelOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       const composerFocused = document.activeElement === composerRef.current;
-      const hasDraft = draft.trim().length > 0;
+      const store = useAgentStore.getState();
+      const hasDraft = store.inputDraft.trim().length > 0;
       if (composerFocused && hasDraft) {
         e.preventDefault();
-        setDraft('');
+        store.setDraft('');
         return;
       }
       e.preventDefault();
@@ -78,12 +96,16 @@ export function AgentPanel() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [panelOpen, draft, closePanel, setDraft]);
+  }, [panelOpen, closePanel]);
 
   const handleSend = useCallback(() => {
+    // P9: read latest draft at click-time via getState() so this
+    // callback doesn't have to re-create on every keystroke (which
+    // would cascade re-renders down to AgentControlsRow).
+    const draft = useAgentStore.getState().inputDraft;
     if (draft.trim().length === 0) return;
     void sendMessage(draft);
-  }, [draft, sendMessage]);
+  }, [sendMessage]);
 
   const handleNewChat = useCallback(() => {
     void newSession();

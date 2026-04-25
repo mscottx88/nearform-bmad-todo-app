@@ -1,5 +1,5 @@
 /**
- * `/help` carve-out for TodoInput.
+ * `/help` carve-out for TodoInput + autocomplete-dropdown registration.
  *
  * Story 6.2 AC 2: `/help` opens the agent panel with an empty composer;
  * `/help <text>` opens the panel with `<text>` pre-filled. The match
@@ -8,14 +8,13 @@
  * `/help <text>` form (with arbitrary trailing text) doesn't get
  * mis-parsed by the registry walker.
  *
- * `registerHelpCommand` is a separate concern: it adds a registry
- * entry so `/help` shows up in the autocomplete dropdown alongside
- * the other slash commands. The carve-out above always wins on
- * Enter, so the registry entry's `execute()` only runs in the
- * defensive case where the parser path somehow misses the form
- * (e.g. if the carve-out is removed in the future). Keeping both
- * paths means discoverability AND the existing parser carve-out
- * keep working.
+ * Story 6.2 Group B CR D3 (choice C): the registry-entry is also
+ * registered so `/help` shows up in the slash-autocomplete dropdown
+ * for discoverability — but it delegates to the SAME activation
+ * function the carve-out uses, rather than running a parallel
+ * implementation. One source of truth for what "/help activates":
+ * `activateAgentHelp(prefill)`. Both the TodoInput Enter carve-out
+ * and the registry-entry's `execute()` call it.
  */
 
 import { registerCommand, type SlashCommand, type WorldSnapshot } from './slashCommands';
@@ -36,12 +35,31 @@ export function parseHelpCommand(text: string): HelpCommandResult | null {
 }
 
 /**
+ * Single source of truth for activating the agent panel via `/help`.
+ * Used by:
+ *   - TodoInput's Enter carve-out (after `parseHelpCommand` returns
+ *     a non-null result), and
+ *   - the slash-autocomplete dropdown's `execute()` (registered
+ *     below).
+ *
+ * Bare `/help` opens the panel with an empty composer; the prefill
+ * form opens it AND seeds the composer's draft so the user's intent
+ * carries over.
+ */
+export function activateAgentHelp(prefill: string = ''): void {
+  const store = useAgentStore.getState();
+  store.openPanel();
+  if (prefill) {
+    store.setDraft(prefill);
+  }
+}
+
+/**
  * Register `/help` against the global slash-command registry so it
- * appears in TodoInput's autocomplete dropdown. The registry entry
- * is a no-op `project` (never mutates the world) and an `execute`
- * that opens the agent panel — a defensive fallback path; the
- * primary entry point is the `parseHelpCommand` carve-out in
- * TodoInput's Enter handler, which fires BEFORE the registry walk.
+ * appears in TodoInput's autocomplete dropdown. The `execute` path
+ * delegates to `activateAgentHelp('')` — same activation function
+ * the carve-out uses, just with no prefill (the dropdown variant
+ * doesn't carry trailing text).
  */
 export function registerHelpCommand(): void {
   const command: SlashCommand = {
@@ -49,9 +67,7 @@ export function registerHelpCommand(): void {
     description: 'Open the agent chat panel',
     isConsumable: () => true,
     project: (world: WorldSnapshot) => world,
-    execute: () => {
-      useAgentStore.getState().openPanel();
-    },
+    execute: () => activateAgentHelp(''),
   };
   registerCommand(command);
 }

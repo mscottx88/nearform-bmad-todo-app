@@ -285,6 +285,14 @@ After CR Group D P23, this cancels only the current session's events.
 closing/reopening the panel preserves what the user was typing for the
 current session.
 
+**And** `↑` / `↓` (Up / Down arrows) at the start of the composer
+recall prior user messages from the active session — terminal /
+Claude Code-style history navigation. The composer stashes the
+in-progress draft on first `↑` and restores it when the user walks
+forward past index 0. Reconciled in Group B code review (D2 / choice
+A: keep + amend AC 8). The `↑/↓ history` affordance is announced in
+the keyboard-hint footer below the composer.
+
 ### AC 9 — `useAgentStore` Zustand store
 
 **Given** the agent panel and supporting hooks
@@ -1156,6 +1164,86 @@ The two original Story-6.1 bugs:
 - `_format_task_description` accepts empty `user_message` via direct call — guarded at the API boundary by Pydantic.
 - System-role messages silently dropped from history — no code path creates them yet (premature).
 - Blind Hunter's `{user_message!r}` template-escape worry — self-withdrawn during analysis.
+
+---
+
+### Post-CR polish — Group B (2026-04-25)
+
+In addition to the 14 P# patches itemized in Review Findings — Group
+B below, the user requested visual polish during the batch-apply
+walkthrough:
+
+1. **Thicker bubble outline + stronger glow** — `stroke-width` bumped
+   from 1 to 1.75; the variant `drop-shadow` filter is now a stacked
+   pair (4px tight inner glow + 14px wider outer halo) so the neon
+   reads as more "lit" than a single bigger blur.
+2. **Inline + block markdown rendering** — `parseAgentMessage`
+   tokenises `**bold**`, `*italic*`, `` `code` ``, plus `# h1` / `## h2`
+   / `### h3` headings and `---` horizontal rules. The horizontal
+   rule renders thicker (2px) with a stacked currentColor box-shadow
+   to match the bubble's neon vocabulary. Block-level pre-pass is
+   line-aware; inline tokenizer is streaming-friendly (unclosed
+   openers fall through as plain text, re-render correctly when the
+   closer arrives).
+3. **Neon-pond emoji bias** — `system_prompt.py` now nudges the LLM
+   toward pond-themed emoji (frogs, lizards, insects, plants,
+   fish, turtles, snails) and away from tech/office icons. Kept
+   tight to honour the ≤200-word system-prompt cap (192 words
+   total).
+
+### Review Findings — Group B (Frontend Chat UI Core) — 2026-04-25
+
+**Layers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (full mode)
+**Diff:** `b873531..HEAD` filtered to chat panel core (~22 files, ~3500 lines)
+
+#### Decision-needed (3)
+
+- [x] [Review][Decision] **AC 4 deviation** — Speech-bubble tail is rendered as inline SVG with stroked `<path>` rather than the AC-prescribed CSS pseudo-element with `clip-path: polygon(...)`. The component-level comment justifies the deviation ("clip-path stroke didn't pick up the neon glow on the hypotenuse"); visual outcome matches the spec. Decision: keep SVG + amend AC 4 to acknowledge the implementation choice, or refactor to clip-path and accept the glow regression. [`frontend/src/components/agent/AgentMessage.tsx:681-708`]
+- [x] [Review][Decision] **Out-of-spec composer history** — `AgentComposer` ships Up/Down arrow recall of prior user messages (`historyIndex`, `stashedDraft`, 6 dedicated tests). AC 8 enumerates the composer's keyboard contract and does not include history navigation. Decision: keep + amend AC 8 (terminal-style recall is a UX win), or revert to free up scope. [`frontend/src/components/agent/AgentComposer.tsx:276-365`]
+- [x] [Review][Decision] **AC 2 contradiction** — `registerHelpCommand()` registers `/help` as a slash-command registry entry, but AC 2 says explicitly "The toggle-command framework from Story 3.3 stays pure — `/help` is a parser carve-out, not a registry entry." Code currently does BOTH (parser carve-out AND registry entry). Decision: trim the registry entry to honor the AC, or amend AC 2 (the registry path enables `/help` to surface in the slash-autocomplete dropdown — discoverability win). [`frontend/src/utils/helpCommand.ts:registerHelpCommand`]
+
+#### Patch (12)
+
+- [x] [Review][Patch] **CRITICAL** — `switchSession` clears `messages` / `streamingBuffer` / `streamingMessageId` but does NOT abort the active stream. The previous stream's reader keeps running; a `start` event arriving after the switch rebinds an optimistic id that no longer exists in the new session, then chunks accumulate into a dangling `streamingMessageId` that never clears. Fix: call `activeStreamHandle?.abort()` and clear `pendingOptimisticAssistantId` at the top of `switchSession`. [`frontend/src/stores/useAgentStore.ts:switchSession`]
+- [x] [Review][Patch] **HIGH** — `start` event arriving AFTER `cancelStreaming` reanimates the cancelled bubble: the start handler unconditionally rebinds the optimistic id and sets `streamingMessageId`, undoing the cancel. Fix: in the `start` handler, bail if the optimistic message in the store is already `status === 'cancelled'` (or guard via a `cancelled` flag captured at cancel time). [`frontend/src/stores/useAgentStore.ts` start-event branch]
+- [x] [Review][Patch] **HIGH** — Module-scope `let activeStreamHandle` and `pendingOptimisticAssistantId` are clobbered when two `sendMessage` calls overlap (rapid Send clicks before the disabled prop kicks in, or programmatic re-entry from `/help`). Fix: move to store state keyed by request id, OR debounce/disable Send while a stream is active (the store already has `streamingMessageId`; the UI should gate Send on it). [`frontend/src/stores/useAgentStore.ts` module top]
+- [x] [Review][Patch] **HIGH** — `streamAgentChat`'s `fetch()` rejection (network down, CORS, abort during request) propagates out before the IIFE runs; `onClose` is documented as "always fires exactly once" but is never called on this path. Fix: wrap the `fetch` in try/catch, call `onClose('error', message)` before re-throwing (or instead of re-throwing). [`frontend/src/hooks/useAgentSse.ts` fetch-then-IIFE block]
+- [x] [Review][Patch] **HIGH** — `switchSession` race: rapid A → B switch where A's `getMessages` resolves last paints A's messages while `activeSessionId === 'b'`. Fix: capture a request token (incrementing counter or a per-call session id) and discard the response if the captured token no longer matches the active session. Apply the same pattern in `loadActiveMessages`. [`frontend/src/stores/useAgentStore.ts:switchSession, loadActiveMessages`]
+- [x] [Review][Patch] **HIGH** — Persisted `activeSessionId` is not validated on rehydrate. If the server-side session was deleted between sessions, `loadActiveMessages` calls `getMessages(id)` which 404s; the unhandled rejection bubbles. Fix: on rehydrate (or first `refreshSessions`), if the persisted `activeSessionId` isn't in the returned list, clear it and fall back to the first session (or null). [`frontend/src/stores/useAgentStore.ts:partialize` + AgentPanel mount effect]
+- [x] [Review][Patch] **HIGH** — `AgentComposer.onKeyDown` does not suppress IME composition: ArrowUp during CJK candidate selection fires history recall, and Enter submits during composition. Fix: short-circuit the handler when `e.nativeEvent.isComposing` is true (or `e.keyCode === 229` for Safari fallback). [`frontend/src/components/agent/AgentComposer.tsx:onKeyDown`]
+- [x] [Review][Patch] **HIGH** — `TodoLink` sets `cursorMode='point'` on hover but doesn't reset it on unmount. If the panel closes (Escape) or session switches while the cursor is over a link, `cursorMode` stays `'point'` indefinitely. Fix: `useEffect(() => () => reset cursor if still 'point', [])` cleanup. [`frontend/src/components/agent/TodoLink.tsx:onPointerLeave area`]
+- [x] [Review][Patch] **MED** — `AgentPanel` Escape-handler `useEffect` includes `draft` in its deps array, so the global keydown listener is unbound + rebound on every keystroke. Fix: read `draft` (or `inputDraft`) via `useAgentStore.getState()` inside the handler instead of closing over it; drop `draft` from deps. [`frontend/src/components/agent/AgentPanel.tsx` Escape effect]
+- [x] [Review][Patch] **MED** — Optimistic user-message id is `optimistic-user-${Date.now()}` (no random suffix) — two sends within the same millisecond collide as React keys. Assistant id has a random suffix; user id should match. Fix: reuse `makeOptimisticId` for both. [`frontend/src/stores/useAgentStore.ts:sendMessage`]
+- [x] [Review][Patch] **MED** — `useAgentSse` discards any half-buffered SSE frame on stream close: when the reader returns `{ done: true }` with bytes still in `buffer`, the trailing frame is dropped. Fix: attempt one final `parseFrame(buffer)` before `closeOnce('done')`. [`frontend/src/hooks/useAgentSse.ts` reader loop, done branch]
+- [x] [Review][Patch] **MED** — `cancelStreaming` calls `agentApi.cancelChat(sessionId)` even when there is no active stream (e.g. user clicks Stop after a `done` already cleared `streamingMessageId`). Fix: short-circuit if `streamingMessageId === null` AND `activeStreamHandle === null`. [`frontend/src/stores/useAgentStore.ts:cancelStreaming`]
+
+#### Deferred (4) — pre-existing, low-yield, or out-of-window
+
+- [x] [Review][Defer] No idle timeout on the SSE stream — a hung backend that holds the stream open without sending bytes leaves the bubble in `streaming` forever; only manual cancel saves the user. Pre-existing pattern; defer to a hardening pass. [`frontend/src/hooks/useAgentSse.ts`]
+- [x] [Review][Defer] Persist schema is `name: 'agent-store-v1'` with no `version` / `migrate` callback. Future shape changes will silently merge old localStorage blobs into a new schema. Add versioning when the first breaking change actually lands. [`frontend/src/stores/useAgentStore.ts:partialize`]
+- [x] [Review][Defer] `parseAgentMessage` doesn't handle URL-encoded UUIDs in `todo://%XX...` form. The system prompt instructs the agent to emit raw UUIDs; encoding is unlikely. Defer until observed in the wild. [`frontend/src/utils/parseAgentMessage.ts:TODO_LINK_RE`]
+- [x] [Review][Defer] `AgentSessionsMenu` confirm-delete state on row A is silently cleared when the user clicks × on row B. Probably intentional (one confirm at a time), but no visual feedback. Cosmetic; defer for retro. [`frontend/src/components/agent/AgentSessionsMenu.tsx:onDeleteClick`]
+
+#### Dismissed (12) — false positives / out of scope
+
+- AC 4 visual outcome — `parseAgentMessage` regex non-issues (no catastrophic backtracking; `g`-flag state is fine via `matchAll`).
+- `dangerouslySetInnerHTML` not used — JSX text is safe (no finding).
+- `AgentMessageList` mount-only-effect documentation drift — no actual bug; comment claim ≠ code path, but second effect handles the case.
+- `AgentMessage` empty-failed-content fallback — defensive copy below the bar; backend Group A patches already guarantee terminal status.
+- `MessageBody` null-content — type contract says `string`, no client-side guard needed.
+- `AgentComposer` Up-at-position-0 multi-line concern — withdrawn during analysis.
+- `AgentComposer` Up arrow recalled message caret position — UX nit, not a bug.
+- `forceHintTick` blur quirk — JSDOM-only.
+- `TodoLink` onClick stale `worldEntry` — UI is OK; pad will be removed shortly anyway.
+- `TodoLink` `positionY` passed as z — confirmed correct (pond uses XZ-plane, world store stores X/Z as `positionX`/`positionY` per existing convention).
+- `AgentMessageList` ResizeObserver feature-detect — modern browser target.
+- `AgentSessionsMenu` rapid double-click race — covered by switch-race patch P5.
+- `camelCase` vs spec literal `snake_case` — resolved by axios `camelcase-keys` interceptor (Dev Notes).
+- Adjacent-link cursor flicker — micro-jitter, not load-bearing.
+- `AgentSessionsMenu` × accessibility — covered by P11 a11y patch (later).
+- `registerHelpCommand` non-idempotence — covered by DN3.
+- `refreshSessions` clobbers optimistic `newSession` — narrow timing window, defer in practice.
+- `AgentPanel` `partialize` re-opens panel on visit — intentional UX (panelOpen persisted by spec).
 
 ---
 

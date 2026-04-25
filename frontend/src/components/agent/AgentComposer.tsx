@@ -77,6 +77,13 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
     };
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Story 6.2 Group B CR P7: short-circuit while the IME is
+      // composing (CJK candidate selection, dead-key sequences,
+      // auto-suggest accept). Without this, Enter submits the
+      // half-composed text and ArrowUp pops history mid-composition,
+      // mangling the input.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const trimmed = draft.trim();

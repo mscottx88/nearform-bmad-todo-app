@@ -126,25 +126,47 @@
   justify-content: flex-start;
 }
 
-.agent-message__bubble-wrap {
-  position: relative;
-  max-width: 80%;
-  display: flex;
-  flex-direction: column;
-}
-
-.agent-message--user .agent-message__bubble-wrap {
-  align-items: flex-end;
-}
-
-.agent-message--assistant .agent-message__bubble-wrap,
-.agent-message--meta .agent-message__bubble-wrap {
-  align-items: flex-start;
-}
+/* ── Speech bubble (Group B CR P13: single-path SVG outline) ──────────
+   Earlier shipping shape was a CSS-bordered <div> + a separate inline
+   SVG triangle stitched onto the bottom edge. The two pieces had
+   independent strokes and independent glow filters (`box-shadow` on
+   the div vs `drop-shadow` on the SVG) so the seam read as two
+   distinct shapes. The bubble + tail are now drawn as a single
+   continuous closed <path> inside one absolutely-positioned <svg>;
+   one stroke + one fill + one drop-shadow filter → unified neon glow
+   around the combined silhouette. The wrapping <div> only handles
+   layout (max-width, alignment) and the inner content padding. */
 
 .agent-message__bubble {
   position: relative;
-  border-radius: 16px;
+  display: inline-block;
+  max-width: 80%;
+  /* Reserve layout space for the tail apex so the next message sits
+     below it instead of overlapping. */
+  margin-bottom: 12px;
+}
+
+.agent-message__outline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.agent-message__outline path {
+  /* `stroke-linejoin: round` rounds the inside corners of the tail
+     notch so the join with the bubble's bottom edge reads as a soft
+     transition instead of a hard 90° angle. Stroke width was bumped
+     from 1 to 1.75 to give the bubble a more substantial neon
+     presence (paired with the thicker drop-shadow on the variant
+     rules below). */
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.agent-message__content {
+  position: relative;
   padding: 10px 14px;
   font-family: var(--font-sans);
   font-size: 14px;
@@ -153,95 +175,145 @@
   word-break: break-word;
 }
 
-.agent-message--user .agent-message__bubble {
-  background: rgba(255, 16, 240, 0.12);
-  border: 1px solid var(--neon-pink);
-  box-shadow: 0 0 10px rgba(255, 16, 240, 0.45);
-  color: #ffd0f5;
+.agent-message__content strong {
+  font-weight: 700;
+  /* Subtle text-shadow on bold text picks up the bubble's neon palette
+     without adding a separate filter — keeps emphasis legible against
+     the slightly translucent fill. */
 }
 
-.agent-message--assistant .agent-message__bubble {
-  background: rgba(0, 238, 255, 0.10);
-  border: 1px solid var(--neon-cyan);
-  box-shadow: 0 0 10px rgba(0, 238, 255, 0.4);
-  color: #daffff;
+.agent-message__content em {
+  font-style: italic;
+  opacity: 0.92;
 }
 
-/* ── Speech bubble tail (inline SVG, see AgentMessage.tsx BubbleTail) ── */
-
-.agent-message__tail {
-  display: block;
-  /* Top edge overlaps the bubble's bottom border by 1px so the
-     bubble's own border paints over the tail's top, hiding the
-     would-be seam. */
-  margin-top: -1px;
-  /* Pulls the glow filter on the SVG so the tail picks up the same
-     halo as the bubble. drop-shadow honours the alpha of the SVG
-     paths so the soft outer glow reads continuously around both
-     bubble and tail. */
+.agent-message__inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* Inherit the bubble's text colour rather than picking a fixed
+     palette — assistant code reads cyan-on-cyan-tint, user code
+     reads pink-on-pink-tint, both stay readable. */
 }
 
-.agent-message--user .agent-message__tail {
-  align-self: flex-end;
-  margin-right: 14px;
-  filter: drop-shadow(0 0 4px rgba(255, 16, 240, 0.55));
+/* Block-level markdown rendered inside the chat bubble. Sized
+   relative to the 14px bubble base so headings remain proportional
+   to the prose around them (a 24px h1 inside a 14px bubble would
+   look disproportionate). Margins are tight — chat bubbles aren't
+   document containers. */
+
+.agent-message__h1,
+.agent-message__h2,
+.agent-message__h3 {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  margin: 8px 0 4px;
+  letter-spacing: 0.02em;
 }
 
-.agent-message--assistant .agent-message__tail {
-  align-self: flex-start;
-  margin-left: 14px;
-  filter: drop-shadow(0 0 4px rgba(0, 238, 255, 0.5));
+.agent-message__h1:first-child,
+.agent-message__h2:first-child,
+.agent-message__h3:first-child {
+  margin-top: 0;
 }
 
-.agent-message--user .agent-message__tail-fill {
+.agent-message__h1 {
+  font-size: 1.35em;
+}
+
+.agent-message__h2 {
+  font-size: 1.18em;
+}
+
+.agent-message__h3 {
+  font-size: 1.05em;
+}
+
+.agent-message__hr {
+  margin: 12px 0;
+  border: 0;
+  height: 2px;
+  /* Variant-tinted neon divider — picks up the bubble's text colour
+     via currentColor (text colour is already variant-tinted by the
+     assistant/user/failed rules above) and glows via a matching
+     box-shadow. The two-stage shadow mirrors the bubble outline's
+     drop-shadow stack so the rule reads as part of the same neon
+     vocabulary instead of a bare CSS divider. */
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.85;
+  box-shadow:
+    0 0 4px currentColor,
+    0 0 10px currentColor;
+}
+
+/* Variant chrome — fill, stroke, glow are all expressed via SVG
+   styling on the unified outline path. Drop-shadow on the SVG (not
+   the wrapper) keeps the halo on the outline only; the text content
+   sits OVER the SVG and isn't tinted by the glow. */
+
+.agent-message--user .agent-message__outline {
+  /* Two-stage drop-shadow: a tight inner glow for the neon "edge"
+     and a wider outer halo for the soft ambient bloom. Compositing
+     two filters reads as more "lit" than a single bigger blur. */
+  filter:
+    drop-shadow(0 0 4px rgba(255, 16, 240, 0.85))
+    drop-shadow(0 0 14px rgba(255, 16, 240, 0.5));
+}
+
+.agent-message--user .agent-message__outline path {
   fill: rgba(255, 16, 240, 0.12);
-}
-
-.agent-message--assistant .agent-message__tail-fill {
-  fill: rgba(0, 238, 255, 0.10);
-}
-
-.agent-message__tail-stroke {
-  fill: none;
-  stroke-width: 1;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.agent-message--user .agent-message__tail-stroke {
   stroke: var(--neon-pink);
 }
 
-.agent-message--assistant .agent-message__tail-stroke {
+.agent-message--user .agent-message__content {
+  color: #ffd0f5;
+}
+
+.agent-message--assistant .agent-message__outline {
+  filter:
+    drop-shadow(0 0 4px rgba(0, 238, 255, 0.8))
+    drop-shadow(0 0 14px rgba(0, 238, 255, 0.45));
+}
+
+.agent-message--assistant .agent-message__outline path {
+  fill: rgba(0, 238, 255, 0.10);
   stroke: var(--neon-cyan);
 }
 
-/* Meta rows (system / tool) — no tail, smaller font, dimmer glow. */
-.agent-message--meta .agent-message__bubble {
-  background: transparent;
-  border: 1px dashed rgba(0, 238, 255, 0.25);
-  box-shadow: none;
-  color: rgba(218, 255, 255, 0.6);
+.agent-message--assistant .agent-message__content {
+  color: #daffff;
+}
+
+/* Meta rows (system / tool) — no bubble, no tail, just a dim text
+   strip. Renders through `__meta-content` in the JSX (no SVG outline). */
+.agent-message__meta-content {
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 4px 8px;
+  border: 1px dashed rgba(0, 238, 255, 0.25);
+  border-radius: 6px;
+  color: rgba(218, 255, 255, 0.6);
 }
 
-/* Failed bubbles flip to red-tinted border (AC 5). */
-.agent-message--failed .agent-message__bubble {
-  border-color: #ff5050;
-  box-shadow: 0 0 10px rgba(255, 80, 80, 0.45);
-  color: #ffc0c0;
+/* Failed bubbles flip stroke + glow to red-tinted (AC 5). */
+.agent-message--failed .agent-message__outline {
+  filter:
+    drop-shadow(0 0 4px rgba(255, 80, 80, 0.85))
+    drop-shadow(0 0 14px rgba(255, 80, 80, 0.5));
 }
 
-.agent-message--failed .agent-message__tail {
-  filter: drop-shadow(0 0 4px rgba(255, 80, 80, 0.55));
-}
-
-.agent-message--failed .agent-message__tail-stroke {
+.agent-message--failed .agent-message__outline path {
   stroke: #ff5050;
+}
+
+.agent-message--failed .agent-message__content {
+  color: #ffc0c0;
 }
 
 /* ── Inline todo references (TodoLink) ──────────────────────────────── */

@@ -56,12 +56,30 @@ export async function streamAgentChat({
 }: StreamArgs): Promise<AgentChatStreamHandle> {
   const controller = new AbortController();
 
-  const response = await fetch(`/api/agent/sessions/${sessionId}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, skill, context: { todo_ids: [] } }),
-    signal: controller.signal,
-  });
+  // Story 6.2 Group B CR P4: previously a `fetch` rejection (network
+  // down, CORS, abort during request) propagated up to the caller
+  // without ever firing `onClose`, breaking the documented "always
+  // fires exactly once" invariant. Wrap fetch in try/catch and call
+  // onClose with the error before returning a no-op handle. The
+  // function now never throws — every termination path (fetch reject,
+  // !response.ok, body-stream done, body-stream error) goes through
+  // `onClose`.
+  let response: Response;
+  try {
+    response = await fetch(`/api/agent/sessions/${sessionId}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, skill, context: { todo_ids: [] } }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      onClose('aborted');
+    } else {
+      onClose('error', err instanceof Error ? err : new Error(String(err)));
+    }
+    return { abort: () => {} };
+  }
 
   if (!response.ok || !response.body) {
     onClose('error', new Error(`stream failed: ${response.status}`));
@@ -87,6 +105,15 @@ export async function streamAgentChat({
       while (true) {
         const { value, done } = await reader.read();
         if (done) {
+          // Story 6.2 Group B CR P11: flush any half-buffered tail
+          // frame on stream close. Without this, a server that
+          // doesn't terminate its final frame with `\n\n`, or a
+          // network truncation right at the boundary, would silently
+          // drop the last event (e.g. the `done` or `error` frame).
+          if (buffer.trim().length > 0) {
+            const tailEvent = parseFrame(buffer);
+            if (tailEvent !== null) onEvent(tailEvent);
+          }
           // Stream ended without `done` event — still treat as done so
           // the store's streaming flag clears and the bubble freezes.
           closeOnce('done');

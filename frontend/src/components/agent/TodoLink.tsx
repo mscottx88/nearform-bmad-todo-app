@@ -20,6 +20,7 @@
  *     the click is a no-op, and the cursor stays on its current mode.
  */
 
+import { useEffect, useRef } from 'react';
 import { useWorldStore } from '../../stores/useWorldStore';
 import { usePondStore } from '../../stores/usePondStore';
 import { NeonTooltip } from '../ui/NeonTooltip';
@@ -36,14 +37,22 @@ export function TodoLink({ label, todoId }: Props) {
   const worldEntry = useWorldStore((s) => s.worldMetadata.get(todoId));
   const isMissing = worldEntry === undefined;
 
+  // Story 6.2 Group B CR P8: track whether THIS link currently owns
+  // the `point` cursor mode + hovered-todo-id, so unmount cleanup
+  // only fires if the cleanup is actually ours to do (vs. a sibling
+  // link having taken over the mode in the meantime).
+  const ownsHoverRef = useRef(false);
+
   const onPointerEnter = () => {
     if (isMissing) return;
     const store = usePondStore.getState();
     store.setHoveredTodoId(todoId);
     store.setCursorMode('point');
+    ownsHoverRef.current = true;
   };
 
   const onPointerLeave = () => {
+    ownsHoverRef.current = false;
     const store = usePondStore.getState();
     // Only clear hover if WE'RE the one who set it — defensive
     // against a racing pointerEnter on a real pad in the scene.
@@ -57,6 +66,26 @@ export function TodoLink({ label, todoId }: Props) {
       store.setCursorMode('firefly');
     }
   };
+
+  // Story 6.2 Group B CR P8: the panel can close (Escape) or the
+  // session can switch while the cursor is still over a link —
+  // pointerLeave never fires, so without this cleanup `cursorMode`
+  // stays `'point'` indefinitely (the firefly cursor disappears,
+  // showing the frog-finger glyph over an empty pond). Run the same
+  // pointerLeave logic on unmount, but only if THIS link owned the
+  // hover at the time.
+  useEffect(() => {
+    return () => {
+      if (!ownsHoverRef.current) return;
+      const store = usePondStore.getState();
+      if (store.hoveredTodoId === todoId) {
+        store.setHoveredTodoId(null);
+      }
+      if (store.cursorMode === 'point') {
+        store.setCursorMode('firefly');
+      }
+    };
+  }, [todoId]);
 
   const onClick = () => {
     if (isMissing) return;
