@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { NeonTooltip } from './NeonTooltip';
 import './PopupColorSwatch.css';
 
 // Locked neon palette (12 hues). Arbitrary hex picks would produce
@@ -74,29 +75,31 @@ export function PopupColorSwatch({
     <div className="action-popup__color-swatches">
       {NEON_SWATCHES.map(({ color, name }) => {
         const isCurrent = color.toLowerCase() === committedLower;
+        const label = isCurrent ? `${name} · current` : name;
         return (
-          <button
-            key={color}
-            type="button"
-            // `--current` modifier draws an extra white ring so the
-            // user sees their committed choice at a glance. Screen
-            // readers get the same cue via aria-pressed.
-            className={
-              isCurrent
-                ? 'action-popup__color-swatch action-popup__color-swatch--current'
-                : 'action-popup__color-swatch'
-            }
-            aria-label={`Set color to ${name}`}
-            aria-pressed={isCurrent}
-            // Per-swatch inline style: background fills the circle,
-            // `color` (= currentColor) drives the CSS border, glow, and
-            // focus-visible outline accents — matches the popup button
-            // language.
-            style={{ backgroundColor: color, color }}
-            onMouseEnter={() => onHover(color)}
-            onMouseLeave={() => onHover(null)}
-            onClick={() => onCommit(color)}
-          />
+          <NeonTooltip key={color} text={label} placement="top">
+            <button
+              type="button"
+              // `--current` modifier draws an extra white ring so the
+              // user sees their committed choice at a glance. Screen
+              // readers get the same cue via aria-pressed.
+              className={
+                isCurrent
+                  ? 'action-popup__color-swatch action-popup__color-swatch--current'
+                  : 'action-popup__color-swatch'
+              }
+              aria-label={`Set color to ${name}`}
+              aria-pressed={isCurrent}
+              // Per-swatch inline style: background fills the circle,
+              // `color` (= currentColor) drives the CSS border, glow, and
+              // focus-visible outline accents — matches the popup button
+              // language.
+              style={{ backgroundColor: color, color }}
+              onMouseEnter={() => onHover(color)}
+              onMouseLeave={() => onHover(null)}
+              onClick={() => onCommit(color)}
+            />
+          </NeonTooltip>
         );
       })}
     </div>

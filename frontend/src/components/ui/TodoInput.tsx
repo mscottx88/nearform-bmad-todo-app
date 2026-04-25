@@ -36,7 +36,7 @@ function generatePosition(): { positionX: number; positionY: number } {
 }
 
 export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [dissolving, setDissolving] = useState(false);
   const [value, setValue] = useState(initialValue);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -101,11 +101,11 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
 
   if (!isOpen && !dissolving) return null;
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Escape') {
       onClose();
       return;
@@ -141,6 +141,10 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
     }
 
     if (e.key === 'Enter') {
+      // Shift+Enter and Ctrl+Enter insert a literal newline (the
+      // textarea's native default). Plain Enter submits.
+      if (e.shiftKey || e.ctrlKey) return;
+      e.preventDefault();
       const trimmed = value.trim();
       if (!trimmed) return;
 
@@ -188,16 +192,19 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
   return createPortal(
     <div className="todo-input-overlay">
       <div className="todo-input-shell">
-        <input
+        <textarea
           ref={inputRef}
           className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
-          type="text"
           placeholder="what's on your mind..."
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onBlur={onClose}
+          rows={1}
         />
+        <span className="todo-input-hint" aria-hidden="true">
+          enter to save · shift+enter for new line · esc to dismiss
+        </span>
         {showDropdown && (
           <ul
             className={`todo-input-dropdown ${

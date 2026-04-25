@@ -90,7 +90,7 @@ describe('useGlobalCursorMode', () => {
     unmount();
   });
 
-  it('falls back to "firefly" over inert content', () => {
+  it('falls back to "firefly" over inert empty content', () => {
     const div = document.createElement('div');
     document.body.appendChild(div);
     const { unmount } = renderHook(() => useGlobalCursorMode());
@@ -100,13 +100,42 @@ describe('useGlobalCursorMode', () => {
     unmount();
   });
 
-  it('does not override "grab" mode (set by LilyPad / scrollbar)', () => {
+  it('shows the I-beam over selectable text (user-select != none)', () => {
+    // A plain paragraph with text — `user-select: text` is the
+    // default, so the cursor should mirror the OS I-beam.
+    const p = document.createElement('p');
+    p.textContent = 'some prose';
+    document.body.appendChild(p);
+    const { unmount } = renderHook(() => useGlobalCursorMode());
+    act(() => dispatchMove(p));
+    expect(usePondStore.getState().cursorMode).toBe('text');
+    unmount();
+  });
+
+  it('does NOT show the I-beam when user-select is none', () => {
+    const span = document.createElement('span');
+    span.textContent = 'decorative chrome';
+    span.style.userSelect = 'none';
+    document.body.appendChild(span);
+    const { unmount } = renderHook(() => useGlobalCursorMode());
+    act(() => dispatchMove(span));
+    expect(usePondStore.getState().cursorMode).toBe('firefly');
+    unmount();
+  });
+
+  it('overrides stale "grab" mode when the cursor moves to a new target', () => {
+    // 'grab' is hover-only; the hook re-infers it on every mousemove
+    // so a stale grab set by one component (e.g. InfoPopup leaving
+    // its panel) can't poison the cursor for the rest of the page.
+    // Components that need grab to PERSIST (scrollbar thumb, resize
+    // handle) opt their elements into managed mode via
+    // `data-cursor-managed`; see the next test.
     const btn = document.createElement('button');
     document.body.appendChild(btn);
     const { unmount } = renderHook(() => useGlobalCursorMode());
     usePondStore.setState({ cursorMode: 'grab' });
     act(() => dispatchMove(btn));
-    expect(usePondStore.getState().cursorMode).toBe('grab');
+    expect(usePondStore.getState().cursorMode).toBe('point');
     unmount();
   });
 
@@ -117,6 +146,31 @@ describe('useGlobalCursorMode', () => {
     usePondStore.setState({ cursorMode: 'grabbing' });
     act(() => dispatchMove(btn));
     expect(usePondStore.getState().cursorMode).toBe('grabbing');
+    unmount();
+  });
+
+  it('does not override the cursor mode while the pointer is over a <canvas>', () => {
+    // The R3F canvas hosts the pond scene — LilyPad sets 'point' on
+    // pointerEnter and 'grabbing' on drag-start. The global hook
+    // must NOT clobber those imperative modes when the next
+    // mousemove fires inside the canvas.
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const { unmount } = renderHook(() => useGlobalCursorMode());
+    usePondStore.setState({ cursorMode: 'point' });
+    act(() => dispatchMove(canvas));
+    expect(usePondStore.getState().cursorMode).toBe('point');
+    unmount();
+  });
+
+  it('respects an opt-in data-cursor-managed attribute', () => {
+    const div = document.createElement('div');
+    div.setAttribute('data-cursor-managed', '');
+    document.body.appendChild(div);
+    const { unmount } = renderHook(() => useGlobalCursorMode());
+    usePondStore.setState({ cursorMode: 'no-access' });
+    act(() => dispatchMove(div));
+    expect(usePondStore.getState().cursorMode).toBe('no-access');
     unmount();
   });
 

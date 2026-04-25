@@ -886,8 +886,11 @@ export function LilyPad({
           detachWindowListeners();
           const cancelStore = usePondStore.getState();
           cancelStore.setActiveDragAnchor(null);
+          // Drop back to the hover affordance (frog pointing finger)
+          // since the cursor is most likely still over this pad after
+          // the implicit drag-cancel.
           if (cancelStore.cursorMode === 'grabbing') {
-            cancelStore.setCursorMode('grab');
+            cancelStore.setCursorMode('point');
           }
           return;
         }
@@ -904,7 +907,7 @@ export function LilyPad({
           detachWindowListeners();
           moveState.setActiveDragAnchor(null);
           if (moveState.cursorMode === 'grabbing') {
-            moveState.setCursorMode('grab');
+            moveState.setCursorMode('point');
           }
           return;
         }
@@ -1051,7 +1054,7 @@ export function LilyPad({
         // pad followed the cursor).
         releaseStore.setActiveDragAnchor(null);
         if (releaseStore.cursorMode === 'grabbing') {
-          releaseStore.setCursorMode('grab');
+          releaseStore.setCursorMode('point');
         }
         // Story 3.4 (CR reversal 2026-04-23): hover was cleared at
         // drag-start; re-publish now if the cursor is still over
@@ -2488,8 +2491,13 @@ export function LilyPad({
         onPointerEnter={() => {
           pointerOverRef.current = true;
           const state = usePondStore.getState();
+          // Frog pointing-finger reads as "this is interactive" the
+          // same way browser links do — matches the cursor used for
+          // every other clickable affordance in the app (buttons,
+          // todo chat-links, etc.). Drag still swaps to the closed
+          // 'grabbing' fist on drag-start.
           if (state.cursorMode === 'firefly') {
-            state.setCursorMode('grab');
+            state.setCursorMode('point');
           }
           // Story 3.4: publish hover only when the pad is resting AND
           // no drag is active (own or any other pad's — via
@@ -2509,9 +2517,9 @@ export function LilyPad({
         onPointerLeave={() => {
           pointerOverRef.current = false;
           const state = usePondStore.getState();
-          // Revert only from 'grab' — drag-in-progress ('grabbing')
+          // Revert only from 'point' — drag-in-progress ('grabbing')
           // is preserved; the drag's own onWindowUp will reset.
-          if (state.cursorMode === 'grab' && !isDraggingRef.current) {
+          if (state.cursorMode === 'point' && !isDraggingRef.current) {
             state.setCursorMode('firefly');
           }
           // Clear hover if and only if this pad still owns it. The

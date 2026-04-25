@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
 import { NeonScrollbar } from './NeonScrollbar';
+import { NeonTooltip } from './NeonTooltip';
 import { PopupColorSwatch } from './PopupColorSwatch';
 import { usePondStore } from '../../stores/usePondStore';
 import { useWorldStore } from '../../stores/useWorldStore';
@@ -286,23 +287,21 @@ export function InfoPopup({
   // panel's own mouseleave dormant — their own hover handlers take
   // over. Leaving the popup back toward the pad restores 'grab'
   // since R3F's cached "pad is hovered" is (usually) still valid.
-  const handlePanelMouseEnter = useCallback((): void => {
-    const store = usePondStore.getState();
-    if (store.cursorMode === 'grab') store.setCursorMode('firefly');
-  }, []);
-  const handlePanelMouseLeave = useCallback((): void => {
-    const store = usePondStore.getState();
-    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
-  }, []);
-
+  // Pre-2026-04-25 the popup explicitly toggled the 'grab' cursor
+  // mode on enter/leave because the surrounding canvas was treated as
+  // a global "pannable grab zone". With Story 6.2's cursor refactor,
+  // LilyPad sets 'point' on pad hover and the global cursor hook
+  // (`useGlobalCursorMode`) infers the right mode for everything else
+  // automatically. Leaving the panel no longer needs to force 'grab' —
+  // doing so leaves the cursor stuck open-hand on canvas elements
+  // that LilyPad's pointerEnter only overrides when starting from
+  // 'firefly'.
   const panelProps = focused
     ? {
         onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
         onPointerUp: (e: React.PointerEvent) => e.stopPropagation(),
         onClick: (e: React.MouseEvent) => e.stopPropagation(),
         onWheel: handleWheel,
-        onMouseEnter: handlePanelMouseEnter,
-        onMouseLeave: handlePanelMouseLeave,
       }
     : {};
 
@@ -350,28 +349,22 @@ export function InfoPopup({
       const next = start.baseH + (ev.clientY - start.startY);
       setEditorHeight(Math.max(EDITOR_MIN_HEIGHT, Math.min(editorMaxHeight, next)));
     };
-    const teardown = (ev?: MouseEvent): void => {
+    const teardown = (): void => {
       editorResizeRef.current = null;
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       resizeTeardownRef.current = null;
-      // Resolve the element actually under the pointer at release.
-      // If it's a draggable affordance (handle or scrollbar thumb),
-      // stay on 'grab'; otherwise revert to 'firefly'. Unmount-path
-      // teardown (no event) falls straight back to 'firefly'.
-      let overDraggable = false;
-      if (ev) {
-        const el = document.elementFromPoint(ev.clientX, ev.clientY);
-        if (el) {
-          overDraggable =
-            el.closest('.info-popup__editor-resize') !== null ||
-            el.closest('.nsb-thumb') !== null;
-        }
-      }
-      usePondStore.getState().setCursorMode(overDraggable ? 'grab' : 'firefly');
+      // Drop back to 'firefly'; the global cursor hook will fire on
+      // the next mousemove and infer the right mode for whatever's
+      // actually under the pointer (frog-hand on draggable handles,
+      // I-beam on text inputs, point on buttons, …). Pre-2026-04-25
+      // we tried to re-resolve to 'grab' here via elementFromPoint,
+      // but that left the open-hand cursor stuck if the user moved
+      // off the popup before mouseup landed.
+      usePondStore.getState().setCursorMode('firefly');
     };
-    const onUp = (ev: MouseEvent): void => { teardown(ev); };
+    const onUp = (): void => { teardown(); };
     resizeTeardownRef.current = () => { teardown(); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -388,29 +381,20 @@ export function InfoPopup({
       if (store.cursorMode === 'grab') store.setCursorMode('firefly');
     }
   }, []);
-  // On drag release, resolve the element actually under the cursor
-  // (from the MouseEvent coords when available) to decide whether to
-  // stay on the 'grab' hover glyph or revert all the way to
-  // 'firefly'. Without this, releasing over empty space would leave
-  // the frog hand stuck on-screen until the user happened to hover
-  // something draggable — because mouseenter / mouseleave transitions
-  // don't fire on the thumb if the cursor never crosses it post-release.
-  const onDragAffordanceDrag = useCallback((dragging: boolean, e?: MouseEvent): void => {
+  // Drag-end always resolves to 'firefly'. The global cursor hook
+  // fires on the next mousemove and re-infers from the element
+  // actually under the cursor (frog-hand if back on the thumb,
+  // I-beam over text, point over buttons, …). Pre-2026-04-25 we
+  // tried to re-resolve to 'grab' via elementFromPoint here, but
+  // that left the open-hand cursor stuck after a drag-end if the
+  // user moved away from the affordance before mouseup landed.
+  const onDragAffordanceDrag = useCallback((dragging: boolean): void => {
     const store = usePondStore.getState();
     if (dragging) {
       store.setCursorMode('grabbing');
       return;
     }
-    let overDraggable = false;
-    if (e) {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      if (el) {
-        overDraggable =
-          el.closest('.nsb-thumb') !== null ||
-          el.closest('.info-popup__editor-resize') !== null;
-      }
-    }
-    store.setCursorMode(overDraggable ? 'grab' : 'firefly');
+    store.setCursorMode('firefly');
   }, []);
   // Resize-handle hover — same firefly↔grab swap as thumb hover.
   const handleEditorResizeEnter = (): void => { onDragAffordanceHover(true); };
@@ -462,6 +446,10 @@ export function InfoPopup({
                   shared NeonScrollbar in overlay mode drives its thumb
                   against the textarea's scrollTop / scrollHeight — no
                   bespoke thumb math here. */}
+              <NeonTooltip
+                text="enter to save · shift+enter for new line · esc to cancel"
+                placement="top"
+              >
               <div
                 className="info-popup__editor-textbox"
                 style={{ height: editorHeight }}
@@ -508,6 +496,7 @@ export function InfoPopup({
                   onThumbDrag={onDragAffordanceDrag}
                 />
               </div>
+              </NeonTooltip>
               <div
                 className="info-popup__editor-resize"
                 onMouseDown={handleEditorResizeStart}
@@ -516,6 +505,11 @@ export function InfoPopup({
                 aria-label="Resize editor"
                 role="separator"
                 aria-orientation="horizontal"
+                /* See NeonScrollbar.tsx — opts out of the global
+                   cursor-mode hook so the imperative grab/grabbing
+                   modes set by handleEditorResizeEnter / Start
+                   aren't immediately re-inferred to 'firefly'. */
+                data-cursor-managed=""
               >
                 <span className="info-popup__editor-resize-grip" aria-hidden />
               </div>
@@ -528,29 +522,26 @@ export function InfoPopup({
               onThumbHover={onDragAffordanceHover}
               onThumbDrag={onDragAffordanceDrag}
             >
-              <div
-                className={
-                  'info-popup__text' +
-                  (focused && onCommitText ? ' info-popup__text--clickable' : '')
-                }
-                onClick={
-                  focused && onCommitText ? () => setEditing(true) : undefined
-                }
-                role={focused && onCommitText ? 'button' : undefined}
-                tabIndex={focused && onCommitText ? 0 : undefined}
-                onKeyDown={
-                  focused && onCommitText
-                    ? (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setEditing(true);
-                        }
+              {focused && onCommitText ? (
+                <NeonTooltip text="click to edit" placement="top">
+                  <div
+                    className="info-popup__text info-popup__text--clickable"
+                    onClick={() => setEditing(true)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setEditing(true);
                       }
-                    : undefined
-                }
-              >
-                {todo.text}
-              </div>
+                    }}
+                  >
+                    {todo.text}
+                  </div>
+                </NeonTooltip>
+              ) : (
+                <div className="info-popup__text">{todo.text}</div>
+              )}
             </NeonScrollbar>
             </div>
           )}

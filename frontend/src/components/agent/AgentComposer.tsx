@@ -28,6 +28,11 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
     const setDraft = useAgentStore((s) => s.setDraft);
     const messages = useAgentStore((s) => s.messages);
     const internalRef = useRef<HTMLTextAreaElement>(null);
+    // Tick state used solely to force a re-render after focus / blur
+    // so the keyboard-hint visibility tracks the textarea's actual
+    // focus state. (`document.activeElement` reads can't drive a
+    // re-render on their own.)
+    const [, forceHintTick] = useState(0);
     // -1 = no history navigation in progress (composer holds the
     // user's in-progress draft). 0 = the most recent prior user
     // message; 1 = the next-most-recent, etc.
@@ -122,20 +127,44 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
       }
     };
 
+    // Show the keyboard hint only while the composer is focused — an
+    // always-on hint clutters the chrome for users who already know
+    // the shortcut. The hint sits just under the textarea and uses
+    // the neon-mono micro-text style we use elsewhere for keyboard
+    // affordances.
+    const hasFocus =
+      typeof document !== 'undefined' &&
+      document.activeElement === internalRef.current;
+
     return (
-      <textarea
-        ref={setRefs}
-        className="agent-composer"
-        placeholder="ask anything…"
-        value={draft}
-        onChange={(e) => {
-          resetHistory();
-          setDraft(e.target.value);
-        }}
-        onKeyDown={onKeyDown}
-        rows={1}
-        style={{ maxHeight: MAX_HEIGHT_PX }}
-      />
+      <div className="agent-composer-wrap">
+        <textarea
+          ref={setRefs}
+          className="agent-composer"
+          placeholder="ask anything…"
+          value={draft}
+          onChange={(e) => {
+            resetHistory();
+            setDraft(e.target.value);
+          }}
+          onKeyDown={onKeyDown}
+          onFocus={() => forceHintTick((t) => t + 1)}
+          onBlur={() => forceHintTick((t) => t + 1)}
+          rows={1}
+          style={{ maxHeight: MAX_HEIGHT_PX }}
+        />
+        <span
+          className={[
+            'agent-composer-hint',
+            hasFocus ? 'agent-composer-hint--visible' : null,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          aria-hidden="true"
+        >
+          enter to send · shift+enter for new line · ↑/↓ history
+        </span>
+      </div>
     );
   },
 );

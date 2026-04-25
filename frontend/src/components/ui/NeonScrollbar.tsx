@@ -541,11 +541,46 @@ export const NeonScrollbar: React.FC<NeonScrollbarProps> = ({
           {children}
         </div>
       )}
-      <div ref={trackYRef} className="nsb-track nsb-track-y">
-        <div ref={thumbYRef} className="nsb-thumb nsb-thumb-y" />
+      {/*
+        `data-cursor-managed`: the thumbs hand-roll their own cursor
+        mode (open frog hand on hover, closed fist while dragging) via
+        `onThumbHover` / `onThumbDrag` callbacks the consumer wires
+        into the global cursor store. The `useGlobalCursorMode` hook
+        defers when it sees this attribute, leaving those imperative
+        modes intact. Without it, every mousemove over the thumb
+        would re-infer (the thumb is just a `<div>`) and reset to
+        'firefly', killing the grab affordance.
+      */}
+      {/*
+        Track: clicking jumps to that position, so it reads as a
+        clickable affordance — `data-cursor="point"` shows the frog
+        pointing-finger glyph on hover. The thumb (a child of the
+        track) opts into managed mode so its hover/drag handlers
+        own the grab/grabbing modes; the explicit attribute on the
+        thumb child takes precedence over the track's `data-cursor`
+        when the cursor is over the thumb.
+      */}
+      <div
+        ref={trackYRef}
+        className="nsb-track nsb-track-y"
+        data-cursor="point"
+      >
+        <div
+          ref={thumbYRef}
+          className="nsb-thumb nsb-thumb-y"
+          data-cursor-managed=""
+        />
       </div>
-      <div ref={trackXRef} className="nsb-track nsb-track-x">
-        <div ref={thumbXRef} className="nsb-thumb nsb-thumb-x" />
+      <div
+        ref={trackXRef}
+        className="nsb-track nsb-track-x"
+        data-cursor="point"
+      >
+        <div
+          ref={thumbXRef}
+          className="nsb-thumb nsb-thumb-x"
+          data-cursor-managed=""
+        />
       </div>
       <div ref={cornerRef} className="nsb-corner" />
     </div>

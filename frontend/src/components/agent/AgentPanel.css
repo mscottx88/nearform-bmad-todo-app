@@ -328,6 +328,32 @@
 
 /* ── Composer (AC 8) ───────────────────────────────────────────────────── */
 
+.agent-composer-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-composer-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+  color: rgba(0, 238, 255, 0.45);
+  padding-left: 4px;
+  /* Always present in the layout (no flicker between focused and
+     unfocused) — fade in via opacity only. The hint is never tall
+     enough to be worth animating its height. */
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+  pointer-events: none;
+  user-select: none;
+}
+
+.agent-composer-hint--visible {
+  opacity: 1;
+}
+
 .agent-composer {
   width: 100%;
   resize: none;

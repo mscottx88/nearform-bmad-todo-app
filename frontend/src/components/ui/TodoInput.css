@@ -22,6 +22,15 @@
   border-radius: 2px;
   pointer-events: auto;
   transition: opacity 100ms ease-out;
+  /* textarea-specific: hide the user-drag handle in the bottom-right
+     and keep the height tight to a single line by default. The
+     textarea grows when the user enters Shift+Enter newlines, up to
+     `max-height` before scrolling internally. */
+  resize: none;
+  line-height: 1.3;
+  overflow-y: auto;
+  max-height: 30vh;
+  vertical-align: top;
 }
 
 .todo-input::placeholder {
@@ -31,6 +40,25 @@
 .todo-input--dissolving {
   opacity: 0;
   pointer-events: none;
+}
+
+/*
+ * Keyboard-shortcut hint that sits just below the input. Always
+ * present in the DOM so the input doesn't reflow when it appears,
+ * styled with the same neon-mono micro-text used by the chat
+ * composer hint for visual consistency across the two inputs.
+ */
+.todo-input-hint {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  color: rgba(0, 238, 255, 0.55);
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  text-shadow: 0 0 4px rgba(0, 238, 255, 0.35);
 }
 
 /* Story 3.3: shell wraps the input + absolute-positioned dropdown

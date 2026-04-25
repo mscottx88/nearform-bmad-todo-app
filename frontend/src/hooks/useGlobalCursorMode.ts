@@ -37,13 +37,47 @@ const TEXT_INPUT_TYPES = new Set([
   '', // <input> with no `type=` defaults to text
 ]);
 
-function inferModeForElement(
-  el: Element | null,
-): 'point' | 'text' | 'no-access' | 'firefly' {
+/** Sentinel return value: "this element manages its own cursor mode
+ *  imperatively — leave whatever the store currently has set alone."
+ *  Used for `<canvas>` (R3F 3D scene; LilyPad's onPointerEnter sets
+ *  'point' / 'grabbing' directly) and any element opting in via the
+ *  `data-cursor-managed` attribute. */
+type InferredMode = 'point' | 'text' | 'no-access' | 'firefly' | 'managed';
+
+/** Whitelist of explicit `data-cursor` attribute values that the hook
+ *  will honour. Anything else is ignored so a typo doesn't stick the
+ *  cursor on a never-cleared mode. */
+const EXPLICIT_CURSOR_VALUES = new Set([
+  'point',
+  'text',
+  'no-access',
+  'firefly',
+]);
+
+/**
+ * Walk up from `el` looking for an interactive affordance. If none is
+ * found, fall through and check whether the original target hovers
+ * over selectable text — if so, show the I-beam glyph (mirrors the
+ * OS default cursor behaviour over `<p>`, `<span>`, etc. with the
+ * default `user-select: text`).
+ */
+function inferModeForElement(el: Element | null): InferredMode {
+  const original = el;
   let target: Element | null = el;
   while (target && target !== document.body && target !== document.documentElement) {
     const tag = target.tagName;
 
+    if (tag === 'CANVAS' || target.hasAttribute('data-cursor-managed')) {
+      return 'managed';
+    }
+    // Explicit override via `data-cursor="<mode>"` — useful for
+    // clickable affordances that aren't natural buttons / inputs
+    // (e.g. the NeonScrollbar track jumps to the click position so
+    // it should read as 'point' even though it's a `<div>`).
+    const explicit = target.getAttribute('data-cursor');
+    if (explicit && EXPLICIT_CURSOR_VALUES.has(explicit)) {
+      return explicit as InferredMode;
+    }
     if (tag === 'BUTTON') {
       return (target as HTMLButtonElement).disabled ? 'no-access' : 'point';
     }
@@ -69,6 +103,18 @@ function inferModeForElement(
 
     target = target.parentElement;
   }
+
+  // No interactive affordance ancestor — fall through to the
+  // selectable-text check. `user-select: text` (the default for
+  // most prose) means the user can drag-select; show the I-beam to
+  // signal that. `user-select: none` (UI chrome, decorative spans)
+  // stays on the firefly default.
+  if (original instanceof HTMLElement && original.textContent?.trim()) {
+    const style = window.getComputedStyle(original);
+    if (style.userSelect !== 'none') {
+      return 'text';
+    }
+  }
   return 'firefly';
 }
 
@@ -76,16 +122,23 @@ export function useGlobalCursorMode(): void {
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const store = usePondStore.getState();
-      // Defer to direct callers that own grab-style modes (LilyPad
-      // drag handle, NeonScrollbar thumb). Their pointerLeave / drag-
-      // end handlers reset to 'firefly', at which point the next
-      // mousemove this fires will pick up whatever's under the
-      // pointer naturally.
-      if (store.cursorMode === 'grab' || store.cursorMode === 'grabbing') {
-        return;
-      }
+      // Only defer during ACTIVE drags. 'grab' (hover affordance) is
+      // re-inferred every mousemove so a stale 'grab' set by one
+      // component (e.g. InfoPopup leaving its panel) can't poison the
+      // cursor for the rest of the page. Hover handlers that need
+      // 'grab' to persist mark their element with the
+      // `data-cursor-managed` attribute (or rely on `<canvas>`); the
+      // hook returns 'managed' for those and skips the override
+      // entirely.
+      if (store.cursorMode === 'grabbing') return;
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const next = inferModeForElement(el);
+      // 'managed' is a sentinel: the cursor is over a self-managing
+      // element (R3F canvas, opt-in `data-cursor-managed`). Skip —
+      // that element's own pointerEnter/Leave is the source of
+      // truth. Without this guard the global hook would overwrite
+      // LilyPad's 'point' on every mousemove inside the canvas.
+      if (next === 'managed') return;
       if (next !== store.cursorMode) {
         store.setCursorMode(next);
       }

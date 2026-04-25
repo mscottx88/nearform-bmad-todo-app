@@ -8,11 +8,16 @@
  *     <button>...</button>
  *   </NeonTooltip>
  *
- * The wrapper renders an extra `<span>` around the trigger and a
- * positioned tooltip element that's only mounted while the trigger is
- * hovered or focus-visible. Show/hide are pure CSS (`opacity` +
- * `pointer-events`) so the timing is consistent with the rest of the
- * neon UI's transitions.
+ * The wrapper renders an extra `<span>` around the trigger; the
+ * tooltip itself is portalled to `document.body` so it isn't clipped
+ * by any `overflow: hidden` ancestor (e.g. the InfoPopup container)
+ * and isn't trapped in a stacking context (e.g. a parent with its
+ * own `z-index`). Position is computed at show-time from the
+ * trigger's `getBoundingClientRect()` and clamped to the viewport so
+ * tooltips near the edge don't overflow off-screen.
+ *
+ * Show/hide is opacity-driven so the transition stays consistent
+ * with the rest of the neon UI.
  *
  * Falls back gracefully on touch devices: pointer events that never
  * land in `pointerenter`/`pointerleave` (e.g. tap-and-release on iOS)
@@ -23,12 +28,17 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  type CSSProperties,
   type ReactElement,
   type ReactNode,
   useCallback,
+  useEffect,
   useId,
+  useLayoutEffect,
+  useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import './NeonTooltip.css';
 
 export type NeonTooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
@@ -59,6 +69,82 @@ interface ChildHandlers {
   'aria-describedby'?: string;
 }
 
+const VIEWPORT_MARGIN = 4; // px breathing room from window edges
+const TRIGGER_GAP = 6; // px gap between the trigger and the tooltip
+
+interface ComputedPosition {
+  top: number;
+  left: number;
+  /** The placement actually used after edge-clamping — may differ
+   *  from the requested placement if the tooltip would have
+   *  overflowed. */
+  resolvedPlacement: NeonTooltipPlacement;
+}
+
+function computePosition(
+  triggerRect: DOMRect,
+  tooltipRect: DOMRect,
+  preferred: NeonTooltipPlacement,
+): ComputedPosition {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const tw = tooltipRect.width;
+  const th = tooltipRect.height;
+
+  // Default coords by placement.
+  let top = 0;
+  let left = 0;
+  let resolvedPlacement = preferred;
+
+  const placeTop = () => {
+    top = triggerRect.top - th - TRIGGER_GAP;
+    left = triggerRect.left + triggerRect.width / 2 - tw / 2;
+    resolvedPlacement = 'top';
+  };
+  const placeBottom = () => {
+    top = triggerRect.bottom + TRIGGER_GAP;
+    left = triggerRect.left + triggerRect.width / 2 - tw / 2;
+    resolvedPlacement = 'bottom';
+  };
+  const placeLeft = () => {
+    top = triggerRect.top + triggerRect.height / 2 - th / 2;
+    left = triggerRect.left - tw - TRIGGER_GAP;
+    resolvedPlacement = 'left';
+  };
+  const placeRight = () => {
+    top = triggerRect.top + triggerRect.height / 2 - th / 2;
+    left = triggerRect.right + TRIGGER_GAP;
+    resolvedPlacement = 'right';
+  };
+
+  if (preferred === 'top') placeTop();
+  else if (preferred === 'bottom') placeBottom();
+  else if (preferred === 'left') placeLeft();
+  else placeRight();
+
+  // Flip if the chosen placement overflows the opposite axis.
+  if (resolvedPlacement === 'top' && top < VIEWPORT_MARGIN) placeBottom();
+  else if (
+    resolvedPlacement === 'bottom' &&
+    top + th > vh - VIEWPORT_MARGIN
+  )
+    placeTop();
+  else if (resolvedPlacement === 'left' && left < VIEWPORT_MARGIN) placeRight();
+  else if (
+    resolvedPlacement === 'right' &&
+    left + tw > vw - VIEWPORT_MARGIN
+  )
+    placeLeft();
+
+  // Clamp horizontally / vertically into the viewport so the tooltip
+  // never reads as cut off, even if both placements would overflow
+  // (very narrow viewports).
+  left = Math.max(VIEWPORT_MARGIN, Math.min(left, vw - tw - VIEWPORT_MARGIN));
+  top = Math.max(VIEWPORT_MARGIN, Math.min(top, vh - th - VIEWPORT_MARGIN));
+
+  return { top, left, resolvedPlacement };
+}
+
 export function NeonTooltip({
   text,
   children,
@@ -68,6 +154,9 @@ export function NeonTooltip({
 }: Props) {
   const [open, setOpen] = useState(false);
   const tooltipId = useId();
+  const triggerWrapRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<ComputedPosition | null>(null);
 
   const child = Children.only(children);
   if (!isValidElement<ChildHandlers>(child)) {
@@ -102,26 +191,94 @@ export function NeonTooltip({
     },
   });
 
+  // Compute position whenever the tooltip is shown. useLayoutEffect so
+  // the first paint already has the correct `top`/`left` — otherwise
+  // the tooltip would flash at 0,0 for one frame before snapping into
+  // place.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const trigger = triggerWrapRef.current;
+    const tooltip = tooltipRef.current;
+    if (!trigger || !tooltip) return;
+    setPosition(
+      computePosition(
+        trigger.getBoundingClientRect(),
+        tooltip.getBoundingClientRect(),
+        placement,
+      ),
+    );
+  }, [open, placement, text]);
+
+  // Recompute on viewport changes while open.
+  useEffect(() => {
+    if (!open) return;
+    const recompute = () => {
+      const trigger = triggerWrapRef.current;
+      const tooltip = tooltipRef.current;
+      if (!trigger || !tooltip) return;
+      setPosition(
+        computePosition(
+          trigger.getBoundingClientRect(),
+          tooltip.getBoundingClientRect(),
+          placement,
+        ),
+      );
+    };
+    window.addEventListener('scroll', recompute, true);
+    window.addEventListener('resize', recompute);
+    return () => {
+      window.removeEventListener('scroll', recompute, true);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [open, placement]);
+
   const wrapClass = ['neon-tooltip-wrap', wrapperClassName]
     .filter(Boolean)
     .join(' ');
 
+  // Tooltip lives in a portal at document.body so an `overflow:
+  // hidden` ancestor (e.g. the InfoPopup container) can't clip it,
+  // and so it sits in its own stacking context above everything else
+  // (the inline z-index defeats the cursor canvas's
+  // `--z-cursor: 2147483647` only when fully opaque — we keep it
+  // below the cursor by setting z-index to a high but lower value).
+  const tooltipStyle: CSSProperties = position
+    ? { top: position.top, left: position.left }
+    : {
+        // Pre-position render: place at top-left out of view but
+        // measurable so getBoundingClientRect returns real
+        // dimensions on the first useLayoutEffect.
+        top: 0,
+        left: 0,
+        visibility: 'hidden',
+      };
+
+  const resolvedPlacement = position?.resolvedPlacement ?? placement;
+
   return (
-    <span className={wrapClass}>
-      {enhanced}
-      <span
-        id={tooltipId}
-        role="tooltip"
-        className={[
-          'neon-tooltip',
-          `neon-tooltip--${placement}`,
-          open ? 'neon-tooltip--open' : null,
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {text}
+    <>
+      <span ref={triggerWrapRef} className={wrapClass}>
+        {enhanced}
       </span>
-    </span>
+      {createPortal(
+        <div
+          ref={tooltipRef}
+          id={tooltipId}
+          role="tooltip"
+          className={[
+            'neon-tooltip',
+            `neon-tooltip--${resolvedPlacement}`,
+            open ? 'neon-tooltip--open' : null,
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          style={tooltipStyle}
+          aria-hidden={!open}
+        >
+          {text}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
