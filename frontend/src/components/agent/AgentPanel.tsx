@@ -131,7 +131,12 @@ export function AgentPanel() {
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
-            padding: 12,
+            // Right- and left-aligned bubbles get a stacked
+            // drop-shadow that blooms ~14-18px past the SVG outline.
+            // Horizontal padding here has to clear that bloom or the
+            // panel's overflow:auto clips the glow on whichever side
+            // the bubble is anchored. Vertical padding stays modest.
+            padding: '12px 20px',
           }}
           scrollRef={chatScrollRef}
           // Cursor swaps:
