@@ -134,11 +134,23 @@ export function useGlobalCursorMode(): void {
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const next = inferModeForElement(el);
       // 'managed' is a sentinel: the cursor is over a self-managing
-      // element (R3F canvas, opt-in `data-cursor-managed`). Skip —
-      // that element's own pointerEnter/Leave is the source of
-      // truth. Without this guard the global hook would overwrite
-      // LilyPad's 'point' on every mousemove inside the canvas.
-      if (next === 'managed') return;
+      // element (R3F canvas, opt-in `data-cursor-managed`). Skip
+      // overriding the imperative mode that element's own handlers
+      // set — but FIRST clear hook-owned modes that wouldn't be
+      // valid inside the managed region. Without this clear, a
+      // stale 'text' (set by hovering a paragraph) or 'no-access'
+      // (set by hovering a disabled button) "leaks" into the
+      // managed region until LilyPad's pointerEnter happens to fire
+      // — which it doesn't if the user moves over empty water.
+      if (next === 'managed') {
+        if (
+          store.cursorMode === 'text' ||
+          store.cursorMode === 'no-access'
+        ) {
+          store.setCursorMode('firefly');
+        }
+        return;
+      }
       if (next !== store.cursorMode) {
         store.setCursorMode(next);
       }

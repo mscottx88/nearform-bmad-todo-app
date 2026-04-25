@@ -149,7 +149,7 @@ describe('useGlobalCursorMode', () => {
     unmount();
   });
 
-  it('does not override the cursor mode while the pointer is over a <canvas>', () => {
+  it('preserves imperative modes (point / grab) on a managed <canvas>', () => {
     // The R3F canvas hosts the pond scene — LilyPad sets 'point' on
     // pointerEnter and 'grabbing' on drag-start. The global hook
     // must NOT clobber those imperative modes when the next
@@ -163,14 +163,24 @@ describe('useGlobalCursorMode', () => {
     unmount();
   });
 
-  it('respects an opt-in data-cursor-managed attribute', () => {
+  it('clears stale hook-owned modes (text / no-access) on entry to managed', () => {
+    // When the cursor moves from a paragraph (hook set 'text') into
+    // the canvas, the stale 'text' would otherwise persist until
+    // some imperative handler fired — which never happens if the
+    // user is over empty water. The hook clears 'text' /
+    // 'no-access' on managed entry so the cursor falls back to
+    // 'firefly' until LilyPad's pointerEnter takes over.
     const div = document.createElement('div');
     div.setAttribute('data-cursor-managed', '');
     document.body.appendChild(div);
     const { unmount } = renderHook(() => useGlobalCursorMode());
+    usePondStore.setState({ cursorMode: 'text' });
+    act(() => dispatchMove(div));
+    expect(usePondStore.getState().cursorMode).toBe('firefly');
+
     usePondStore.setState({ cursorMode: 'no-access' });
     act(() => dispatchMove(div));
-    expect(usePondStore.getState().cursorMode).toBe('no-access');
+    expect(usePondStore.getState().cursorMode).toBe('firefly');
     unmount();
   });
 

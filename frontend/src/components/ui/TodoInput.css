@@ -25,8 +25,9 @@
   box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
   border-radius: 2px;
   pointer-events: auto;
-  width: min(80vw, 600px);
-  min-width: 320px;
+  /* Width is owned by the shell (min(95vw, 800px)) so this fills the
+     full width of its flex parent. */
+  width: 100%;
   box-sizing: border-box;
 }
 
@@ -85,13 +86,19 @@
 
 /* Story 3.3: shell wraps the input + absolute-positioned dropdown
    so the dropdown anchors directly beneath the input without
-   shifting the input's layout. */
+   shifting the input's layout.
+   2026-04-25: shell now sets the textbox width so the textarea inside
+   can simply fill 100%. The historical `min-width: 320px` on
+   `.todo-input` plus auto-width worked for an `<input>` (which sized
+   to `min-width` minimum); textareas don't size that way without an
+   explicit width, so the shell now owns it. */
 .todo-input-shell {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   pointer-events: auto;
+  width: min(95vw, 800px);
 }
 
 .todo-input-dropdown {
