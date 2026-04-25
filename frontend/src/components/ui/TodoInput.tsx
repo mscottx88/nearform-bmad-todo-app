@@ -148,11 +148,18 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
       // the registry walker so the help branch never falls into the
       // toggle-command framework. On match, open the agent panel with
       // the prefill (if any), reset the composer, and close TodoInput.
+      //
+      // Story 6.2 Group D CR P2: only seed the agent draft when the
+      // user actually supplied a prefill — bare `/help` should NOT
+      // wipe an in-progress agent-composer draft. Mirrors the same
+      // guard `activateAgentHelp` (the source-of-truth helper) uses.
       const help = parseHelpCommand(trimmed);
       if (help !== null) {
         const agent = useAgentStore.getState();
         agent.openPanel();
-        agent.setDraft(help.prefill);
+        if (help.prefill) {
+          agent.setDraft(help.prefill);
+        }
         setValue('');
         onClose();
         return;

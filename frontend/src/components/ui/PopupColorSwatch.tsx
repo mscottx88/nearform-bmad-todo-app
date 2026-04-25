@@ -63,6 +63,20 @@ export function PopupColorSwatch({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Story 6.2 Group D CR P1: don't swallow Escape when focus is
+      // inside an editable element. The InfoPopup's edit-mode
+      // textarea is focusable while the swatch is open; a captured
+      // Escape there should cancel the edit, not collapse the
+      // swatch. The swatch still claims Escape when focus is on a
+      // button / non-editable surface (the original AC #4 / AC #8
+      // intent).
+      const target = e.target as HTMLElement | null;
+      const inEditable =
+        target !== null &&
+        (target.tagName === 'TEXTAREA' ||
+          target.tagName === 'INPUT' ||
+          target.isContentEditable);
+      if (inEditable) return;
       e.stopImmediatePropagation();
       onCollapse();
     };
@@ -75,7 +89,11 @@ export function PopupColorSwatch({
     <div className="action-popup__color-swatches">
       {NEON_SWATCHES.map(({ color, name }) => {
         const isCurrent = color.toLowerCase() === committedLower;
-        const label = isCurrent ? `${name} · current` : name;
+        // Story 6.2 Group D CR P4: avoid `·` (middle dot) as the
+        // separator — most screen readers either pause on it or
+        // read it literally as "middle dot". An em-dash reads
+        // cleanly as a brief pause.
+        const label = isCurrent ? `${name} — current` : name;
         return (
           <NeonTooltip key={color} text={label} placement="top">
             <button

@@ -22,6 +22,14 @@ If this file grows faster than it drains, something's wrong with the process, no
 
 ---
 
+## Deferred from: code review of story 6-2-chat-panel — Group D chrome polish (2026-04-25)
+
+- `[OPEN]` `InfoPopup` edit-mode unmount with an active resize-drag flips cursor to `firefly` for one frame before `useGlobalCursorMode` re-resolves on the next mousemove. Cosmetic. (frontend/src/components/ui/InfoPopup.tsx resize teardown)
+- `[OPEN]` `NeonScrollbar` track click during an in-flight thumb drag (cursor moves off thumb mid-drag, mouseup on track) jumps scroll to the click position, conflicting with the thumb's final position. Pre-existing pattern, not introduced by Story 6.2. (frontend/src/components/ui/NeonScrollbar.tsx track click handler)
+- `[OPEN]` `InfoPopup` removed `handlePanelMouseEnter` / `handlePanelMouseLeave`. If the popup unmounts while the cursor is in `grab` mode without a subsequent mousemove, the mode briefly persists until the next move re-infers via `useGlobalCursorMode`. Edge case; address if observed. (frontend/src/components/ui/InfoPopup.tsx)
+
+---
+
 ## Deferred from: code review of story 6-2-chat-panel — Group C UI polish (2026-04-25)
 
 - `[OPEN]` `NeonTooltip` lacks an `Escape` keyboard dismissal — the WAI-ARIA Tooltip pattern requires Escape to dismiss the tooltip while focus stays on the trigger. Currently only blur dismisses. Minor a11y gap; address in a future a11y pass. (frontend/src/components/ui/NeonTooltip.tsx)

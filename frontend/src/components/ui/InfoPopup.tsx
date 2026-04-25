@@ -307,7 +307,15 @@ export function InfoPopup({
 
   const commitEdit = (): void => {
     const trimmed = editText.trim();
-    if (trimmed.length > 0 && trimmed !== todo.text) {
+    // Story 6.2 Group D CR P3: empty-trim used to silently snap
+    // back to the original text on Enter — no feedback, looked
+    // broken. Now: stay in edit mode with the empty draft so the
+    // user can see their input is the problem. They can type to
+    // recover or hit Escape to cancel-and-revert.
+    if (trimmed.length === 0) {
+      return;
+    }
+    if (trimmed !== todo.text) {
       onCommitText?.(trimmed);
     }
     setEditing(false);

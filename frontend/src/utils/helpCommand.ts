@@ -28,8 +28,15 @@ export interface HelpCommandResult {
 export function parseHelpCommand(text: string): HelpCommandResult | null {
   const trimmed = text.trim();
   if (trimmed === '/help') return { open: true, prefill: '' };
-  if (trimmed.startsWith('/help ')) {
-    return { open: true, prefill: trimmed.slice('/help '.length).trim() };
+  // Story 6.2 Group D CR P5: accept any whitespace separator
+  // (space, tab, newline) between `/help` and the prefill, plus
+  // an explicit `/` for the slash-command-style `/help/foo`
+  // shorthand some users will reach for. Without this, common
+  // typos and tab-completion behaviours fell through to the
+  // todo-create path with the literal `/help...` text.
+  const match = /^\/help[\s/](.*)$/.exec(trimmed);
+  if (match !== null) {
+    return { open: true, prefill: match[1].trim() };
   }
   return null;
 }

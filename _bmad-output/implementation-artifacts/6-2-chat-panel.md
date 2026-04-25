@@ -1347,6 +1347,43 @@ batch-apply walkthrough:
 
 ---
 
+### Review Findings — Group D (InfoPopup / TodoInput / scrollbar / swatch tweaks) — 2026-04-25
+
+**Layers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (full mode)
+**Diff:** `b873531..HEAD` filtered to chrome polish (~6 files, ~450 lines)
+
+#### Decision-needed (1)
+
+- [x] [Review][Decision] InfoPopup textarea `value` prop change while editing is silently ignored — `useEffect(syncFromProp)` bails when `editing === true`. If a server push, optimistic mutation, or external commit updates `todo.text` mid-edit, the user keeps their stale draft and `commitEdit` writes their version over the new server text without warning. Decision: accept current behaviour (user's in-flight edit wins, no merge UX), surface a "draft conflict" indicator, or auto-merge non-conflicting external updates. [`frontend/src/components/ui/InfoPopup.tsx` editing sync effect]
+
+#### Patch (5)
+
+- [x] [Review][Patch] **HIGH** — `PopupColorSwatch` registers a capture-phase, `stopImmediatePropagation`-firing Escape handler at window level. If the user opens the swatch (focused mode), then enters edit mode while the swatch is still open, Escape inside the textarea is swallowed by the swatch's window-capture handler — collapsing the swatch instead of cancelling the edit. Fix: short-circuit the swatch's Escape handler when `e.target` (or `document.activeElement`) is inside the editing textarea, OR drop capture-phase and rely on bubble-phase ordering. [`frontend/src/components/ui/PopupColorSwatch.tsx:63-72`]
+- [x] [Review][Patch] **MED** — `TodoInput`'s `/help` carve-out calls `agent.setDraft(help.prefill)` unconditionally — even when `help.prefill === ''`. If the user has an in-progress agent-composer draft and types `/help` (no prefix) in TodoInput, their composer text is wiped. `activateAgentHelp` (the same source-of-truth helper used by the registry-entry execute) already guards with `if (prefill)`. Fix: add the same guard in TodoInput's branch. [`frontend/src/components/ui/TodoInput.tsx:154-155`]
+- [x] [Review][Patch] **MED** — `commitEdit` early-returns when `trimmed.length === 0`, silently restoring the original text without surfacing why. A user who deletes everything to clear the todo and presses Enter sees the textarea snap back to the original with no feedback. Fix: surface a brief "todo text can't be empty" hint OR wire delete-via-empty to the existing delete affordance OR explicitly route empty-trim through the cancel path so the UX is at least consistent with Escape. [`frontend/src/components/ui/InfoPopup.tsx:308-315`]
+- [x] [Review][Patch] **LOW** — `PopupColorSwatch`'s tooltip text uses `` `${name} · current` `` (middle-dot separator). Most screen readers either pause on `·` or read it literally as "middle dot". Fix: use a different separator (em-dash, comma) or pass a separate `ariaLabel` to NeonTooltip. [`frontend/src/components/ui/PopupColorSwatch.tsx:77`]
+- [x] [Review][Patch] **LOW** — `parseHelpCommand` rejects `/help/foo` (no space between `/help` and the prefill). Same for `/help\tfoo` (tab separator). Fall-through path then tries to create the literal string as a todo. Fix: accept any whitespace OR explicit `/` separator after `/help`, to match common slash-command conventions. [`frontend/src/utils/helpCommand.ts:31-33`]
+
+#### Deferred (3) — pre-existing or low-yield
+
+- [x] [Review][Defer] `InfoPopup` edit-mode unmount with an active resize-drag (e.g., Escape on outer popup while user is mid-resize-drag) flips cursor to `firefly` for one frame before useGlobalCursorMode re-resolves on the next mousemove. Cosmetic. [`frontend/src/components/ui/InfoPopup.tsx` resize teardown]
+- [x] [Review][Defer] `NeonScrollbar` track click during an in-flight thumb drag (cursor moves off thumb mid-drag, mouseup lands on track) jumps scroll to the click position, conflicting with the thumb's final position. Pre-existing; not introduced by Group D changes. [`frontend/src/components/ui/NeonScrollbar.tsx` track click handler]
+- [x] [Review][Defer] `InfoPopup` removed `handlePanelMouseEnter` / `handlePanelMouseLeave` (consolidated into `useGlobalCursorMode`). If the popup unmounts while the cursor is in `grab` mode without a subsequent mousemove, the cursor briefly persists in `grab` until the next move re-infers. Edge case; defer pending observation. [`frontend/src/components/ui/InfoPopup.tsx`]
+
+#### Dismissed — false positives / out of scope
+
+- `data-cursor-managed=""` empty-string truthy concern — verified the hook uses `target.hasAttribute('data-cursor-managed')`, not truthy-of-dataset (`useGlobalCursorMode.ts:70`). Correct.
+- `/help` carve-out swallows `/helper` etc — verified `parseHelpCommand` matches exactly `/help` (entire trimmed input) or `/help ` (with trailing space), never `/helper`.
+- Tooltip wrapping each swatch button injects extra a11y — `NeonTooltip` uses `aria-describedby`, not `aria-label`; doesn't override the button's existing `aria-label`.
+- Tooltip recompute on label change (`current` → not-current) — cosmetic one-frame jitter, not a defect.
+- `align-items: stretch` shell width concern — speculative, no observed failure.
+- `onUp` unused-arg signature cleanup — internal style nit.
+- Mobile keyboard overlay / `95vw` width fight — out of scope (desktop-first app).
+- Hint-banner overlap on very small viewports — out of scope, no observed failure.
+- Refs-during-render (Blind hypothesis) — verified the affected refs are in event handlers / effects, not render paths.
+
+---
+
 ## Change Log
 
 - **2026-04-25** — Story 6.2 implemented end-to-end:

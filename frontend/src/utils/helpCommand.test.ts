@@ -39,4 +39,26 @@ describe('parseHelpCommand', () => {
   it('does not match an empty string', () => {
     expect(parseHelpCommand('')).toBeNull();
   });
+
+  // Story 6.2 Group D CR P5: tab and newline separators (and the
+  // explicit `/help/foo` shorthand) used to fall through to the
+  // todo-create path. The regex now accepts any whitespace OR a
+  // `/` after `/help`.
+  it('matches /help with a tab separator', () => {
+    expect(parseHelpCommand('/help\tfoo bar')).toEqual({
+      open: true,
+      prefill: 'foo bar',
+    });
+  });
+
+  it('matches /help/foo (slash separator, no space)', () => {
+    expect(parseHelpCommand('/help/plan my week')).toEqual({
+      open: true,
+      prefill: 'plan my week',
+    });
+  });
+
+  it('still does not match /helpfoo (no separator at all)', () => {
+    expect(parseHelpCommand('/helpfoo')).toBeNull();
+  });
 });
