@@ -9,17 +9,39 @@
   pointer-events: none;
 }
 
-.todo-input {
+/*
+ * Wrapper that owns the panel chrome (border, glow, background) AND
+ * holds the absolute-positioned NeonScrollbar overlay. The textarea
+ * inside is transparent and fills the wrapper, with right padding
+ * reserved for the neon thumb track. Modelled after
+ * `.info-popup__editor-textbox` so the two textboxes look and behave
+ * the same.
+ */
+.todo-input__textbox {
+  position: relative;
+  overflow: hidden;
   background: rgba(0, 0, 0, 0.9);
   border: 1px solid var(--neon-cyan);
   box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+  border-radius: 2px;
+  pointer-events: auto;
+  width: min(80vw, 600px);
+  min-width: 320px;
+  box-sizing: border-box;
+}
+
+.todo-input {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
   color: var(--neon-cyan);
   font-family: var(--font-mono);
   font-size: 20px;
-  padding: 12px 24px;
+  /* Right padding reserves 15px for the neon track overlay (matches
+     NeonScrollbar's track width). */
+  padding: 12px 39px 12px 24px;
   outline: none;
-  min-width: 320px;
-  border-radius: 2px;
   pointer-events: auto;
   transition: opacity 100ms ease-out;
   /* textarea-specific: hide the user-drag handle in the bottom-right
@@ -30,7 +52,7 @@
   line-height: 1.3;
   overflow-y: auto;
   max-height: 30vh;
-  vertical-align: top;
+  box-sizing: border-box;
 }
 
 .todo-input::placeholder {

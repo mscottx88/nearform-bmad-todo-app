@@ -12,6 +12,7 @@ import {
   worldFromVisibility,
   type SlashCommand,
 } from '../../utils/slashCommands';
+import { NeonScrollbar } from './NeonScrollbar';
 import './TodoInput.css';
 
 interface TodoInputProps {
@@ -37,6 +38,16 @@ function generatePosition(): { positionX: number; positionY: number } {
 
 export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Separate state-backed ref so NeonScrollbar (overlay mode) re-runs
+  // its layout effects when the textarea actually mounts. A plain
+  // useRef would still hold null on the first render and the
+  // scrollbar tracks would never bind. Pattern lifted from
+  // InfoPopup's edit-mode textarea wiring.
+  const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
+  const setTextareaRefs = (el: HTMLTextAreaElement | null) => {
+    inputRef.current = el;
+    setTextareaEl(el);
+  };
   const [dissolving, setDissolving] = useState(false);
   const [value, setValue] = useState(initialValue);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -192,16 +203,27 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
   return createPortal(
     <div className="todo-input-overlay">
       <div className="todo-input-shell">
-        <textarea
-          ref={inputRef}
-          className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
-          placeholder="what's on your mind..."
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onBlur={onClose}
-          rows={1}
-        />
+        <div className="todo-input__textbox">
+          <textarea
+            ref={setTextareaRefs}
+            className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
+            placeholder="what's on your mind..."
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onBlur={onClose}
+            rows={1}
+          />
+          {/*
+            Overlay-mode NeonScrollbar paints the cyan thumb against the
+            textarea's native scrollTop/scrollHeight. The native
+            scrollbar is hidden by global.css's `::-webkit-scrollbar
+            { display: none }`, so without this overlay the user can
+            scroll past the 30vh max-height but has no visual
+            indicator that there's hidden content above/below.
+          */}
+          <NeonScrollbar color="cyan" scrollElement={textareaEl} />
+        </div>
         <span className="todo-input-hint" aria-hidden="true">
           enter to save · shift+enter for new line · esc to dismiss
         </span>
