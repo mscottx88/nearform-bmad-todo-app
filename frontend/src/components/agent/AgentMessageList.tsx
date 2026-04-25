@@ -74,6 +74,20 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
     return () => el.removeEventListener('scroll', recompute);
   }, [scrollRef]);
 
+  // One-shot scroll-to-bottom on mount. Without this, opening the
+  // panel via F1 with prior history shows the OLDEST messages at the
+  // top — chat conventions expect the LATEST. The "messages grew"
+  // effect below only fires when the array length CHANGES after
+  // mount, so it doesn't cover the initial render. Runs once with an
+  // empty deps array; subsequent visibility toggles and message
+  // arrivals are handled by the other effects.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el === null) return;
+    el.scrollTop = el.scrollHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
+  }, []);
+
   // On message-list change OR streaming-buffer change, scroll to
   // bottom if pinned; otherwise show the pill.
   useEffect(() => {
