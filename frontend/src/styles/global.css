@@ -63,7 +63,13 @@ textarea[readonly],
 select[disabled],
 select:disabled,
 [aria-disabled="true"] {
-  cursor: none;
+  /* `!important` is the simplest way to defeat the user-agent
+     stylesheet's `cursor: not-allowed` on disabled form controls in
+     Chromium and Firefox — both ship that rule with default
+     specificity, and a few browser builds promote it to
+     `!important` for accessibility. The custom firefly canvas paints
+     the no-access glyph instead. */
+  cursor: none !important;
 }
 
 ::selection {
