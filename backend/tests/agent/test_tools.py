@@ -17,6 +17,12 @@ from src.schemas.agent import ChatMessageResponse
 from src.schemas.search import SearchResponse, SearchResult
 from src.schemas.todo import TodoResponse
 
+# Single fixed timestamp used as the deterministic created_at/updated_at
+# in test fixtures. Centralising it avoids the cargo-cult `datetime(2026,
+# 1, 1, ...)` literals scattered across tests; if a future test ever
+# asserts on relative time, change FIXED_TS in one place.
+FIXED_TS = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 def _make_todo(**overrides: Any) -> TodoResponse:
     data: dict[str, Any] = {
@@ -34,8 +40,8 @@ def _make_todo(**overrides: Any) -> TodoResponse:
         "display_metadata": {},
         "deleted": False,
         "deleted_at": None,
-        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
-        "updated_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "created_at": FIXED_TS,
+        "updated_at": FIXED_TS,
     }
     data.update(overrides)
     return TodoResponse(**data)
@@ -90,7 +96,7 @@ class TestGetTodoTool:
         todo_orm.color = "#00ff88"
         todo_orm.position_x = None
         todo_orm.position_y = None
-        todo_orm.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+        todo_orm.created_at = FIXED_TS
 
         mock_session = MagicMock()
         factory = _make_session_factory(mock_session)
@@ -185,7 +191,7 @@ class TestGetChatHistoryTool:
             metadata_={},
             status="complete",
             error=None,
-            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            created_at=FIXED_TS,
         )
 
         mock_session = MagicMock()

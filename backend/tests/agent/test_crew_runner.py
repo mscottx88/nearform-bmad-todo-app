@@ -77,7 +77,7 @@ class TestRunCrew:
         registry = {"chat": _mock_skill(mock_crew)}
         with (
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
-            patch("src.agent.crew_runner.time.sleep"),
+            patch("src.agent.crew_runner.time.sleep") as mock_sleep,
         ):
             result = run_crew(ctx, "chat")
 
@@ -85,6 +85,10 @@ class TestRunCrew:
         assert result.success is True
         assert result.prose == prose
         assert result.error is None
+        # Deferred from Group E: assert sleep was actually called so a
+        # regression that drops the chunk-pacing entirely (returning
+        # empty list, no sleep, no `done`) would fail this test.
+        assert mock_sleep.call_count >= 1
 
         events: list[dict | None] = []
         while not q.empty():

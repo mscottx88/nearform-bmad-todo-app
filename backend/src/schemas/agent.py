@@ -79,3 +79,18 @@ class ChatRequest(BaseModel):
     context: ChatRequestContext = Field(default_factory=ChatRequestContext)
 
     _validate_content = field_validator("content")(_not_whitespace_only)
+
+    @field_validator("skill")
+    @classmethod
+    def _normalise_skill(cls, value: str | None) -> str | None:
+        # Deferred from Group D: skill names previously had to be exact
+        # lowercase matches with no surrounding whitespace, asymmetric
+        # with the whitespace-only validator on `content`. Strip + lower
+        # so `"  Chat\n"` and `"chat"` route identically.
+        if value is None:
+            return None
+        cleaned = value.strip().lower()
+        # An empty result after stripping is semantically invalid — drop
+        # to None so the downstream "skill is None → classifier" path
+        # kicks in instead of attempting `SKILL_REGISTRY[""]`.
+        return cleaned or None

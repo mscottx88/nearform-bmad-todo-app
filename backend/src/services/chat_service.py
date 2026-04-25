@@ -26,7 +26,14 @@ def create_session(db: Session) -> ChatSessionResponse:
 
 
 def list_sessions(db: Session) -> list[ChatSessionResponse]:
-    rows = db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+    # Deferred from Group E: `updated_at`-only ordering flakes when two
+    # sessions land in the same `func.now()` tick. Add `id` as the
+    # secondary key so ordering stays deterministic across calls.
+    rows = (
+        db.query(ChatSession)
+        .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
+        .all()
+    )
     return [ChatSessionResponse.model_validate(r) for r in rows]
 
 

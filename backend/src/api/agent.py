@@ -86,6 +86,15 @@ def finalise_assistant_message(
             "assistant message %s vanished during finalisation",
             assistant_msg_id,
         )
+    except Exception:  # noqa: BLE001
+        # Deferred from Group D: previously any non-NotFound exception
+        # bubbled out of the daemon thread to stderr with no DB record.
+        # Swallow + log so the SSE stream still terminates cleanly and
+        # ops have a single grep-able line per failure.
+        logger.exception(
+            "assistant message %s finalisation failed unexpectedly",
+            assistant_msg_id,
+        )
 
 
 @router.post("/sessions", response_model=ChatSessionResponse)

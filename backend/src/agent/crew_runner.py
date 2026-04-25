@@ -9,6 +9,20 @@ from typing import Any
 from src.agent.skills.registry import SKILL_REGISTRY, SkillContext
 
 AGENT_CHUNK_DELAY_MS: int = 50
+# Per-chunk delay must stay inside the spec's 30-80ms range. Validated at
+# module load (deferred from Group C: "AGENT_CHUNK_DELAY_MS no range
+# validation") so a config typo fails loudly at import rather than
+# silently shipping a bad UX.
+assert 30 <= AGENT_CHUNK_DELAY_MS <= 80, (  # noqa: S101
+    f"AGENT_CHUNK_DELAY_MS must be in [30, 80] ms; got {AGENT_CHUNK_DELAY_MS}"
+)
+
+# Hard cap on the number of chunks produced for a single LLM response.
+# Deferred from Group C: a 100k-word LLM run would otherwise produce 100k
+# queue events, balloon memory, and saturate the SSE consumer. Once the
+# cap is reached `_chunk_words` truncates and adds an explicit ellipsis
+# marker so the SSE consumer can render "[truncated]" if it cares.
+MAX_CHUNKS_PER_RUN: int = 500
 
 
 @dataclass(frozen=True)
@@ -38,16 +52,24 @@ def _chunk_words(text: str) -> list[str]:
     """
     lines = text.split("\n")
     chunks: list[str] = []
+    truncated = False
     for i, line in enumerate(lines):
+        if truncated:
+            break
         words = line.split()
         idx = 0
         while idx < len(words):
+            if len(chunks) >= MAX_CHUNKS_PER_RUN:
+                truncated = True
+                break
             size = random.randint(2, 5)  # noqa: S311
             group = words[idx : idx + size]
             chunks.append(" ".join(group))
             idx += size
-        if i < len(lines) - 1:
+        if not truncated and i < len(lines) - 1:
             chunks.append("\n")
+    if truncated:
+        chunks.append("…[truncated]")
     return chunks
 
 

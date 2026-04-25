@@ -242,12 +242,12 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` `PooledTool.__init__` sets `_session_factory` AFTER `super().__init__(**kwargs)` — any future Pydantic validator that inspects the private attr before the super call will see it unset. Works today with no such validators; switch to `model_post_init` if it ever needs to. (backend/src/agent/tools/base.py)
 - `[OPEN]` `event_queue` in `run_crew` is unbounded — a pathologically verbose LLM run can balloon memory before the SSE consumer drains it. Add a reasonable `maxsize` as a DoS guard. (backend/src/agent/crew_runner.py)
 - `[OPEN]` Intent-classifier prompt-injection via `ctx.user_message` — `!r` escaping is weak protection. Low blast radius today (only 2 skills, `"chat"` is the safe fallback) but add output validation / whitelist-check when more skills land. (backend/src/agent/skills/intent_classifier.py)
-- `[OPEN]` `AGENT_CHUNK_DELAY_MS` has no range validation at module load — out-of-range values silently apply. Add an `assert 30 <= AGENT_CHUNK_DELAY_MS <= 80` or a `Field(ge=30, le=80)` in config when the constant becomes env-driven. (backend/src/agent/crew_runner.py)
+- `[FIXED post-CR-quickwin]` `AGENT_CHUNK_DELAY_MS` no range validation — module-load `assert 30 <= AGENT_CHUNK_DELAY_MS <= 80` added so a config typo fails loudly at import.
 - `[OPEN]` `max_tokens=4096` is low for structured chat responses; tune once real usage patterns emerge. (backend/src/agent/llm.py)
-- `[OPEN]` No hard cap on chunk count — a 100k-word LLM response produces 100k queue events. Clamp total chunks (e.g. at 500) as a DoS guard. (backend/src/agent/crew_runner.py `_chunk_words` / `run_crew`)
+- `[FIXED post-CR-quickwin]` Hard cap on chunk count — `MAX_CHUNKS_PER_RUN = 500` clamps `_chunk_words` output and appends `…[truncated]` so the SSE consumer can render it. DoS guard against pathological 100k-word LLM responses.
 - `[OPEN]` `stream_sse` uses `queue.get()` with no timeout — hangs if the producer thread dies BEFORE entering the `try:` block (interpreter-level failure, forced-kill, etc.). Add a watchdog timeout pattern with a periodic heartbeat or liveness check. (backend/src/agent/crew_runner.py `stream_sse`)
 - `[OPEN]` `search_service.hybrid_search` doesn't accept a `limit` param; `SearchTodosTool` slices `response.results[:limit]` client-side. Push the cap into the service signature in a future story that owns `search_service`. (backend/src/agent/tools/search_todos.py, backend/src/services/search_service.py)
-- `[OPEN]` `tests/services/test_search_service.py::test_hybrid_search_semantic_only_hits_vector` is intermittently flaky right after a fresh `alembic upgrade head` — the HNSW index appears to need a warmup insert+query cycle before reliably returning the first row searched. Once the index has been "touched" by any prior test run it stays stable. Mitigation when running in isolation: rerun the test (passes second time). Proper fix is a session-scoped fixture that does one warmup insert before the test session, or a `VACUUM ANALYZE todos` after the migration. Not caused by Story 6.1; surfaced during the Group C CR. (backend/tests/services/test_search_service.py)
+- `[FIXED post-CR-quickwin]` HNSW-warmup flake — added `_warm_hnsw_index` session-scoped autouse fixture in `tests/conftest.py` that inserts one embedded todo, runs a vector query, then deletes the row before any test runs. The HNSW graph is primed for the entire session.
 
 ### Group D — API + wiring
 
@@ -256,18 +256,18 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` `_CANCEL_MAP` outer entries can leak if the worker thread is killed before its `finally` runs (SIGKILL, hard interpreter exit). Acceptable for single-process dev; add a TTL sweeper if observable in prod. (backend/src/api/agent.py)
 - `[OPEN]` Agent routes have no auth / per-user scoping — any UUID-aware client can read/delete/chat any session. Subsumes Group C D-24 (`tools have no authorisation`). Out of epic scope until auth lands. (backend/src/api/agent.py)
 - `[OPEN]` `_run_and_finalise` daemon thread has no LLM-call timeout — a hung CrewAI / Anthropic call leaves the SSE connection open indefinitely. Add a `concurrent.futures.wait(..., timeout=N)` watchdog or per-thread deadline once real timeout SLAs are scoped. (backend/src/api/agent.py)
-- `[OPEN]` Worker-thread `update_message` failures other than `ChatMessageNotFoundError` bubble unhandled — daemon thread dies with traceback to stderr, no DB record. Add a final fallback that logs and exits gracefully. (backend/src/api/agent.py `_run_and_finalise`)
-- `[OPEN]` `body.skill` only accepts exact lowercase matches — no `strip()` / `lower()` normalisation. Asymmetric with the whitespace-only validator on `content`. (backend/src/schemas/agent.py)
+- `[FIXED post-CR-quickwin]` `finalise_assistant_message` now has a fallback `except Exception` that logs via `logger.exception` instead of letting the daemon thread die with a stderr-only traceback. SSE stream still terminates cleanly.
+- `[FIXED post-CR-quickwin]` `body.skill` is now stripped and lowercased by a Pydantic `@field_validator` on `ChatRequest`. `"  Chat\n"` and `"chat"` route identically; empty-after-strip drops to `None` so the classifier path kicks in.
 - `[OPEN]` `lifespan` is `async def` for FastAPI's framework contract; the agent-key warning addition perpetuates the async surface (body remains sync). Constitutional principle holds; flag if FastAPI ever offers a sync-only lifespan API. (backend/src/main.py)
 
 ### Group E — tests
 
 - `[OPEN]` Strict `MagicMock(spec=...)` adoption across all tool unit tests — large refactor; bogus method calls currently succeed silently. (backend/tests/agent/test_tools.py)
 - `[OPEN]` `q.empty()` drain anti-pattern in `TestRunCrew` — works under the current single-threaded test layout; revisit if `run_crew` gains concurrency. (backend/tests/agent/test_crew_runner.py)
-- `[OPEN]` `test_list_sessions_ordered_by_updated_at_desc` flakes when both sessions land in the same `func.now()` tick. Add an `id` tiebreaker to the `list_sessions` ORDER BY when CI surfaces it. (backend/src/services/chat_service.py `list_sessions`, backend/tests/services/test_chat_service.py)
+- `[FIXED post-CR-quickwin]` `list_sessions` now orders by `(updated_at DESC, id DESC)` — secondary `id` key makes ordering deterministic even when two sessions share a `func.now()` tick.
 - `[OPEN]` `_CANCEL_MAP_LOCK` contention is never exercised — removing the locks would not fail any current test. Needs a threading-test pattern. (backend/src/api/agent.py)
 - `[OPEN]` AC 9 strict word-group size (2-5) is not asserted — `random.randint` makes single-run assertions flaky; needs a histogram or RNG-injection point. (backend/src/agent/crew_runner.py `_chunk_words`)
-- `[OPEN]` `time.sleep` is patched in `TestRunCrew` but not asserted-called — a regression that drops the sleep entirely would pass tests. Add `mock_sleep.assert_called()` when a regression slips through. (backend/tests/agent/test_crew_runner.py)
+- `[FIXED post-CR-quickwin]` `TestRunCrew.test_emits_start_chunks_done_sentinel` now asserts `mock_sleep.call_count >= 1` — a regression that drops chunk pacing entirely (returning empty list, no sleep) fails this test.
 - `[OPEN]` AC 9 `thought` / `tool_call` / `tool_result` events bypass-delay rule — not emitted by current skills, defer until a skill emits them. (backend/src/agent/crew_runner.py)
 - `[OPEN]` `Thread.start` failure scenario in chat handler — add when an OS-thread-limit test pattern is established. (backend/src/api/agent.py)
 - `[OPEN]` Standalone unit test of `_classify_intent` — covered indirectly via integration tests; defer until a regression demands it. (backend/src/api/agent.py)
@@ -275,7 +275,7 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` `client` fixture overrides `get_db` to share `db_session` with the test — masks bugs where the API endpoint forgets to commit; refactor to per-request Session if it bites. (backend/tests/conftest.py)
 - `[OPEN]` AC 9 ambiguity around 1-word inputs — spec says 2-5; behaviour for "yes." (1 word) is implementation-defined. Defer until the spec disambiguates. (backend/_bmad-output/implementation-artifacts/6-1-agent-foundation.md)
 - `[OPEN]` `test_chat_returns_event_stream` doesn't iterate the stream body — would need `httpx.stream()` instead of `client.post()`. The framing tests live in `test_crew_runner.py` instead. (backend/tests/api/test_agent.py)
-- `[OPEN]` Hard-coded `2026-01-01` timestamps in test fixtures — cosmetic. (backend/tests/agent/test_tools.py)
+- `[FIXED post-CR-quickwin]` Hard-coded `2026-01-01` timestamps in `test_tools.py` extracted to a single `FIXED_TS` module constant.
 - `[OPEN]` AC 1 migration round-trip is a manual deploy gate per Story DoD, not a unit test. (backend/migrations/versions/0001_schema.py)
 </content>
 </invoke>
