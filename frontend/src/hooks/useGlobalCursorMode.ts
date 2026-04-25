@@ -120,7 +120,20 @@ function inferModeForElement(el: Element | null): InferredMode {
 
 export function useGlobalCursorMode(): void {
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    // Story 6.2 Group C CR P7: rAF-coalesce the inference traversal.
+    // `document.elementFromPoint` is called synchronously in the
+    // move handler (it's a single hit-test, the cheap part, AND
+    // tests rely on it being captured at event-dispatch time when
+    // `elementFromPoint` is stubbed). The expensive walk —
+    // `inferModeForElement` with its `getComputedStyle` /
+    // `userSelect` reads on the selectable-text fallback — is
+    // deferred to a rAF callback so a 1000Hz mouse only triggers
+    // one traversal per frame instead of hundreds.
+    let pendingEl: Element | null = null;
+    let scheduled = false;
+
+    const runInference = () => {
+      scheduled = false;
       const store = usePondStore.getState();
       // Only defer during ACTIVE drags. 'grab' (hover affordance) is
       // re-inferred every mousemove so a stale 'grab' set by one
@@ -131,8 +144,7 @@ export function useGlobalCursorMode(): void {
       // hook returns 'managed' for those and skips the override
       // entirely.
       if (store.cursorMode === 'grabbing') return;
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const next = inferModeForElement(el);
+      const next = inferModeForElement(pendingEl);
       // 'managed' is a sentinel: the cursor is over a self-managing
       // element (R3F canvas, opt-in `data-cursor-managed`). Skip
       // overriding the imperative mode that element's own handlers
@@ -155,6 +167,24 @@ export function useGlobalCursorMode(): void {
         store.setCursorMode(next);
       }
     };
+
+    const onMove = (e: MouseEvent) => {
+      pendingEl = document.elementFromPoint(e.clientX, e.clientY);
+      if (scheduled) return;
+      scheduled = true;
+      // Tests dispatch synthetic mousemoves and read the store
+      // synchronously via `act(() => dispatch())`. `requestAnimationFrame`
+      // in jsdom flushes during `act`'s scheduler tick — but only if
+      // we DON'T also defer past `act`'s boundary. Run inference
+      // synchronously when rAF isn't available (jsdom guards), or
+      // schedule via rAF in real browsers.
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(runInference);
+      } else {
+        runInference();
+      }
+    };
+
     document.addEventListener('mousemove', onMove);
     return () => document.removeEventListener('mousemove', onMove);
   }, []);

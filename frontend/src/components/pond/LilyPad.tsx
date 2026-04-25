@@ -30,6 +30,10 @@ import { MatchStatsPopup } from './MatchStatsPopup';
 // `intersectPlane` returns truthy.
 const WATER_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const worldDragPoint = new THREE.Vector3();
+// Story 6.2 Group C polish: reused for the per-pad world-position
+// read inside useFrame (label-sizing math). One shared Vector3 per
+// module-load avoids per-tick allocation across all mounted pads.
+const _padWorldPosTmp = new THREE.Vector3();
 // Window-level pointermove does not carry a pre-computed ray the way
 // R3F's ThreeEvent does, so we keep our own Raycaster + NDC Vector2
 // to derive the water-plane hit from raw clientX/Y + camera + canvas.
@@ -432,6 +436,11 @@ export function LilyPad({
   // rotation_y in the batch PATCH.
   const driftSeed = todo.driftSeed;
   const groupRef = useRef<THREE.Group>(null);
+  // Story 6.2 Group C polish: ref to the lily-pad text label so
+  // useFrame can size it relative to the camera distance — closer
+  // camera → wider label area → more wrapped lines visible inside
+  // the pad.
+  const labelRef = useRef<HTMLDivElement>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
   // Story 2.8: ref to the GlowSource shader material. useFrame writes
@@ -1168,6 +1177,53 @@ export function LilyPad({
   useFrame((state, delta) => {
     const group = groupRef.current;
     if (!group) return;
+
+    // Story 6.2 Group C polish: scale the lily-pad text label's
+    // width AND font size based on the pad's projected on-screen
+    // size. Closer camera → bigger pad → wider label area + larger
+    // font. Zoomed out → smaller pad → narrower / smaller text.
+    //
+    // Math: for a perspective camera, the pixels-per-world-unit at
+    // a given world-space depth = (viewport.height / 2) /
+    // (depth * tan(fov/2)). PAD_RADIUS is 1 world unit; leave a
+    // 10% margin so wrapped text never crosses the visible pad
+    // rim. `getWorldPosition` (not raw local `group.position`) so a
+    // parent-transformed scene doesn't poison the depth read.
+    //
+    // CRITICAL: this runs at the TOP of useFrame, BEFORE any of the
+    // phase-specific early-returns below. The `'resting'` and
+    // `'completed'/'deleted'` branches all `return;` mid-function;
+    // putting label sizing at the bottom would silently no-op for
+    // every idle pad.
+    {
+      const label = labelRef.current;
+      if (label) {
+        const persp = state.camera as THREE.PerspectiveCamera;
+        group.getWorldPosition(_padWorldPosTmp);
+        const depth = persp.position.distanceTo(_padWorldPosTmp);
+        const fovRad = (persp.fov * Math.PI) / 180;
+        const pxPerUnit =
+          state.size.height / (2 * depth * Math.tan(fovRad / 2));
+        const padDiameterPx = PAD_RADIUS * 2 * pxPerUnit;
+        // Width also tracks the pad: floor 50px keeps single short
+        // words on one line when zoomed all the way out, but lets
+        // the box shrink past the 80px we used initially so the
+        // label stays mostly inside the pad rim at small sizes.
+        const widthPx = Math.max(50, Math.round(padDiameterPx * 0.9));
+        label.style.width = `${widthPx}px`;
+        // Linear font scale with floor 4 + cap 56:
+        //   ~30-50px diameter (max zoom-out) → 4-5px (very tiny)
+        //   ~120px (default)                 → ~9px
+        //   ~250px (medium-in)               → ~19px
+        //   ~600px (close)                   → ~45px
+        //   ≳ 750px (very close)             → 56px (cap)
+        const fontPx = Math.max(
+          4,
+          Math.min(56, Math.round(padDiameterPx * 0.075)),
+        );
+        label.style.fontSize = `${fontPx}px`;
+      }
+    }
 
     // Story 4.9: read the LIVE rest position from the world store
     // every tick. The component-scoped `posX` / `posZ` are only the
@@ -2471,6 +2527,11 @@ export function LilyPad({
         phaseRef.current = 'resting';
       }
     }
+
+    // (label sizing moved to the TOP of useFrame so it runs for
+    // resting / completed / deleted pads too — the per-phase early
+    // returns above were silently no-oping the bottom-of-frame
+    // version for every idle pad.)
   });
 
   return (
@@ -2571,18 +2632,43 @@ export function LilyPad({
           style={{ pointerEvents: 'none' }}
         >
           <div
+            ref={labelRef}
             style={{
-              fontFamily: "'Inter', sans-serif",
+              // Story 6.2 Group C polish: switch to the project's
+              // mono UI font (matches the chat-panel chrome and
+              // keyboard-hint footer); allow text to wrap rather than
+              // truncate with ellipsis. `maxWidth` is sized per-frame
+              // by the useFrame block below so closer-camera shows
+              // more text and zoomed-out shows less.
+              fontFamily: 'var(--font-mono)',
               color: '#ffffff',
               fontSize: '11px',
+              lineHeight: 1.25,
               textShadow: `0 0 6px ${color}`,
-              whiteSpace: 'nowrap',
+              // Allow normal word-wrapping inside the bounded
+              // width below. `wordBreak: break-word` only kicks
+              // in for pathological single-word inputs that exceed
+              // the box; it must NOT be the default break mode or
+              // drei's `<Html center>` content-fit sizing collapses
+              // the wrapper to per-character lines.
+              whiteSpace: 'normal',
+              overflowWrap: 'break-word',
+              textAlign: 'center',
               opacity: textOpacity,
               transition: 'opacity 200ms ease-in',
-              maxWidth: '100px',
+              // Use explicit `width` (not maxWidth) so drei's
+              // <Html center> wrapper can't content-fit shrink the
+              // div to its narrowest line. Overridden imperatively
+              // by useFrame each tick to scale with camera zoom.
+              width: '120px',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
               userSelect: 'none',
+              // Cap the height to ~5 lines so a very long todo
+              // doesn't visually overflow the lily pad. The pad's
+              // visual radius is ~1 world unit; 5 lines × ~14px
+              // line height ≈ 70px, well within typical projected
+              // diameter at default camera distance.
+              maxHeight: '5em',
             }}
           >
             {todo.text}

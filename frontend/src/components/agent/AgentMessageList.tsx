@@ -90,6 +90,17 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
 
   // On message-list change OR streaming-buffer change, scroll to
   // bottom if pinned; otherwise show the pill.
+  //
+  // Story 6.2 Group C polish (user report 2026-04-25): re-check pin
+  // status synchronously before snapping. The 'scroll' event fires
+  // asynchronously after a programmatic `inner.scrollTop` mutation
+  // (which is what NeonScrollbar's thumb drag does on every
+  // mousemove). If a chunk arrives mid-drag, this effect can run
+  // BEFORE the scroll event handler updates `isPinnedRef.current`,
+  // reading a stale `true` from the pre-drag state and snapping the
+  // user's hard-won scroll position back to the bottom. Recompute
+  // distance-from-bottom here so we trust the live DOM layout, not
+  // the cached ref.
   useEffect(() => {
     const el = scrollRef.current;
     if (el === null) return;
@@ -107,7 +118,15 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
 
     if (!grew && !streamed) return;
 
-    if (isPinnedRef.current) {
+    const distanceFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+    const pinnedNow = distanceFromBottom <= PIN_THRESHOLD_PX;
+    // Sync the ref with our synchronous read so subsequent paths
+    // (and the next scroll-event recompute) start from the truth.
+    if (isPinnedRef.current !== pinnedNow) {
+      isPinnedRef.current = pinnedNow;
+    }
+
+    if (pinnedNow) {
       el.scrollTop = el.scrollHeight;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowNewMessagesPill(false);

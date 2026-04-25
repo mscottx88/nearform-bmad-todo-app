@@ -152,23 +152,104 @@ export function NeonTooltip({
   disabled = false,
   wrapperClassName,
 }: Props) {
+  // Story 6.2 Group C CR P1: ALL hooks must run before any
+  // conditional return. The previous shape called `useState` /
+  // `useId` / `useRef` BEFORE the validity early-return but
+  // `useCallback` / `useLayoutEffect` / `useEffect` AFTER it — a
+  // child swapping from a valid element to a non-element on a
+  // re-render would mismatch React's hook count and crash with
+  // "Rendered fewer hooks than expected".
   const [open, setOpen] = useState(false);
   const tooltipId = useId();
   const triggerWrapRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<ComputedPosition | null>(null);
 
-  const child = Children.only(children);
-  if (!isValidElement<ChildHandlers>(child)) {
-    // Not a valid element — render the children verbatim, no tooltip.
-    return <>{children}</>;
-  }
-
   const show = useCallback(() => {
     if (disabled) return;
     setOpen(true);
   }, [disabled]);
   const hide = useCallback(() => setOpen(false), []);
+
+  // Group C CR P11: equality-guarded setPosition. The recompute
+  // effect fires on every scroll / resize event and previously
+  // called `setPosition(newPos)` unconditionally. With a
+  // capture-phase scroll listener firing on every nested scroll
+  // container — and inertial scroll producing many sub-pixel
+  // updates per frame — that would push React into a tight render
+  // loop. Skip the update if the new position is identical.
+  const updatePosition = useCallback(
+    (next: ComputedPosition) => {
+      setPosition((prev) => {
+        if (
+          prev &&
+          prev.top === next.top &&
+          prev.left === next.left &&
+          prev.resolvedPlacement === next.resolvedPlacement
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  // Compute position whenever the tooltip is shown. useLayoutEffect so
+  // the first paint already has the correct `top`/`left` — otherwise
+  // the tooltip would flash at 0,0 for one frame before snapping into
+  // place.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const trigger = triggerWrapRef.current;
+    const tooltip = tooltipRef.current;
+    if (!trigger || !tooltip) return;
+    updatePosition(
+      computePosition(
+        trigger.getBoundingClientRect(),
+        tooltip.getBoundingClientRect(),
+        placement,
+      ),
+    );
+  }, [open, placement, text, updatePosition]);
+
+  // Recompute on viewport changes while open.
+  useEffect(() => {
+    if (!open) return;
+    const recompute = () => {
+      const trigger = triggerWrapRef.current;
+      const tooltip = tooltipRef.current;
+      if (!trigger || !tooltip) return;
+      // Group C CR P9: bail to closed if the trigger has been
+      // removed from the DOM mid-show. Without this, conditionally
+      // rendering the trigger while `open=true` leaves an orphan
+      // tooltip pinned to the last computed position with no
+      // pointerLeave to dismiss it.
+      if (!trigger.isConnected) {
+        setOpen(false);
+        return;
+      }
+      updatePosition(
+        computePosition(
+          trigger.getBoundingClientRect(),
+          tooltip.getBoundingClientRect(),
+          placement,
+        ),
+      );
+    };
+    window.addEventListener('scroll', recompute, true);
+    window.addEventListener('resize', recompute);
+    return () => {
+      window.removeEventListener('scroll', recompute, true);
+      window.removeEventListener('resize', recompute);
+    };
+  }, [open, placement, updatePosition]);
+
+  const child = Children.only(children);
+  if (!isValidElement<ChildHandlers>(child)) {
+    // Not a valid element — render the children verbatim, no tooltip.
+    return <>{children}</>;
+  }
 
   const childProps = child.props as ChildHandlers;
   const enhanced = cloneElement<ChildHandlers>(child as ReactElement<ChildHandlers>, {
@@ -190,47 +271,6 @@ export function NeonTooltip({
       hide();
     },
   });
-
-  // Compute position whenever the tooltip is shown. useLayoutEffect so
-  // the first paint already has the correct `top`/`left` — otherwise
-  // the tooltip would flash at 0,0 for one frame before snapping into
-  // place.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const trigger = triggerWrapRef.current;
-    const tooltip = tooltipRef.current;
-    if (!trigger || !tooltip) return;
-    setPosition(
-      computePosition(
-        trigger.getBoundingClientRect(),
-        tooltip.getBoundingClientRect(),
-        placement,
-      ),
-    );
-  }, [open, placement, text]);
-
-  // Recompute on viewport changes while open.
-  useEffect(() => {
-    if (!open) return;
-    const recompute = () => {
-      const trigger = triggerWrapRef.current;
-      const tooltip = tooltipRef.current;
-      if (!trigger || !tooltip) return;
-      setPosition(
-        computePosition(
-          trigger.getBoundingClientRect(),
-          tooltip.getBoundingClientRect(),
-          placement,
-        ),
-      );
-    };
-    window.addEventListener('scroll', recompute, true);
-    window.addEventListener('resize', recompute);
-    return () => {
-      window.removeEventListener('scroll', recompute, true);
-      window.removeEventListener('resize', recompute);
-    };
-  }, [open, placement]);
 
   const wrapClass = ['neon-tooltip-wrap', wrapperClassName]
     .filter(Boolean)

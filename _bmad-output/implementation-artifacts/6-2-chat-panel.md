@@ -1247,6 +1247,106 @@ walkthrough:
 
 ---
 
+### Post-CR polish — Group C (2026-04-25)
+
+In addition to the 12 P# patches itemized in Review Findings — Group
+C below, the user requested several UX adjustments during the
+batch-apply walkthrough:
+
+1. **F1 → focus composer.** AgentPanel's open-effect now schedules
+   `composerRef.current?.focus()` via `requestAnimationFrame` so
+   pressing F1 (or running `/help`) opens the panel AND lands the
+   cursor in the textarea ready to type.
+2. **Symmetric chat-scroll padding.** The NeonScrollbar's vertical
+   track is 15px wide and sits at `right: 0`; the chat scroll inner
+   now pads `12px / 35px / 12px / 20px` (T/R/B/L) so the visible
+   gutter on the right (≈20px after the track) matches the 20px on
+   the left.
+3. **Scroll-pin race fix.** AgentMessageList's auto-scroll-to-bottom
+   effect now re-checks distance-from-bottom synchronously instead
+   of trusting `isPinnedRef`. The cached ref could be stale when a
+   chunk-driven re-render outraced the async scroll-event handler
+   that updates it — visible as the scroll position snapping back
+   to bottom on mouseup mid-drag.
+4. **Lily-pad text label.** Switched from `'Inter'` to
+   `var(--font-mono)`; allowed wrapping; sized `maxWidth`
+   imperatively in `useFrame` based on the pad's projected on-
+   screen radius so closer-camera shows more of the todo text and
+   zoomed-out shows less. `maxHeight: 5em` caps overflow so a
+   pathologically long todo doesn't visually bleed past the pad
+   rim.
+5. **Custom cursor extensions kept** (DN1: choice A) — `point` /
+   `text` / `no-access` modes plus `useGlobalCursorMode` driver
+   stay; spec polish-round Dev Notes acknowledge them as legitimate
+   additions.
+6. **KeyboardShortcutsHint global** (DN2: choice A) — the global
+   page-chrome footer is the always-visible affordance surface.
+   AC 8's "below the composer" wording reconciled to allow the
+   global-chrome implementation.
+7. **`↑/↓ history` is composer-only** — kept out of the global
+   footer (would imply app-wide history nav). The composer's own
+   focus-only hint band already announces it.
+8. **Stronger bubble glow** (Group B follow-up): `stroke-width`
+   bumped to 1.75; stacked drop-shadow filter (4px tight + 14px
+   wide) for a more "lit" neon presence.
+9. **Markdown rendering** (Group B follow-up): `parseAgentMessage`
+   now tokenises `**bold**` / `*italic*` / `` `code` `` plus
+   `# h1` / `## h2` / `### h3` and `---` horizontal rules. The
+   horizontal rule is rendered with stacked currentColor box-shadow
+   so it picks up the bubble's neon palette.
+10. **Pond emoji bias** (Group A backend prompt): system_prompt.py
+    nudges the LLM toward pond-themed emoji and away from tech /
+    office icons, kept under the 200-word system-prompt cap.
+
+### Review Findings — Group C (UI Polish: cursor / tooltip / hints) — 2026-04-25
+
+**Layers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (full mode)
+**Diff:** `b873531..HEAD` filtered to UI polish (~13 files, ~1400 lines)
+
+#### Decision-needed (2)
+
+- [x] [Review][Decision] **Out-of-spec polish: custom-cursor extensions + global cursor-mode driver.** `CursorFirefly` gains three new modes (`point` / `text` / `no-access`) with new draw functions; `useGlobalCursorMode` is a wholly new hook that infers the cursor mode from the element under the pointer. Neither is in any AC or the explicit-scope-additions block. Decision: keep + amend the polish-round Dev Notes (consistent with how Group A D2 / Group B D2 reconciled out-of-spec additions), or revert. [`frontend/src/components/effects/CursorFirefly.tsx`, `frontend/src/hooks/useGlobalCursorMode.ts`]
+- [x] [Review][Decision] **AC 8 location vs always-visible hint.** AC 8 says the `↑/↓ history` affordance is "announced in the keyboard-hint footer below the composer". The diff implements `KeyboardShortcutsHint` as a global page chrome (`position: fixed; bottom-left`), not a per-composer footer. Decision: keep as global (amend AC 8) — it's an always-visible affordance for the entire app, not just composer; or relocate to inside the agent-panel composer section. [`frontend/src/components/ui/KeyboardShortcutsHint.css`]
+
+#### Patch (12)
+
+- [x] [Review][Patch] **CRITICAL** — `NeonTooltip` violates Rules of Hooks: `useState` / `useId` / `useRef` run BEFORE `Children.only(child)` validation, but `useCallback(show)` / `useCallback(hide)` / `useLayoutEffect` / `useEffect` run AFTER the early-return for invalid children. If a parent ever swaps from a valid element child to a non-element child (string, fragment, conditional render), React sees fewer hooks and crashes with "Rendered fewer hooks than expected". Fix: move all hooks above the validity check; render the conditional path AFTER hooks have run. [`frontend/src/components/ui/NeonTooltip.tsx:155-165`]
+- [x] [Review][Patch] **HIGH** — `CursorFirefly` reads `window.devicePixelRatio` once at mount and reuses it across `resize()` calls. Dragging the window between monitors with different DPRs, or zooming the page (which mutates `devicePixelRatio` on Chromium), produces a blurry / half-resolution canvas because the buffer keeps the old DPR. Fix: re-read `dpr` on every resize event, or attach a `matchMedia('(resolution: ...)')` listener. [`frontend/src/components/effects/CursorFirefly.tsx` resize block]
+- [x] [Review][Patch] **HIGH** — `CursorFirefly` accumulates canvas transforms on every resize: each `resize()` calls `ctx.scale(dpr, dpr)` without first resetting the transform matrix, so a window dragged through multiple resize ticks ends up rendering at compounded scale. Fix: `ctx.setTransform(1, 0, 0, 1, 0, 0)` before re-applying the DPR scale. [`frontend/src/components/effects/CursorFirefly.tsx` resize block]
+- [x] [Review][Patch] **HIGH** — `useKeyboardShortcuts` doesn't filter modifier keys on F1: `Ctrl+F1`, `Cmd+F1`, `Shift+F1`, `Alt+F1` all toggle the panel. macOS uses `Cmd+F1` for system shortcuts (mirror displays). Fix: only fire on bare F1 (`!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey`). [`frontend/src/hooks/useKeyboardShortcuts.ts` F1 branch]
+- [x] [Review][Patch] **HIGH** — `useKeyboardShortcuts` doesn't check `e.repeat` on F1, so holding the key down rapidly toggles the panel at the OS auto-repeat rate (~30Hz). Fix: short-circuit when `e.repeat` is true. [`frontend/src/hooks/useKeyboardShortcuts.ts` F1 branch]
+- [x] [Review][Patch] **HIGH** — F1 isn't `preventDefault`'d when focus is in an input/textarea (the input-focus filter early-returns first). Result: while typing in TodoInput, F1 opens the OS's native help dialog INSTEAD of toggling the agent panel. Fix: `preventDefault()` the F1 keydown unconditionally before the input filter (or skip the filter for F1 — F1 should toggle the panel even from inside inputs, matching AC 1). [`frontend/src/hooks/useKeyboardShortcuts.ts`]
+- [x] [Review][Patch] **HIGH** — `useGlobalCursorMode` calls `document.elementFromPoint` + `window.getComputedStyle` on every mousemove (potentially hundreds/sec on high-poll mice). Both force layout. Fix: throttle to once-per-RAF (queue the latest event, run inference in a single rAF callback). [`frontend/src/hooks/useGlobalCursorMode.ts:122-159`]
+- [x] [Review][Patch] **HIGH** — `NeonTooltip` clamps `left` to `Math.max(VIEWPORT_MARGIN, Math.min(left, vw - tw - VIEWPORT_MARGIN))`. If `tw > vw - 2 * VIEWPORT_MARGIN` (tooltip wider than viewport), `Math.min` returns a negative number and `Math.max` pins the left to 4px while the tooltip still overflows the right edge. The CSS `white-space: nowrap` prevents wrapping. Fix: add `max-width: calc(100vw - 2 * VIEWPORT_MARGIN)` and let the tooltip wrap when it would overflow. [`frontend/src/components/ui/NeonTooltip.{tsx,css}`]
+- [x] [Review][Patch] **HIGH** — `NeonTooltip` doesn't handle the trigger element being removed from the DOM mid-show. The recompute effect listens for scroll/resize but not DOM mutations. If the parent conditionally renders the trigger and removes it while `open=true`, the tooltip stays at the last computed position, orphaned. Fix: hide on `MutationObserver` removal, OR check `triggerWrapRef.current?.isConnected` in the recompute effect and bail to closed. [`frontend/src/components/ui/NeonTooltip.tsx`]
+- [x] [Review][Patch] **MED** (AC 8 alignment) — `KeyboardShortcutsHint`'s `KEYBOARD_HINTS` list omits the `↑/↓ history` affordance. AC 8 (post-Group-B amendment) explicitly mandates: *"The `↑/↓ history` affordance is announced in the keyboard-hint footer below the composer."* Add an entry. [`frontend/src/components/ui/KeyboardShortcutsHint.tsx:KEYBOARD_HINTS`]
+- [x] [Review][Patch] **MED** — `NeonTooltip`'s recompute effect calls `setPosition` unconditionally on every scroll/resize event, even if the new computed position is sub-pixel-identical to the old one. With a capture-phase scroll listener firing on every nested scroll container, this can push React into a tight render loop on inertial scroll. Fix: shallow-equality guard before `setPosition`. [`frontend/src/components/ui/NeonTooltip.tsx` recompute effect]
+- [x] [Review][Patch] **MED** — `KeyboardShortcutsHint` renders the `Esc · Esc` chord as a single `<kbd>Esc · Esc</kbd>` element. Screen readers announce this as the literal string "Esc dot Esc". Fix: render as `<kbd>Esc</kbd> <kbd>Esc</kbd>` with `aria-label="Escape twice"` on the wrapping `<li>`. [`frontend/src/components/ui/KeyboardShortcutsHint.tsx`]
+
+#### Deferred (5) — pre-existing, low-yield, or rarely triggered
+
+- [x] [Review][Defer] `NeonTooltip` lacks an `Escape` keyboard dismissal — WAI-ARIA Tooltip pattern requires it. Pre-existing pattern; minor a11y gap. [`frontend/src/components/ui/NeonTooltip.tsx`]
+- [x] [Review][Defer] `EmptyPondHint` typewriter animation restarts when `todos.length === 0` flickers during async load. Defer pending observation in real usage. [`frontend/src/components/ui/EmptyPondHint.tsx`]
+- [x] [Review][Defer] `useGlobalCursorMode` selectable-text fallback uses `original.textContent?.trim()` truthy-check — false positives on wrapper divs that contain text-bearing descendants but no text directly. Narrow practical impact. [`frontend/src/hooks/useGlobalCursorMode.ts:112`]
+- [x] [Review][Defer] `CursorFirefly` mode change instantly recolors the existing trail; mid-flight transition reads as a flicker. Cosmetic. [`frontend/src/components/effects/CursorFirefly.tsx`]
+- [x] [Review][Defer] `useKeyboardShortcuts` early-returns for F1 when `activePopupTodoId !== null || searchActive` — undocumented behaviour that contradicts the "always-discoverable" framing of the agent panel. Document or revisit. [`frontend/src/hooks/useKeyboardShortcuts.ts:35-36`]
+
+#### Dismissed — false positives / out of scope
+
+- `aria-hidden` / `aria-describedby` timing concerns (AT users tolerate opacity-driven visibility transitions).
+- Magic number `0.707` vs `Math.SQRT1_2` (precision difference is sub-pixel; visually identical at all DPRs).
+- Capture-phase scroll listener leaking on portal target re-mount (no observable failure; React's effect cleanup handles it).
+- `useId()` SSR mismatch (no SSR in this app).
+- Tooltip `<span>` wrapper layout changes (escape hatch via `wrapperClassName` is sufficient).
+- z-index 50 collision (no concrete failure mode in current chrome).
+- Mobile media query / touch device rendering (out of scope per spec — desktop-first app).
+- `Shift+Enter` not in keyboard-hint footer (the composer's own focus-only hint band already shows `shift+enter for new line`).
+- `EmptyPondHint` shortcut-list removal — net affordance preserved by the new global `KeyboardShortcutsHint`; spec didn't authorize but didn't prohibit.
+- `<input TYPE="Text">` mixed-case casing (already handled via `.toLowerCase()`).
+- `drawTextCursor` non-null assertion on `nodes[0]` (RAF guarantees nodes are populated by the time draw runs).
+
+---
+
 ## Change Log
 
 - **2026-04-25** — Story 6.2 implemented end-to-end:

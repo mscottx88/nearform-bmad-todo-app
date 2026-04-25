@@ -176,7 +176,14 @@ describe('useKeyboardShortcuts', () => {
     unmount();
   });
 
-  it('F1 inside an input element is NOT captured', () => {
+  // Story 6.2 Group C CR P6: F1 inside an input IS captured — the
+  // panel toggle is a global affordance per AC 1, and a previous
+  // version of this hook returned early on inputs without
+  // preventDefault'ing, so typing in TodoInput + pressing F1 popped
+  // the browser's native F1 help dialog. F1 now runs BEFORE the
+  // input-focus filter, suppresses the help dialog, and toggles the
+  // panel regardless of focus.
+  it('F1 inside an input element IS captured (CR P6)', () => {
     useAgentStore.setState({
       panelOpen: false,
       activeSessionId: null,
@@ -192,8 +199,76 @@ describe('useKeyboardShortcuts', () => {
     const onOpen = vi.fn();
     const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
     dispatch('F1', input);
-    expect(useAgentStore.getState().panelOpen).toBe(false);
+    expect(useAgentStore.getState().panelOpen).toBe(true);
     unmount();
     document.body.removeChild(input);
+  });
+
+  // Story 6.2 Group C CR P4: bare F1 only — modifier-key combos
+  // (Ctrl+F1, Cmd+F1, Shift+F1, Alt+F1) are reserved for the OS /
+  // browser and should NOT toggle the panel.
+  it('Ctrl+F1 / Cmd+F1 / Shift+F1 / Alt+F1 do NOT toggle the panel (CR P4)', () => {
+    useAgentStore.setState({
+      panelOpen: false,
+      activeSessionId: null,
+      sessions: [],
+      messages: [],
+      inputDraft: '',
+      streamingMessageId: null,
+      streamingBuffer: '',
+    });
+    const onOpen = vi.fn();
+    const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
+
+    for (const mods of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 'F1',
+        cancelable: true,
+        ...mods,
+      });
+      window.dispatchEvent(event);
+    }
+    expect(useAgentStore.getState().panelOpen).toBe(false);
+    unmount();
+  });
+
+  // Story 6.2 Group C CR P5: OS auto-repeat fires keydown at ~30Hz
+  // when F1 is held; without an `e.repeat` guard the panel would
+  // toggle that many times per second. Repeat events must be ignored.
+  it('held-F1 (e.repeat) does NOT re-toggle the panel (CR P5)', () => {
+    useAgentStore.setState({
+      panelOpen: false,
+      activeSessionId: null,
+      sessions: [],
+      messages: [],
+      inputDraft: '',
+      streamingMessageId: null,
+      streamingBuffer: '',
+    });
+    const onOpen = vi.fn();
+    const { unmount } = renderHook(() => useKeyboardShortcuts(onOpen));
+
+    // First press: real keydown — toggles open.
+    const first = new KeyboardEvent('keydown', { key: 'F1', cancelable: true });
+    window.dispatchEvent(first);
+    expect(useAgentStore.getState().panelOpen).toBe(true);
+
+    // Repeated keydowns from OS auto-repeat (key still held).
+    for (let i = 0; i < 5; i++) {
+      const repeat = new KeyboardEvent('keydown', {
+        key: 'F1',
+        cancelable: true,
+        repeat: true,
+      });
+      window.dispatchEvent(repeat);
+    }
+    // Panel stays open — repeat events were ignored.
+    expect(useAgentStore.getState().panelOpen).toBe(true);
+    unmount();
   });
 });

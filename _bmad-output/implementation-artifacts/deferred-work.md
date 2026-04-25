@@ -22,6 +22,16 @@ If this file grows faster than it drains, something's wrong with the process, no
 
 ---
 
+## Deferred from: code review of story 6-2-chat-panel — Group C UI polish (2026-04-25)
+
+- `[OPEN]` `NeonTooltip` lacks an `Escape` keyboard dismissal — the WAI-ARIA Tooltip pattern requires Escape to dismiss the tooltip while focus stays on the trigger. Currently only blur dismisses. Minor a11y gap; address in a future a11y pass. (frontend/src/components/ui/NeonTooltip.tsx)
+- `[OPEN]` `EmptyPondHint` typewriter animation restarts whenever `todos.length === 0` flickers during async load (e.g. fetch retry round-trip). Add a short-circuit / debounce when observed in real usage. (frontend/src/components/ui/EmptyPondHint.tsx)
+- `[OPEN]` `useGlobalCursorMode` selectable-text fallback (`original.textContent?.trim()`) reports truthy on wrapper `<div>`s that contain text-bearing descendants but no direct text — produces I-beam over decorative wrappers. Narrow practical impact; tighten when observed. (frontend/src/hooks/useGlobalCursorMode.ts:112)
+- `[OPEN]` `CursorFirefly` mode change instantly recolors the existing trail; mid-flight transition reads as a single-frame flicker as nodes laid down in the previous mode get the new colour. Cosmetic. (frontend/src/components/effects/CursorFirefly.tsx)
+- `[OPEN]` `useKeyboardShortcuts` silently early-returns F1 when `activePopupTodoId !== null || searchActive` — undocumented; contradicts the always-discoverable framing of the agent panel. Document or revisit; users may want F1 to toggle the panel even from inside InfoPopup or active search. (frontend/src/hooks/useKeyboardShortcuts.ts:35-36)
+
+---
+
 ## Deferred from: code review of story 6-2-chat-panel — Group B frontend chat (2026-04-25)
 
 - `[OPEN]` `useAgentSse` has no idle-timeout on the SSE stream. A hung backend holding the connection open without sending bytes leaves the chat bubble in `streaming` state forever; only manual cancel saves the user. Add a configurable read-timeout / heartbeat check when the hardening pass for SSE plumbing happens. (frontend/src/hooks/useAgentSse.ts)

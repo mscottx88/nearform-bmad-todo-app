@@ -57,6 +57,12 @@ export function AgentPanel() {
   // clear `activeSessionId`. Sequence them so refresh validates the
   // persisted id first; loadActiveMessages then reads the post-
   // validation state via getState().
+  //
+  // Group C polish (user request 2026-04-25): focus the composer on
+  // open so F1 → type-immediately works without an extra click. Done
+  // synchronously in the same effect so the focus happens on the
+  // first paint of the open panel; a `requestAnimationFrame` defer
+  // handles the case where the textarea ref hasn't attached yet.
   useEffect(() => {
     if (!panelOpen) return;
     void (async () => {
@@ -65,6 +71,9 @@ export function AgentPanel() {
         await loadActiveMessages();
       }
     })();
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panelOpen-only
   }, [panelOpen]);
 

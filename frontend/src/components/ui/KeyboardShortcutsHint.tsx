@@ -9,6 +9,7 @@
  *     F1        → toggle the agent chat panel
  *     Esc       → close popup / cancel current action
  *     Esc · Esc → reset the camera (double-tap within 600ms)
+ *     ↑ / ↓     → recall prior chat messages in the agent composer
  *
  *   Mouse:
  *     Click pad     → open the task's info popup
@@ -28,32 +29,53 @@
 
 import './KeyboardShortcutsHint.css';
 
+/**
+ * One affordance row. `keys` is an array so a chord (e.g. Esc·Esc)
+ * can be rendered as multiple `<kbd>` elements separated by a small
+ * delimiter — Story 6.2 Group C CR P12: a single `<kbd>Esc · Esc</kbd>`
+ * is announced by screen readers as the literal string "Esc dot Esc",
+ * which mis-reads the chord. Two `<kbd>` chips with `aria-label` on
+ * the wrapping `<li>` reads correctly.
+ */
 interface Hint {
-  /** Visible label inside the `<kbd>` chip. May be a chord like
-   *  "Esc · Esc" — the chip styles handle the punctuation cleanly. */
-  key: string;
-  /** Lower-cased description rendered after the chip. */
+  /** Sequence of key labels. Single-key shortcuts pass an array of
+   *  one; chords pass two or more. */
+  keys: ReadonlyArray<string>;
+  /** Lower-cased description rendered after the chip(s). */
   desc: string;
+  /** Optional accessible name for the whole row, used when the
+   *  visual chord notation reads weird verbatim. */
+  ariaLabel?: string;
 }
 
 const KEYBOARD_HINTS: ReadonlyArray<Hint> = [
-  { key: 'Enter', desc: 'new task' },
-  { key: '/', desc: 'slash command' },
-  { key: 'F1', desc: 'agent help' },
-  { key: 'Esc', desc: 'close · cancel' },
-  { key: 'Esc · Esc', desc: 'reset camera' },
+  { keys: ['Enter'], desc: 'new task' },
+  { keys: ['/'], desc: 'slash command' },
+  { keys: ['F1'], desc: 'agent help' },
+  { keys: ['Esc'], desc: 'close · cancel' },
+  {
+    keys: ['Esc', 'Esc'],
+    desc: 'reset camera',
+    ariaLabel: 'Escape twice — reset camera',
+  },
+  // ↑/↓ chat-history navigation is INTENTIONALLY not in this global
+  // footer — it's a composer-only affordance, and the composer's own
+  // focus-only hint band already announces it
+  // (`↑/↓ history` text in `AgentComposer.tsx`'s
+  // `.agent-composer-hint` strip). Showing it globally would imply
+  // app-wide history navigation, which doesn't exist.
 ];
 
 const MOUSE_HINTS: ReadonlyArray<Hint> = [
-  { key: 'click', desc: 'open task' },
-  { key: 'drag', desc: 'move task' },
-  { key: 'right-drag', desc: 'pan camera' },
+  { keys: ['click'], desc: 'open task' },
+  { keys: ['drag'], desc: 'move task' },
+  { keys: ['right-drag'], desc: 'pan camera' },
   // Both Ctrl+RMB (OrbitControls' built-in modifier swap) and
   // Shift+RMB (the swap in PondCamera.tsx) trigger camera rotate;
   // we surface only the Shift form in the hint because Ctrl
   // conflicts with the right-click menu on some Mac configs.
-  { key: 'shift + right-drag', desc: 'rotate camera' },
-  { key: 'wheel', desc: 'zoom' },
+  { keys: ['shift + right-drag'], desc: 'rotate camera' },
+  { keys: ['wheel'], desc: 'zoom' },
 ];
 
 function HintGroup({
@@ -67,12 +89,24 @@ function HintGroup({
     <div className="kbd-hints__group">
       <span className="kbd-hints__group-label">{label}</span>
       <ul className="kbd-hints__list" aria-label={label}>
-        {hints.map((h) => (
-          <li key={`${label}-${h.key}`}>
-            <kbd className="kbd-hints__key">{h.key}</kbd>
-            <span className="kbd-hints__desc">{h.desc}</span>
-          </li>
-        ))}
+        {hints.map((h) => {
+          const liKey = `${label}-${h.keys.join('+')}-${h.desc}`;
+          return (
+            <li key={liKey} aria-label={h.ariaLabel}>
+              {h.keys.map((k, idx) => (
+                <span key={idx} className="kbd-hints__key-group">
+                  {idx > 0 && (
+                    <span className="kbd-hints__chord-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  )}
+                  <kbd className="kbd-hints__key">{k}</kbd>
+                </span>
+              ))}
+              <span className="kbd-hints__desc">{h.desc}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

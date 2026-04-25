@@ -39,4 +39,30 @@ describe('KeyboardShortcutsHint', () => {
     expect(screen.getByText('keys')).toBeInTheDocument();
     expect(screen.getByText('mouse')).toBeInTheDocument();
   });
+
+  // Story 6.2 Group C CR (post-feedback): ↑/↓ is composer-ONLY
+  // affordance — the composer's own focus-only hint band announces
+  // it. The global footer must NOT include it (would imply app-
+  // wide history nav).
+  it('does NOT render ↑/↓ in the global footer (composer-only)', () => {
+    render(<KeyboardShortcutsHint />);
+    const list = screen.getByRole('list', { name: 'keys' });
+    expect(list).not.toHaveTextContent(/↑/);
+    expect(list).not.toHaveTextContent(/↓/);
+    expect(list).not.toHaveTextContent(/chat history/);
+  });
+
+  // Story 6.2 Group C CR P12: chord notation renders as separate
+  // <kbd> elements with an aria-label on the wrapping <li>, so
+  // screen readers don't announce "Esc dot Esc" verbatim.
+  it('renders the Esc·Esc chord as separate <kbd> elements with aria-label', () => {
+    render(<KeyboardShortcutsHint />);
+    const escEscRow = screen.getByLabelText('Escape twice — reset camera');
+    expect(escEscRow).toBeInTheDocument();
+    // Two <kbd> elements inside (one per Esc).
+    const kbds = escEscRow.querySelectorAll('kbd');
+    expect(kbds).toHaveLength(2);
+    expect(kbds[0]?.textContent).toBe('Esc');
+    expect(kbds[1]?.textContent).toBe('Esc');
+  });
 });

@@ -24,7 +24,16 @@
   letter-spacing: 0.04em;
   padding: 4px 8px;
   border-radius: 4px;
-  white-space: nowrap;
+  /* Story 6.2 Group C CR P8: clamp width so a tooltip wider than
+     the viewport wraps onto multiple lines instead of overflowing
+     off-screen. `nowrap` was the previous behaviour — attractive
+     for short labels, but combined with the position-clamp it
+     produced silently-truncated content on narrow viewports.
+     `max-width: calc(100vw - 8px)` keeps both the LEFT and RIGHT
+     VIEWPORT_MARGIN gutters; soft-wrap kicks in only when needed. */
+  white-space: normal;
+  word-break: break-word;
+  max-width: calc(100vw - 8px);
   box-shadow: 0 0 10px rgba(0, 238, 255, 0.45);
   pointer-events: none;
   opacity: 0;

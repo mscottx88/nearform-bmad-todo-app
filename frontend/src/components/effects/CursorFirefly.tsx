@@ -381,19 +381,29 @@ export function CursorFirefly() {
     const canvas: HTMLCanvasElement | null = canvasRef.current;
     if (!canvas) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    // Story 6.2 Group C CR P2 + P3: re-read `devicePixelRatio` on every
+    // resize (multi-monitor drag, page zoom on Chromium both mutate it
+    // mid-session) and reset the transform matrix before re-applying
+    // the DPR scale so successive resizes don't compound scale onto
+    // an already-scaled context.
     const resize = (): void => {
+      const dpr = window.devicePixelRatio || 1;
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       const c = canvas.getContext('2d');
-      if (c) c.scale(dpr, dpr);
+      if (c) {
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.scale(dpr, dpr);
+      }
     };
     resize();
     window.addEventListener('resize', resize);
 
     const ctx: CanvasRenderingContext2D | null = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
+    // No second scale here — `resize()` above already established the
+    // DPR transform on the same context. Calling `ctx.scale(dpr, dpr)`
+    // a second time at mount used to compound the scale to dpr².
 
     const onMove = (e: MouseEvent): void => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };

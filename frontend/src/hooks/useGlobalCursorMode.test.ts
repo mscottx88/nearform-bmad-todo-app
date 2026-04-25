@@ -12,12 +12,22 @@ function dispatchMove(target: Element) {
 }
 
 describe('useGlobalCursorMode', () => {
+  // Story 6.2 Group C CR P7: the hook now rAF-coalesces inference.
+  // jsdom doesn't flush rAF inside React's `act`, so spy on rAF to
+  // run callbacks synchronously — keeps the existing test contract
+  // (dispatch then assert) without forcing every test to await
+  // a frame manually.
   beforeEach(() => {
     usePondStore.setState({ cursorMode: 'firefly' });
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(performance.now());
+      return 0;
+    });
   });
 
   afterEach(() => {
     document.body.innerHTML = '';
+    vi.restoreAllMocks();
   });
 
   it('sets cursor mode to "point" over an enabled button', () => {

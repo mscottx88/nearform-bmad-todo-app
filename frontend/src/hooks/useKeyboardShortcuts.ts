@@ -23,6 +23,32 @@ type OpenInputCallback = (initialValue: string) => void;
 export function useKeyboardShortcuts(onOpenInput: OpenInputCallback) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Story 6.2 AC 1 + Group C CR P4 + P5 + P6: F1 toggles the agent
+      // panel from ANYWHERE — including inside focused inputs and
+      // textareas. AC 1 frames F1 as a global panel toggle, and
+      // capturing it before the input-focus filter is the only way to
+      // suppress the browser's native F1 help dialog (a previous
+      // version of this hook returned early on inputs without
+      // preventDefault'ing F1, so typing in TodoInput + pressing F1
+      // popped the OS help dialog instead of toggling the panel).
+      //
+      // Bare F1 only — `Ctrl+F1` / `Cmd+F1` / `Shift+F1` / `Alt+F1`
+      // are reserved for the OS / browser (macOS uses `Cmd+F1` for
+      // mirror-display toggle, etc). `e.repeat` skips the OS auto-
+      // repeat firing keydown at ~30Hz when the user holds the key.
+      if (
+        e.key === 'F1' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !e.repeat
+      ) {
+        e.preventDefault();
+        useAgentStore.getState().togglePanel();
+        return;
+      }
+
       const target = e.target as HTMLElement;
       if (
         target.tagName === 'INPUT' ||
@@ -50,16 +76,6 @@ export function useKeyboardShortcuts(onOpenInput: OpenInputCallback) {
         e.preventDefault();
         e.stopImmediatePropagation();
         onOpenInput('/');
-        return;
-      }
-
-      // Story 6.2 AC 1: F1 toggles the agent chat panel. preventDefault
-      // suppresses the browser's native F1 help shortcut. Same input-
-      // focus filter as Enter / `/` above so F1 inside TodoInput,
-      // textarea, contenteditable, etc. is NOT captured.
-      if (e.key === 'F1') {
-        e.preventDefault();
-        useAgentStore.getState().togglePanel();
         return;
       }
     };

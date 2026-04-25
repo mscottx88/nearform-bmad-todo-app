@@ -75,6 +75,26 @@
   letter-spacing: 0.04em;
 }
 
+/* Story 6.2 Group C CR P12: chord notation (e.g. Esc·Esc) renders as
+   separate <kbd> elements grouped under a key-group span, with a
+   `·` delimiter between them. Replaces the previous "single <kbd>
+   with literal Esc · Esc text" — that read as "Esc dot Esc" to
+   screen readers; the wrapping <li> now carries an aria-label and
+   the dot is `aria-hidden`. */
+.kbd-hints__key-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.kbd-hints__chord-sep {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(218, 255, 255, 0.55);
+  /* No surrounding chip — sits between two <kbd> chips like a
+     typographic ligature. */
+}
+
 /* Mobile / narrow viewport: stack the two groups vertically and shrink
    so the hint footer doesn't dominate the screen. */
 @media (max-width: 640px) {
