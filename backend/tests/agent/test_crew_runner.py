@@ -74,12 +74,13 @@ class TestRunCrew:
         mock_crew = MagicMock()
         mock_crew.kickoff.return_value = prose
 
+        assistant_id = uuid.uuid4()
         registry = {"chat": _mock_skill(mock_crew)}
         with (
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep") as mock_sleep,
         ):
-            result = run_crew(ctx, "chat")
+            result = run_crew(ctx, "chat", assistant_id)
 
         # Story 6.1 CR Group E TP7: assert the CrewResult contract.
         assert result.success is True
@@ -98,6 +99,8 @@ class TestRunCrew:
         assert isinstance(first, dict)
         assert first["type"] == "start"
         assert first["skill"] == "chat"
+        # Story 6.2 AC 11: start payload echoes the assistant message id.
+        assert first["message_id"] == str(assistant_id)
 
         chunk_events = [
             e for e in events if isinstance(e, dict) and e.get("type") == "chunk"
@@ -128,7 +131,7 @@ class TestRunCrew:
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep", side_effect=capture_sleep),
         ):
-            run_crew(ctx, "chat")
+            run_crew(ctx, "chat", uuid.uuid4())
 
         chunks = _chunk_words(many_words)
         chunk_count = len(chunks)
@@ -149,7 +152,7 @@ class TestRunCrew:
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep"),
         ):
-            result = run_crew(ctx, "chat")
+            result = run_crew(ctx, "chat", uuid.uuid4())
 
         # TP7: CrewResult on the error path.
         assert result.success is False
@@ -178,7 +181,7 @@ class TestRunCrew:
             patch("src.agent.crew_runner.SKILL_REGISTRY", registry),
             patch("src.agent.crew_runner.time.sleep"),
         ):
-            result = run_crew(ctx, "chat")
+            result = run_crew(ctx, "chat", uuid.uuid4())
 
         # TP7: CrewResult on the empty-prose path is a failure.
         assert isinstance(result, CrewResult)

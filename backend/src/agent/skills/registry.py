@@ -7,6 +7,8 @@ from typing import Any
 from crewai import Crew
 from sqlalchemy.orm import Session
 
+from src.schemas.agent import ChatMessageResponse
+
 
 @dataclass(frozen=True)
 class SkillContext:
@@ -17,6 +19,13 @@ class SkillContext:
     session_factory: Callable[[], Session]
     llm: Any
     event_queue: "queue.Queue[dict[str, Any] | None]"
+    # Story 6.2 AC 12: pre-loaded chat transcript (oldest → newest) so
+    # skills can prepend conversation context to the Task description
+    # without paying for a `GetChatHistoryTool` call on every turn.
+    # Tuple (not list) because the dataclass is frozen — an empty tuple
+    # is a safe immutable default. Call sites that don't need history
+    # (intent classifier, synthetic test contexts) can omit the field.
+    history: tuple[ChatMessageResponse, ...] = ()
 
 
 @dataclass(frozen=True)

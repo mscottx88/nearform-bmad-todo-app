@@ -113,6 +113,76 @@ class TestChatEndpoint:
         assert resp.status_code == 400
         assert resp.json()["error"] == "invalid_skill"
 
+    # Story 6.2 AC 12: chat handler must load recent history and filter
+    # to complete user/assistant rows (excluding the in-flight assistant
+    # placeholder) before building the SkillContext.
+    def test_chat_loads_history_into_skill_context(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        session = chat_service.create_session(db_session)
+        chat_service.create_message(
+            db_session, session.id, role="user", content="first turn"
+        )
+        chat_service.create_message(
+            db_session, session.id, role="assistant", content="first reply"
+        )
+        # A failed assistant row must be filtered OUT of history.
+        chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="oops",
+            status="failed",
+        )
+
+        captured: dict[str, Any] = {}
+
+        def _capture_run(ctx: Any, _skill: str, _msg_id: Any) -> Any:
+            from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+
+            captured["history"] = ctx.history
+            return CrewResult(success=True, prose="ok", error=None)
+
+        def _fake_stream(_q: Any) -> Iterator[str]:
+            yield 'data: {"type":"done"}\n\n'
+
+        # Synchronously execute the worker so we can observe its
+        # SkillContext — bypasses the daemon thread entirely.
+        class _ImmediateThread:
+            def __init__(self, target: Any, daemon: bool = False) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        with (
+            patch("src.api.agent.threading.Thread", _ImmediateThread),
+            patch("src.api.agent._classify_intent", return_value="chat"),
+            patch("src.api.agent.get_llm_for_agent", return_value=MagicMock()),
+            patch("src.api.agent.run_crew", side_effect=_capture_run),
+            patch("src.api.agent.stream_sse", side_effect=_fake_stream),
+        ):
+            resp = client.post(
+                f"/api/agent/sessions/{session.id}/chat",
+                json={"content": "second turn"},
+            )
+
+        assert resp.status_code == 200
+        history = captured["history"]
+        # Tuple, not list — SkillContext is frozen.
+        assert isinstance(history, tuple)
+        # First-turn pair survived; failed row filtered out; in-flight
+        # assistant placeholder filtered out; just-inserted user message
+        # for "second turn" is included (it's `complete`, status default).
+        roles_and_content = [(m.role, m.content) for m in history]
+        assert ("user", "first turn") in roles_and_content
+        assert ("assistant", "first reply") in roles_and_content
+        assert ("assistant", "oops") not in roles_and_content
+        # The pending placeholder for THIS turn must not appear.
+        for m in history:
+            assert m.status == "complete"
+            assert m.role in ("user", "assistant")
+
 
 # Story 6.1 CR Group E TP3: P29 GET /sessions/{id} endpoint.
 class TestGetSessionDetail:

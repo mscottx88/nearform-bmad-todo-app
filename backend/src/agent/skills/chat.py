@@ -8,6 +8,24 @@ from src.agent.tools.list_todos import ListTodosTool
 from src.agent.tools.search_todos import SearchTodosTool
 
 
+def _format_task_description(ctx: SkillContext) -> str:
+    """Prepend a compact chat transcript to the user's latest message.
+
+    Story 6.2 AC 12: the chat skill receives the last `_HISTORY_WINDOW`
+    `complete` user/assistant messages via `ctx.history` (oldest → newest,
+    excluding the in-flight assistant placeholder). Formatting them
+    inline gives the agent conversational continuity without forcing it
+    to call `GetChatHistoryTool` on every turn for short follow-ups
+    like "and what about that one?". `GetChatHistoryTool` stays
+    registered for deeper-than-window lookups.
+    """
+    if not ctx.history:
+        return ctx.user_message
+    transcript_lines = [f"{m.role}: {m.content}" for m in ctx.history]
+    transcript_block = "Conversation so far:\n" + "\n".join(transcript_lines)
+    return f"{transcript_block}\n\nUser's latest message: {ctx.user_message}"
+
+
 def build(ctx: SkillContext) -> Crew:
     """Free-form chat crew with all four read-only tools."""
     tools = [
@@ -33,7 +51,7 @@ def build(ctx: SkillContext) -> Crew:
     )
 
     task = Task(
-        description=ctx.user_message,
+        description=_format_task_description(ctx),
         expected_output="A helpful, concise response to the user's message.",
         agent=agent,
     )

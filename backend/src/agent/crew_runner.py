@@ -2,6 +2,7 @@ import json
 import queue
 import random
 import time
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -73,13 +74,21 @@ def _chunk_words(text: str) -> list[str]:
     return chunks
 
 
-def run_crew(ctx: SkillContext, skill_name: str) -> CrewResult:
+def run_crew(
+    ctx: SkillContext,
+    skill_name: str,
+    assistant_message_id: uuid.UUID,
+) -> CrewResult:
     """Run the crew in a daemon thread, emitting SSE events via ctx.event_queue.
 
     Returns a `CrewResult` so the calling wrapper can finalise the
     assistant DB row (Story 6.1 CR P24). The terminal `None` sentinel is
     enqueued in a `finally` block (P16). An empty LLM response surfaces
     as `agent_empty_response` and is reported as a failed result (P20).
+
+    Story 6.2 AC 11: `assistant_message_id` is echoed back in the `start`
+    event payload so the SSE consumer can bind subsequent
+    `chunk`/`done`/`error` events to the right assistant DB row.
     """
     q: queue.Queue[dict[str, Any] | None] = ctx.event_queue
     prose = ""
@@ -92,6 +101,7 @@ def run_crew(ctx: SkillContext, skill_name: str) -> CrewResult:
                 "type": "start",
                 "session_id": str(ctx.session_id),
                 "skill": skill_name,
+                "message_id": str(assistant_message_id),
             }
         )
 

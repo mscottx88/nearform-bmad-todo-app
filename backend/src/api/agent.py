@@ -43,6 +43,14 @@ _CANCEL_MAP_LOCK = threading.Lock()
 # it as a user-facing skill leaks an internal routing primitive.
 _INTERNAL_SKILLS: frozenset[str] = frozenset({"intent_classifier"})
 
+# Story 6.2 AC 12: how many recent messages we pre-load and pass to the
+# chat skill via `SkillContext.history`. The chat handler trims this
+# down to `complete` user/assistant rows (excluding the in-flight
+# assistant placeholder) before building the SkillContext. Twenty turns
+# is enough for short follow-ups like "and what about that one?";
+# anything deeper goes through `GetChatHistoryTool`.
+_HISTORY_WINDOW = 20
+
 
 def finalise_assistant_message(
     assistant_msg_id: uuid.UUID,
@@ -158,6 +166,21 @@ def chat(
     if resolved_skill is None:
         resolved_skill = _classify_intent(body.content, session_id)
 
+    # Story 6.2 AC 12: load recent transcript for the chat skill. We
+    # query AFTER inserting the user + assistant placeholder rows so
+    # `list_messages` returns them too, then filter the placeholder out.
+    # Older messages with status != 'complete' (failed, cancelled,
+    # streaming) are also dropped — the agent shouldn't see partial /
+    # broken turns when reasoning about context.
+    raw_history = chat_service.list_messages(db, session_id, limit=_HISTORY_WINDOW)
+    history = tuple(
+        m
+        for m in raw_history
+        if m.status == "complete"
+        and m.role in ("user", "assistant")
+        and m.id != assistant_msg_id
+    )
+
     q: queue.Queue[dict[str, Any] | None] = queue.Queue()
     cancel_event = threading.Event()
 
@@ -172,11 +195,12 @@ def chat(
         session_factory=SessionLocal,
         llm=get_llm_for_agent(),
         event_queue=q,
+        history=history,
     )
 
     def _run_and_finalise() -> None:
         try:
-            result = run_crew(ctx, resolved_skill)
+            result = run_crew(ctx, resolved_skill, assistant_msg_id)
             finalise_assistant_message(assistant_msg_id, resolved_skill, result)
         finally:
             with _CANCEL_MAP_LOCK:
