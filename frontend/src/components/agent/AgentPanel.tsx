@@ -131,12 +131,23 @@ export function AgentPanel() {
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
-            // Right- and left-aligned bubbles get a stacked
-            // drop-shadow that blooms ~14-18px past the SVG outline.
-            // Horizontal padding here has to clear that bloom or the
-            // panel's overflow:auto clips the glow on whichever side
-            // the bubble is anchored. Vertical padding stays modest.
-            padding: '12px 20px',
+            // Asymmetric horizontal padding by design: the
+            // NeonScrollbar's vertical track is 15px wide and sits
+            // at `right: 0` of the outer wrapper, so a symmetric
+            // 20/20 padding produces VISUALLY uneven gutters
+            // (left bubble has 20px of empty space, right bubble
+            // has ~5px before the track starts). 20px on the left,
+            // 20+15=35px on the right makes the visible empty
+            // space equal on both sides regardless of where the
+            // bubble is anchored.
+            //
+            // Vertical padding stays at 12 — the bottom track only
+            // appears for horizontal scroll which the chat list
+            // never produces.
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingLeft: 20,
+            paddingRight: 35,
           }}
           scrollRef={chatScrollRef}
           // Cursor swaps:
