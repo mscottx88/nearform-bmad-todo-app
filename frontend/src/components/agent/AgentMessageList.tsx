@@ -54,6 +54,16 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
 
   const lastMessageCountRef = useRef(messages.length);
   const lastStreamingContentRef = useRef('');
+  // Story 6.2 Group E polish (user report 2026-04-25): the auto-
+  // scroll effect's "trust live DOM" guard correctly prevents
+  // snap-back during streaming-mid-drag, but it also blocks the
+  // initial-load snap-to-bottom: when messages first arrive,
+  // `scrollTop` is still 0 and `distanceFromBottom > threshold`,
+  // so the synchronous read says "not pinned" and the chat opens
+  // showing the OLDEST messages. This flag forces the FIRST
+  // grew/streamed tick to scroll to bottom unconditionally;
+  // subsequent ticks rely on the synchronous distance check.
+  const initialSnapDoneRef = useRef(false);
 
   // Keep `isPinnedRef` in sync with the actual scroll position. Fires
   // on user-initiated scroll and on programmatic scrolls.
@@ -117,6 +127,20 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
     lastStreamingContentRef.current = streamingContent;
 
     if (!grew && !streamed) return;
+
+    // First non-empty tick after mount: always snap to bottom,
+    // regardless of synchronous distance — the user just opened
+    // the panel and expects the LATEST messages, not history from
+    // the top of the scroll buffer.
+    const isInitialSnap = !initialSnapDoneRef.current && messages.length > 0;
+    if (isInitialSnap) {
+      initialSnapDoneRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      isPinnedRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowNewMessagesPill(false);
+      return;
+    }
 
     const distanceFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
     const pinnedNow = distanceFromBottom <= PIN_THRESHOLD_PX;
