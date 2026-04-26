@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -139,6 +140,7 @@ def update_message(
     status: ChatMessageStatus,
     skill: str | None = None,
     error: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     # Story 6.1 CR P7: raise on missing rows so the caller can't mistake
     # "message was deleted between start-of-stream and finalisation" for
@@ -152,6 +154,12 @@ def update_message(
         row.skill = skill
     if error is not None:
         row.error = error
+    if metadata is not None:
+        # Story 6.3: write to the ORM column attr `metadata_` (the
+        # trailing underscore avoids the SQLAlchemy `Base.metadata`
+        # reserved name). Replace-and-set rather than merge — the
+        # caller is expected to pass a complete envelope.
+        row.metadata_ = metadata
     # Story 6.1 CR P14: bump the parent session so `list_sessions`
     # ordering reflects stream completion, not just the initial insert.
     session_row = db.query(ChatSession).filter(ChatSession.id == row.session_id).first()

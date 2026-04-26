@@ -150,10 +150,23 @@
    around the combined silhouette. The wrapping <div> only handles
    layout (max-width, alignment) and the inner content padding. */
 
+/* Story 6.3: column-direction wrapper around the bubble + any
+   proposal renderer (RephraseProposal etc.) so a long-content
+   proposal doesn't squeeze the bubble's flex basis and force its
+   text to wrap one character per line. The wrapper inherits its
+   horizontal alignment from `.agent-message`'s `justify-content`. */
+.agent-message__stack {
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+  min-width: 0;
+}
+
 .agent-message__bubble {
   position: relative;
   display: inline-block;
-  max-width: 80%;
+  /* max-width is now on the stack wrapper; bubble keeps its
+     intrinsic sizing. */
   /* Reserve layout space for the tail apex so the next message sits
      below it instead of overlapping. */
   margin-bottom: 12px;

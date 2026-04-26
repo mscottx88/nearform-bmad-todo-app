@@ -34,6 +34,7 @@ def _make_todo(**overrides: Any) -> TodoResponse:
         "position_y": None,
         "rotation_y": 0.0,
         "drift_seed": 0.0,
+        "due_date": None,
         "embedding_status": "complete",
         "archived": False,
         "archived_at": None,
@@ -96,6 +97,7 @@ class TestGetTodoTool:
         todo_orm.color = "#00ff88"
         todo_orm.position_x = None
         todo_orm.position_y = None
+        todo_orm.due_date = None
         todo_orm.created_at = FIXED_TS
 
         mock_session = MagicMock()

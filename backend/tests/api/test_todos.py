@@ -3,6 +3,7 @@ import time
 import uuid
 from unittest.mock import patch
 
+import pytest
 from starlette.testclient import TestClient
 
 
@@ -330,6 +331,33 @@ def test_update_todo_not_found(client: TestClient) -> None:
     assert response.status_code == 404
     data = response.json()
     assert data["error"] == "not_found"
+
+
+# Story 6.3 AC 7: defence in depth on the LLM mutation surface. The
+# rephrase skill's Accept button fires PATCH /api/todos/{id} with a
+# `field` slot the LLM picked. A hallucinated `id`, `created_at`, or
+# any unknown field MUST be rejected with 422 — never silently
+# discarded, never written to the row.
+def test_update_todo_rejects_unknown_field(client: TestClient) -> None:
+    create_resp = client.post("/api/todos", json={"text": "Hardened"})
+    todo_id = create_resp.json()["id"]
+    response = client.patch(
+        f"/api/todos/{todo_id}",
+        json={"text": "still ok", "id": "should-be-rejected"},
+    )
+    assert response.status_code == 422
+
+
+def test_todo_update_schema_forbids_extra_fields() -> None:
+    # Schema-level guard so a regression in the model_config is
+    # caught even if the API route swallowed the validation error.
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from src.schemas.todo import TodoUpdate  # noqa: PLC0415
+
+    with pytest.raises(ValidationError) as exc_info:
+        TodoUpdate.model_validate({"text": "ok", "created_at": "2026-04-26"})
+    assert any(err["type"] == "extra_forbidden" for err in exc_info.value.errors())
 
 
 def test_delete_todo(client: TestClient) -> None:

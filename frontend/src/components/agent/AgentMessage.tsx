@@ -39,6 +39,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../types/agent';
 import { parseAgentMessage } from '../../utils/parseAgentMessage';
+import { RephraseProposal } from './RephraseProposal';
 import { TodoLink } from './TodoLink';
 
 interface Props {
@@ -243,24 +244,89 @@ export function AgentMessage({ message, isStreaming }: Props) {
     );
   }
 
+  // Story 6.3: per-kind proposal renderer slot. Switch keeps the
+  // dispatch site simple — a future `position_deltas` /
+  // `visual_cues` kind adds a new arm without a refactor.
+  const proposal = readProposalMetadata(message);
+
   return (
     <div className={className} data-role={message.role} data-status={message.status}>
-      <div className="agent-message__bubble" ref={bubbleRef}>
-        <BubbleOutline role={message.role as 'user' | 'assistant'} width={size.w} height={size.h} />
-        <div className="agent-message__content">
-          {showThinking ? (
-            <span className="agent-thinking" aria-label="agent is thinking">
-              <span className="agent-thinking__dot" />
-              <span className="agent-thinking__dot" />
-              <span className="agent-thinking__dot" />
-            </span>
-          ) : (
-            <span className="agent-message__text">
-              <MessageBody message={message} />
-            </span>
-          )}
+      {/*
+        `.agent-message` is `display: flex` row, with `justify-content`
+        controlling horizontal alignment by role. A direct
+        `RephraseProposal` sibling would be a flex item alongside the
+        bubble — long candidate-chip text would squeeze the bubble's
+        flex basis to near-zero and wrap each character on its own
+        line. Wrap bubble + proposal in a column-direction stack so the
+        proposal sits BELOW the bubble (sibling visually, but flex-
+        column nested) and the bubble retains its full width.
+      */}
+      <div className="agent-message__stack">
+        <div className="agent-message__bubble" ref={bubbleRef}>
+          <BubbleOutline role={message.role as 'user' | 'assistant'} width={size.w} height={size.h} />
+          <div className="agent-message__content">
+            {showThinking ? (
+              <span className="agent-thinking" aria-label="agent is thinking">
+                <span className="agent-thinking__dot" />
+                <span className="agent-thinking__dot" />
+                <span className="agent-thinking__dot" />
+              </span>
+            ) : (
+              <span className="agent-message__text">
+                <MessageBody message={message} />
+              </span>
+            )}
+          </div>
         </div>
+        {proposal !== null && proposal.kind === 'text_rewrite' && (
+          <RephraseProposal
+            payload={proposal.payload as unknown as RephraseProposalPayload}
+            targets={proposal.targets}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+interface ProposalMetadata {
+  kind: string;
+  payload: Record<string, unknown>;
+  targets: string[];
+}
+
+interface RephraseProposalPayload {
+  suggestions?: {
+    field: string;
+    original: string;
+    revised: string;
+    reason: string;
+  }[];
+  missing_fields?: string[];
+  candidates?: { id: string; text: string }[];
+}
+
+function readProposalMetadata(message: ChatMessage): ProposalMetadata | null {
+  const candidate = (message.metadata as { proposal?: unknown }).proposal;
+  if (
+    candidate === null ||
+    typeof candidate !== 'object' ||
+    candidate === undefined
+  ) {
+    return null;
+  }
+  const obj = candidate as Record<string, unknown>;
+  if (
+    typeof obj.kind === 'string' &&
+    typeof obj.payload === 'object' &&
+    obj.payload !== null &&
+    Array.isArray(obj.targets)
+  ) {
+    return {
+      kind: obj.kind,
+      payload: obj.payload as Record<string, unknown>,
+      targets: obj.targets as string[],
+    };
+  }
+  return null;
 }

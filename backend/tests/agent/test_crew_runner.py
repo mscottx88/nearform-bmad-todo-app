@@ -150,6 +150,11 @@ class TestChunkWords:
 def _mock_skill(crew: MagicMock) -> MagicMock:
     spec = MagicMock()
     spec.builder = lambda c: crew
+    # Story 6.3: an unset MagicMock attribute returns a MagicMock
+    # (truthy), which would flip crew_runner into the proposal-parsing
+    # pipeline for these chat-skill tests. Pin proposal_kind=None so
+    # the legacy "stream raw prose" path stays exercised.
+    spec.proposal_kind = None
     return spec
 
 

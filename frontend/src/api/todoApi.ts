@@ -83,6 +83,8 @@ interface UpdateTodoInput {
   color?: string;
   positionX?: number;
   positionY?: number;
+  /** Story 6.3: ISO date string (YYYY-MM-DD) or null to clear. */
+  dueDate?: string | null;
 }
 
 export function useUpdateTodo() {

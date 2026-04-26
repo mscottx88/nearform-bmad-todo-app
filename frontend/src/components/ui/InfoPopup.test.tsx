@@ -1,11 +1,19 @@
 import { render, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { InfoPopup } from './InfoPopup';
-import type { Todo } from '../../types';
 
 vi.mock('@react-three/drei', () => ({
   Html: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
+
+// Story 6.3: InfoPopup uses `useUpdateTodo` for the due-date picker.
+// The test environment has no React Query client, so mock the hook to
+// keep this file's render scope tight.
+vi.mock('../../api/todoApi', () => ({
+  useUpdateTodo: () => ({ mutate: vi.fn() }),
+}));
+
+import { InfoPopup } from './InfoPopup';
+import type { Todo } from '../../types';
 
 function makeTodo(overrides: Partial<Todo> = {}): Todo {
   return {
@@ -17,6 +25,7 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
     positionY: 4.56,
     rotationY: 0,
     driftSeed: 0,
+    dueDate: null,
     embeddingStatus: 'complete',
     archived: false,
     archivedAt: null,

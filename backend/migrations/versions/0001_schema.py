@@ -72,6 +72,13 @@ def upgrade() -> None:
             server_default=sa.text("random() * 2 * pi()"),
             nullable=False,
         ),
+        # Story 6.3: optional deadline (date + time, timezone-aware).
+        # Nullable because the rephrase skill only sets it when the
+        # user explicitly provides a date (e.g. "add a due date of
+        # May 1") AND because most todos don't have a deadline. Stored
+        # as DateTime(tz) so users can pick a specific hour/minute via
+        # the InfoPopup's NeonDateTimePicker.
+        sa.Column("due_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "embedding", pgvector.sqlalchemy.vector.VECTOR(dim=768), nullable=True
         ),

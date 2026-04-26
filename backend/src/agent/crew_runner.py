@@ -8,6 +8,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 from src.agent.skills.registry import SKILL_REGISTRY, SkillContext
 
 AGENT_CHUNK_DELAY_MS: int = 50
@@ -40,12 +42,19 @@ class CrewResult:
     distinguish a user-cancelled run (status='cancelled') from a generic
     failure (status='failed'). `success` stays False on the cancel path
     so existing branches treat it as a non-success terminal state.
+
+    Story 6.3: `metadata` carries the proposal envelope (`{"proposal":
+    {...}}`) for skills whose `proposal_kind` is non-None. The API layer
+    passes it through to `chat_service.update_message(metadata=...)` so
+    the frontend can re-hydrate the proposal from
+    `GET /api/agent/sessions/{id}/messages` after a panel close+reopen.
     """
 
     success: bool
     prose: str
     error: str | None
     cancelled: bool = False
+    metadata: dict[str, Any] | None = None
 
 
 def _chunk_words(text: str) -> list[str]:
@@ -145,6 +154,83 @@ def _chunk_words(text: str) -> list[str]:
     return chunks
 
 
+@dataclass(frozen=True)
+class _ProposalParseError:
+    """Sentinel returned by `_extract_proposal_envelope` on failure.
+
+    Distinct codes (`agent_invalid_proposal_missing` vs
+    `agent_invalid_proposal_shape`) make ops triage easier — a
+    consistently-empty `result.pydantic` points at a CrewAI parse
+    failure, while a shape mismatch hints at a schema drift.
+    """
+
+    code: str
+    message: str
+
+
+def _extract_proposal_envelope(
+    crew_output: Any,
+    proposal_kind: str,
+    resolved_target_id: uuid.UUID | None,
+    resolved_candidates: Any = None,
+) -> dict[str, Any] | _ProposalParseError:
+    """Convert a `CrewOutput` whose Task carries `output_pydantic` into
+    the canonical wire envelope for the `proposal` SSE event +
+    `chat_messages.metadata.proposal` row.
+
+    Story 6.3: CrewAI sets `CrewOutput.pydantic` to the parsed model
+    instance after schema validation. If that attribute is missing or
+    not a BaseModel (CrewAI failed to parse the LLM output despite
+    `output_pydantic`), we fail the run with a controlled error code.
+
+    The envelope's `targets` list is single-element for v1's
+    `text_rewrite` kind. Future kinds (e.g. `position_deltas`) may
+    populate multiple ids; the wire shape is array-typed already.
+
+    `resolved_candidates` (when non-empty) is folded into
+    `payload.candidates` so the renderer can show clickable
+    disambiguation chips. The LLM does not produce these — they come
+    from the server-side search resolver inside the skill's `build()`.
+    """
+    pydantic_instance = getattr(crew_output, "pydantic", None)
+    if pydantic_instance is None or not isinstance(pydantic_instance, BaseModel):
+        return _ProposalParseError(
+            code="agent_invalid_proposal_missing",
+            message="Skill produced no parseable structured output",
+        )
+    payload = pydantic_instance.model_dump()
+    # Validate the keys we care about are present — model_dump() of a
+    # well-formed RephraseEnvelope will always include them, but a
+    # future skill might wire a different model and we don't want a
+    # silent KeyError downstream.
+    if "reasoning" not in payload or "suggestions" not in payload:
+        return _ProposalParseError(
+            code="agent_invalid_proposal_shape",
+            message="Structured output is missing required keys",
+        )
+    reasoning = payload.pop("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return _ProposalParseError(
+            code="agent_invalid_proposal_shape",
+            message="Structured output `reasoning` must be a non-empty string",
+        )
+    if resolved_candidates:
+        # Pydantic models in the candidates list need to round-trip
+        # through model_dump for JSON serialisation; UUIDs become
+        # strings, etc.
+        payload["candidates"] = [
+            c.model_dump(mode="json") if hasattr(c, "model_dump") else c
+            for c in resolved_candidates
+        ]
+    targets = [str(resolved_target_id)] if resolved_target_id is not None else []
+    return {
+        "kind": proposal_kind,
+        "payload": payload,
+        "targets": targets,
+        "reasoning": reasoning,
+    }
+
+
 def run_crew(
     ctx: SkillContext,
     skill_name: str,
@@ -226,7 +312,6 @@ def run_crew(
             return _emit_cancelled()
 
         result = crew.kickoff()
-        prose = str(result).strip()
 
         # P1: the LLM call may have taken seconds to minutes; the user
         # may have hit Cancel during it. Re-check before we start the
@@ -234,6 +319,46 @@ def run_crew(
         # to at least stop new content from appearing.
         if cancel_event is not None and cancel_event.is_set():
             return _emit_cancelled()
+
+        # Story 6.3: skills with a `proposal_kind` set produce a
+        # Pydantic-validated envelope (Task.output_pydantic). CrewAI
+        # exposes the parsed model via `CrewOutput.pydantic`; we fold
+        # it into the canonical wire shape and emit the `proposal`
+        # event before any chunks fire. On extraction failure, emit
+        # `agent_invalid_proposal` and fail the run — never silently
+        # fall back to streaming the raw output.
+        envelope_metadata: dict[str, Any] | None = None
+        if spec.proposal_kind is not None:
+            extracted = _extract_proposal_envelope(
+                result,
+                spec.proposal_kind,
+                ctx.resolved_target_id,
+                getattr(ctx, "resolved_candidates", None),
+            )
+            if isinstance(extracted, _ProposalParseError):
+                q.put(
+                    {
+                        "type": "error",
+                        "code": extracted.code,
+                        "message": extracted.message,
+                        "recoverable": False,
+                    }
+                )
+                return CrewResult(success=False, prose="", error=extracted.code)
+            envelope = extracted
+            q.put(
+                {
+                    "type": "proposal",
+                    "kind": envelope["kind"],
+                    "payload": envelope["payload"],
+                    "targets": envelope["targets"],
+                    "reasoning": envelope["reasoning"],
+                }
+            )
+            envelope_metadata = {"proposal": envelope}
+            prose = envelope["reasoning"]
+        else:
+            prose = str(result).strip()
 
         chunks = _chunk_words(prose)
         chunk_count = len(chunks)
@@ -265,7 +390,9 @@ def run_crew(
             time.sleep(actual_delay_s)
 
         q.put({"type": "done"})
-        return CrewResult(success=True, prose=prose, error=None)
+        return CrewResult(
+            success=True, prose=prose, error=None, metadata=envelope_metadata
+        )
 
     except Exception as exc:  # noqa: BLE001
         q.put(

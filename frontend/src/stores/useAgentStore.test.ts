@@ -161,6 +161,75 @@ describe('useAgentStore', () => {
     expect(assistant?.status).toBe('complete');
   });
 
+  // Story 6.3: proposal events arrive between `start` and the first
+  // `chunk`. They write onto the streaming bubble's `metadata.proposal`
+  // without touching content / streamingBuffer.
+  it('ingestSseEvent handles proposal event by writing metadata.proposal', async () => {
+    useAgentStore.setState({ activeSessionId: 'sess-a' });
+    await useAgentStore.getState().sendMessage('rephrase this');
+    useAgentStore.getState().ingestSseEvent({
+      type: 'start',
+      session_id: 'sess-a',
+      skill: 'rephrase',
+      message_id: 'server-msg-1',
+    });
+    useAgentStore.getState().ingestSseEvent({
+      type: 'proposal',
+      kind: 'text_rewrite',
+      payload: {
+        suggestions: [
+          { field: 'text', original: 'old', revised: 'new', reason: 'clearer' },
+        ],
+        missing_fields: ['due_date'],
+      },
+      targets: ['todo-1'],
+      reasoning: 'Made it crisper.',
+    });
+
+    const state = useAgentStore.getState();
+    const assistant = state.messages.find((m) => m.id === 'server-msg-1');
+    expect(assistant).toBeDefined();
+    const proposal = assistant?.metadata.proposal as
+      | { kind: string; targets: string[]; reasoning: string; payload: { missing_fields: string[] } }
+      | undefined;
+    expect(proposal?.kind).toBe('text_rewrite');
+    expect(proposal?.targets).toEqual(['todo-1']);
+    expect(proposal?.reasoning).toBe('Made it crisper.');
+    expect(proposal?.payload.missing_fields).toEqual(['due_date']);
+    // Content and streamingBuffer must NOT be clobbered by proposal
+    // ingest — those are the chunk pipeline's concern.
+    expect(assistant?.content).toBe('');
+    expect(state.streamingBuffer).toBe('');
+  });
+
+  it('subsequent chunk after proposal still appends to content', async () => {
+    useAgentStore.setState({ activeSessionId: 'sess-a' });
+    await useAgentStore.getState().sendMessage('rephrase this');
+    useAgentStore.getState().ingestSseEvent({
+      type: 'start',
+      session_id: 'sess-a',
+      skill: 'rephrase',
+      message_id: 'server-msg-1',
+    });
+    useAgentStore.getState().ingestSseEvent({
+      type: 'proposal',
+      kind: 'text_rewrite',
+      payload: { suggestions: [], missing_fields: [] },
+      targets: ['todo-1'],
+      reasoning: 'Done.',
+    });
+    useAgentStore.getState().ingestSseEvent({ type: 'chunk', text: 'Done.' });
+
+    const assistant = useAgentStore
+      .getState()
+      .messages.find((m) => m.id === 'server-msg-1');
+    expect(assistant?.content).toBe('Done.');
+    // Proposal metadata still present after the chunk landed.
+    expect(
+      (assistant?.metadata as { proposal?: { kind: string } }).proposal?.kind,
+    ).toBe('text_rewrite');
+  });
+
   it('ingestSseEvent handles error event by flipping bubble to failed state', async () => {
     useAgentStore.setState({ activeSessionId: 'sess-a' });
     await useAgentStore.getState().sendMessage('hi');

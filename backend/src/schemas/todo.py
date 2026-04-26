@@ -23,16 +23,31 @@ class TodoCreate(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     position_x: float | None = None
     position_y: float | None = None
+    due_date: datetime | None = None
 
     _validate_text = field_validator("text")(_not_whitespace_only)
 
 
 class TodoUpdate(BaseModel):
+    # Story 6.3 AC 7: defence in depth on the LLM mutation surface.
+    # The PATCH /api/todos/{id} route is what `RephraseProposal.tsx`
+    # fires when the user clicks Accept on a rephrase suggestion. The
+    # LLM picks the `field` slot, so a hallucinated or malicious
+    # field name (e.g. `id`, `created_at`) must be rejected with 422
+    # before any service code runs. Pydantic v2 raises
+    # `ValidationError(type='extra_forbidden')` on any unknown key.
+    model_config = ConfigDict(extra="forbid")
+
     text: str | None = Field(default=None, min_length=1, max_length=1000)
     completed: bool | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     position_x: float | None = None
     position_y: float | None = None
+    # Story 6.3 user-driven enhancement: real due_date column. The
+    # rephrase skill suggests this field when the user supplies a date.
+    # Pydantic accepts ISO 8601 date strings ("2026-05-01") and
+    # date instances; `None` clears the field.
+    due_date: datetime | None = None
 
     @field_validator("text")
     @classmethod
@@ -87,6 +102,11 @@ class TodoResponse(BaseModel):
     # 2026-04-23: server-assigned random drift phase. Write-once —
     # stable across reloads so ambient motion stays consistent.
     drift_seed: float
+    # Story 6.3: optional deadline (date + time, timezone-aware).
+    # Surfaces in the InfoPopup with a clickable NeonDateTimePicker
+    # and is the target of the rephrase skill's `due_date` field
+    # suggestions.
+    due_date: datetime | None
     embedding_status: str
     archived: bool
     archived_at: datetime | None

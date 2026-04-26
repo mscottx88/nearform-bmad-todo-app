@@ -39,6 +39,26 @@ export interface ChatMessage {
 }
 
 /**
+ * Story 6.3: structured proposal envelope persisted on the assistant
+ * row's `metadata.proposal` field and emitted live via the `proposal`
+ * SSE event. Skills whose `SkillSpec.proposal_kind` is non-None
+ * produce these (rephrase → `text_rewrite`; future
+ * organize → `position_deltas`; etc.).
+ *
+ * `payload` is intentionally `Record<string, unknown>` here — each
+ * `kind` has its own per-renderer payload shape (defined alongside
+ * the renderer, e.g. `RephraseProposal.tsx`'s prop type for
+ * `text_rewrite`). The renderer registration in `AgentMessage.tsx`
+ * narrows by `kind` before passing payload through.
+ */
+export interface ProposalEnvelope {
+  kind: string;
+  payload: Record<string, unknown>;
+  targets: string[];
+  reasoning: string;
+}
+
+/**
  * SSE events emitted by `crew_runner.py` over `/api/agent/sessions/{id}/chat`.
  * The keys are snake_case because they arrive directly from the server
  * stream, bypassing the axios camelcase interceptor.
@@ -47,4 +67,11 @@ export type SseEvent =
   | { type: 'start'; session_id: string; skill: string; message_id: string }
   | { type: 'chunk'; text: string }
   | { type: 'done' }
-  | { type: 'error'; code: string; message: string; recoverable: boolean };
+  | { type: 'error'; code: string; message: string; recoverable: boolean }
+  | {
+      type: 'proposal';
+      kind: string;
+      payload: Record<string, unknown>;
+      targets: string[];
+      reasoning: string;
+    };

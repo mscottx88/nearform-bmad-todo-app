@@ -1,6 +1,6 @@
 # Story 6.3: Rephrase Skill
 
-Status: ready-for-dev
+Status: review
 
 > **Scope note:** First "skill" beyond the free-form `chat` skill in
 > Epic 6 ("The Intelligent Pond Companion"). Lands the entire
@@ -295,11 +295,11 @@ If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Docu
 
 ### AC 9 — Definition of done gates
 
-- [ ] `npm run build` clean (no TS errors, no Vite warnings);
-- [ ] `npx vitest --run` from `frontend/` passes (existing + new);
-- [ ] `uv run pytest` from `backend/` passes (existing + new);
-- [ ] `npm run lint` net-zero new errors;
-- [ ] Manual smoke: open panel, click a pad, type "rephrase this", send → assistant prose streams in, suggestion block appears below, Accept updates the pad's text and the block flips to "✓ applied"; Dismiss disables both buttons without any network call.
+- [x] `npm run build` clean (no TS errors, no Vite warnings);
+- [x] `npx vitest --run` from `frontend/` passes (existing + new);
+- [x] `uv run pytest` from `backend/` passes (existing + new);
+- [x] `npm run lint` net-zero new errors;
+- [x] Manual smoke: open panel, click a pad, type "rephrase this", send → assistant prose streams in, suggestion block appears below, Accept updates the pad's text and the block flips to "✓ applied"; Dismiss disables both buttons without any network call.
 
 ---
 
@@ -307,7 +307,7 @@ If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Docu
 
 ### Task 1 — Backend: `rephrase` skill module (AC 1, AC 2, AC 3)
 
-- [ ] Create [`backend/src/agent/skills/rephrase.py`](backend/src/agent/skills/rephrase.py):
+- [x] Create [`backend/src/agent/skills/rephrase.py`](backend/src/agent/skills/rephrase.py):
   - `build(ctx: SkillContext) -> Crew` factory matching the existing skill signature.
   - Resolve target todo id per AC 2: read `ctx.context.todo_ids[0]` if set; else regex-scan `ctx.user_message` for a UUID; else proceed with empty-target fallback prompt. The chat skill currently consumes `ctx.user_message` only — extending `SkillContext` to carry `context: ChatRequestContext` is part of this task (see Task 3 also).
   - Up-front `GetTodoTool` lookup to fetch the target's content; embed the content directly into the Task description so the agent doesn't have to call the tool a second time.
@@ -315,28 +315,28 @@ If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Docu
   - Task description includes: untrusted-data framing literal, target todo content, user request, JSON schema spec from AC 3, and the empty-target fallback instructions if applicable.
   - `expected_output` matches the JSON schema description verbatim.
   - Single-agent, single-task, sequential crew.
-- [ ] Register the skill in [`backend/src/agent/skills/registry.py`](backend/src/agent/skills/registry.py):
+- [x] Register the skill in [`backend/src/agent/skills/registry.py`](backend/src/agent/skills/registry.py):
   - Import from `src.agent.skills.rephrase`;
   - Add `SKILL_REGISTRY["rephrase"]` with `proposal_kind="text_rewrite"`;
   - Update `intent_classifier` skill list dynamically (it iterates `SKILL_REGISTRY` minus internal skills — already happens [intent_classifier.py:25-28](backend/src/agent/skills/intent_classifier.py#L25-L28)), so registering the skill is enough for the classifier to start routing to it.
-- [ ] Create [`backend/tests/agent/test_rephrase_skill.py`](backend/tests/agent/test_rephrase_skill.py) per AC 8.
+- [x] Create [`backend/tests/agent/test_rephrase_skill.py`](backend/tests/agent/test_rephrase_skill.py) per AC 8.
 
 ### Task 2 — Backend: `crew_runner` proposal pipeline (AC 4)
 
-- [ ] Extend [`backend/src/agent/crew_runner.py`](backend/src/agent/crew_runner.py)'s `run_crew`:
+- [x] Extend [`backend/src/agent/crew_runner.py`](backend/src/agent/crew_runner.py)'s `run_crew`:
   - After `crew.kickoff()` and before chunk-streaming, branch on `spec.proposal_kind`:
     - When `proposal_kind is None` (chat / classifier): keep the existing path verbatim — chunk the prose, no proposal event, no metadata write.
     - When `proposal_kind is not None`: parse `prose` as JSON; on success, build the envelope; emit `{"type": "proposal", "kind": ..., "payload": ..., "targets": ..., "reasoning": ...}`; chunk the `reasoning` text only; persist the envelope into the assistant row's metadata via the new `metadata` parameter on `finalise_assistant_message`.
   - JSON parse failure / shape mismatch → emit `agent_invalid_proposal` error and return `CrewResult(success=False, ...)`. Use distinct codes (`agent_invalid_proposal_json` vs `agent_invalid_proposal_shape`) to make ops triage easier.
   - The `CrewResult` dataclass GAINS an optional `metadata: dict[str, Any] | None = None` field (or similar) so the API wrapper can pass it through to `finalise_assistant_message` without re-parsing the SSE stream.
-- [ ] Extend [`finalise_assistant_message`](backend/src/api/agent.py#L83) signature with `metadata: dict[str, Any] | None = None`. When provided, write to the row alongside `content` / `status`. Existing call sites (chat skill) pass `None` and behave unchanged.
-- [ ] Extend `chat_service.update_message` if it doesn't already accept `metadata` — confirm via `grep -n metadata backend/src/services/chat_service.py`. If absent, add a `metadata: dict[str, Any] | None = None` kwarg that writes to the existing JSONB column when non-None.
-- [ ] Create [`backend/tests/agent/test_crew_runner_proposal.py`](backend/tests/agent/test_crew_runner_proposal.py) per AC 8.
+- [x] Extend [`finalise_assistant_message`](backend/src/api/agent.py#L83) signature with `metadata: dict[str, Any] | None = None`. When provided, write to the row alongside `content` / `status`. Existing call sites (chat skill) pass `None` and behave unchanged.
+- [x] Extend `chat_service.update_message` if it doesn't already accept `metadata` — confirm via `grep -n metadata backend/src/services/chat_service.py`. If absent, add a `metadata: dict[str, Any] | None = None` kwarg that writes to the existing JSONB column when non-None.
+- [x] Create [`backend/tests/agent/test_crew_runner_proposal.py`](backend/tests/agent/test_crew_runner_proposal.py) per AC 8.
 
 ### Task 3 — Backend: `SkillContext` widening + API plumbing (AC 2)
 
-- [ ] Extend [`SkillContext`](backend/src/agent/skills/registry.py) with `context: ChatRequestContext = field(default_factory=ChatRequestContext)` (frozen dataclass — use `field(default_factory=...)` since `ChatRequestContext` is mutable). Pre-existing skills (chat / classifier) ignore this field, so the widening is backward compatible.
-- [ ] Update [`backend/src/api/agent.py`](backend/src/api/agent.py)'s `chat()` handler to thread `body.context` into the constructed `SkillContext`:
+- [x] Extend [`SkillContext`](backend/src/agent/skills/registry.py) with `context: ChatRequestContext = field(default_factory=ChatRequestContext)` (frozen dataclass — use `field(default_factory=...)` since `ChatRequestContext` is mutable). Pre-existing skills (chat / classifier) ignore this field, so the widening is backward compatible.
+- [x] Update [`backend/src/api/agent.py`](backend/src/api/agent.py)'s `chat()` handler to thread `body.context` into the constructed `SkillContext`:
   ```python
   ctx = SkillContext(
       session_id=session_id,
@@ -348,36 +348,36 @@ If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Docu
       context=body.context,  # <-- new
   )
   ```
-- [ ] Extend [`backend/tests/api/test_agent_chat.py`](backend/tests/api/test_agent_chat.py) per AC 8's E2E cases.
+- [x] Extend [`backend/tests/api/test_agent_chat.py`](backend/tests/api/test_agent_chat.py) per AC 8's E2E cases.
 
 ### Task 4 — Backend: schema validation (AC 7)
 
-- [ ] Verify [`backend/src/schemas/todo.py`](backend/src/schemas/todo.py)'s `TodoUpdate` rejects extra fields:
+- [x] Verify [`backend/src/schemas/todo.py`](backend/src/schemas/todo.py)'s `TodoUpdate` rejects extra fields:
   - If `model_config = ConfigDict(extra="forbid")` is already set, no change.
   - Otherwise, add it. Document the change as a defence-in-depth step; the LLM is the new untrusted producer of PATCH bodies.
-- [ ] Add / extend a schema-level test asserting that `TodoUpdate.model_validate({"id": "x", "text": "y"})` raises `ValidationError`.
+- [x] Add / extend a schema-level test asserting that `TodoUpdate.model_validate({"id": "x", "text": "y"})` raises `ValidationError`.
 
 ### Task 5 — Frontend: SSE union + ingest (AC 6)
 
-- [ ] Extend [`frontend/src/types/agent.ts`](frontend/src/types/agent.ts) `SseEvent` union with the `proposal` arm.
-- [ ] Extend [`useAgentStore.ingestSseEvent`](frontend/src/stores/useAgentStore.ts) with the new branch — write `metadata.proposal` onto the streaming message; do NOT touch `content` or `streamingBuffer`.
-- [ ] Extend [`frontend/src/stores/useAgentStore.test.ts`](frontend/src/stores/useAgentStore.test.ts) with the new ingestion case + the "subsequent chunk still appends to content" case (AC 8).
+- [x] Extend [`frontend/src/types/agent.ts`](frontend/src/types/agent.ts) `SseEvent` union with the `proposal` arm.
+- [x] Extend [`useAgentStore.ingestSseEvent`](frontend/src/stores/useAgentStore.ts) with the new branch — write `metadata.proposal` onto the streaming message; do NOT touch `content` or `streamingBuffer`.
+- [x] Extend [`frontend/src/stores/useAgentStore.test.ts`](frontend/src/stores/useAgentStore.test.ts) with the new ingestion case + the "subsequent chunk still appends to content" case (AC 8).
 
 ### Task 6 — Frontend: `RephraseProposal.tsx` component (AC 5)
 
-- [ ] Create [`frontend/src/components/agent/RephraseProposal.tsx`](frontend/src/components/agent/RephraseProposal.tsx):
+- [x] Create [`frontend/src/components/agent/RephraseProposal.tsx`](frontend/src/components/agent/RephraseProposal.tsx):
   - Reads the proposal payload from props (the parent passes `message.metadata.proposal` after type-narrowing on `kind === 'text_rewrite'`).
   - Per-suggestion local state — `applied`, `dismissed` — both `boolean`. Resets on parent re-mount, NOT persisted.
   - Live-todo lookup via `useTodos()` for the staleness check; falls back to "stale" when the matching todo's text differs from the suggestion's `original`.
   - `useUpdateTodo()` mutation on Accept; Dismiss is a pure local state flip.
   - Missing-field hints rendered per the copy table.
   - Component is presentational — no Zustand subscriptions, no API calls except the mutation hook. Keeps the test surface small.
-- [ ] Create matching CSS rules in a new [`RephraseProposal.css`](frontend/src/components/agent/RephraseProposal.css) (or extend [`AgentPanel.css`](frontend/src/components/agent/AgentPanel.css) — pick by what neighbouring components do). Match the panel's neon-cyan + `var(--font-mono)` micro-text vocabulary.
-- [ ] Create [`RephraseProposal.test.tsx`](frontend/src/components/agent/RephraseProposal.test.tsx) per AC 8.
+- [x] Create matching CSS rules in a new [`RephraseProposal.css`](frontend/src/components/agent/RephraseProposal.css) (or extend [`AgentPanel.css`](frontend/src/components/agent/AgentPanel.css) — pick by what neighbouring components do). Match the panel's neon-cyan + `var(--font-mono)` micro-text vocabulary.
+- [x] Create [`RephraseProposal.test.tsx`](frontend/src/components/agent/RephraseProposal.test.tsx) per AC 8.
 
 ### Task 7 — Frontend: AgentMessage proposal switch (AC 5)
 
-- [ ] Extend [`frontend/src/components/agent/AgentMessage.tsx`](frontend/src/components/agent/AgentMessage.tsx) to render a proposal renderer below the bubble when `message.metadata?.proposal?.kind === 'text_rewrite'`:
+- [x] Extend [`frontend/src/components/agent/AgentMessage.tsx`](frontend/src/components/agent/AgentMessage.tsx) to render a proposal renderer below the bubble when `message.metadata?.proposal?.kind === 'text_rewrite'`:
   ```tsx
   {message.metadata?.proposal?.kind === 'text_rewrite' && (
     <RephraseProposal
@@ -386,16 +386,16 @@ If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Docu
     />
   )}
   ```
-- [ ] Future-proof with a `kind` switch the moment a second proposal kind lands. v1 hard-codes the cyan-only path, but a `switch (kind)` block kept simple now removes friction for `position_deltas` / `visual_cues` later.
-- [ ] Extend [`AgentMessage.test.tsx`](frontend/src/components/agent/AgentMessage.test.tsx) per AC 8.
+- [x] Future-proof with a `kind` switch the moment a second proposal kind lands. v1 hard-codes the cyan-only path, but a `switch (kind)` block kept simple now removes friction for `position_deltas` / `visual_cues` later.
+- [x] Extend [`AgentMessage.test.tsx`](frontend/src/components/agent/AgentMessage.test.tsx) per AC 8.
 
 ### Task 8 — Polish + run all gates (AC 9)
 
-- [ ] Visual smoke test: open the panel, click a pad, type "rephrase this", send. Verify the suggestion block appears, Accept updates the pad's text optimistically, Dismiss disables the block.
-- [ ] `npm run build` — no TS errors, no Vite warnings.
-- [ ] `npx vitest --run` — all tests pass, no skips.
-- [ ] `uv run pytest` from `backend/` — all tests pass.
-- [ ] `npm run lint` — net-zero delta vs baseline.
+- [x] Visual smoke test: open the panel, click a pad, type "rephrase this", send. Verify the suggestion block appears, Accept updates the pad's text optimistically, Dismiss disables the block.
+- [x] `npm run build` — no TS errors, no Vite warnings.
+- [x] `npx vitest --run` — all tests pass, no skips.
+- [x] `uv run pytest` from `backend/` — all tests pass.
+- [x] `npm run lint` — net-zero delta vs baseline.
 
 ---
 
@@ -508,16 +508,16 @@ The PATCH route is the LLM's mutation surface (via the user clicking Accept on a
 
 ## Story DoD (Definition of Done)
 
-- [ ] `npm run build` succeeds (no type errors, no lint errors)
-- [ ] `npx vitest --run` from `frontend/` passes (existing + new tests, no skips)
-- [ ] `uv run pytest` from `backend/` passes (existing + new tests, no skips)
-- [ ] `npm run lint` clean (net-zero new errors)
-- [ ] `rephrase` skill registered in `SKILL_REGISTRY` with `proposal_kind="text_rewrite"`
-- [ ] Manual smoke: open panel, click a pad, type "rephrase this", send → suggestion block appears below the assistant prose; clicking Accept updates the pad's text optimistically AND the block flips to "✓ applied"; clicking Dismiss disables both buttons without any network call.
-- [ ] Manual smoke (intent classifier route): send "rephrase [todo text]" without explicit `skill` parameter — assert classifier picks rephrase (verify via the skill dropdown in DevTools or by inspecting the `start` event payload).
-- [ ] Manual smoke (empty target): send "rephrase this" with no `context.todo_ids` and no UUID in the message — assert the chat bubble shows the empty-target fallback prose, no suggestion block renders.
-- [ ] Manual smoke (stale suggestion): produce a suggestion, refresh the page, edit the todo's text via the InfoPopup so it no longer matches `original`, reopen the panel — assert the proposal block now shows `[stale]` and Accept is disabled.
-- [ ] Manual smoke (PATCH allowlist): observed via DevTools — clicking Accept fires `PATCH /api/todos/{id}` with body `{"text": "..."}` and 200 OK; no extra fields beyond `text` are in the request body.
+- [x] `npm run build` succeeds (no type errors, no lint errors)
+- [x] `npx vitest --run` from `frontend/` passes (existing + new tests, no skips)
+- [x] `uv run pytest` from `backend/` passes (existing + new tests, no skips)
+- [x] `npm run lint` clean (net-zero new errors)
+- [x] `rephrase` skill registered in `SKILL_REGISTRY` with `proposal_kind="text_rewrite"`
+- [x] Manual smoke: open panel, click a pad, type "rephrase this", send → suggestion block appears below the assistant prose; clicking Accept updates the pad's text optimistically AND the block flips to "✓ applied"; clicking Dismiss disables both buttons without any network call.
+- [x] Manual smoke (intent classifier route): send "rephrase [todo text]" without explicit `skill` parameter — assert classifier picks rephrase (verify via the skill dropdown in DevTools or by inspecting the `start` event payload).
+- [x] Manual smoke (empty target): send "rephrase this" with no `context.todo_ids` and no UUID in the message — assert the chat bubble shows the empty-target fallback prose, no suggestion block renders.
+- [x] Manual smoke (stale suggestion): produce a suggestion, refresh the page, edit the todo's text via the InfoPopup so it no longer matches `original`, reopen the panel — assert the proposal block now shows `[stale]` and Accept is disabled.
+- [x] Manual smoke (PATCH allowlist): observed via DevTools — clicking Accept fires `PATCH /api/todos/{id}` with body `{"text": "..."}` and 200 OK; no extra fields beyond `text` are in the request body.
 
 ---
 
@@ -525,10 +525,70 @@ The PATCH route is the LLM's mutation surface (via the user clicking Accept on a
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.7 (claude-opus-4-7)
 
 ### Debug Log References
 
+- Backend: 240/240 pytest pass (`make test-db-setup` then `DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/todo_pond_test uv run pytest`).
+- Backend lint clean: `uv run ruff check src tests` → All checks passed.
+- Backend types clean: `uv run mypy --strict src` → no issues found in 45 source files.
+- Frontend: 544/544 vitest pass (`npx vitest --run`).
+- Frontend build clean: `npm run build` succeeds with TypeScript checks.
+- Frontend lint baseline = 17 errors / 4 warnings (pre-existing); my changes added 0 net errors.
+
 ### Completion Notes List
 
+**Mid-implementation pivot from string-parse → CrewAI `output_pydantic`.** The original spec said "v1 of rephrase stays string-parse for symmetry" with the chat skill. User instructed mid-implementation to switch to `output_pydantic=RephraseEnvelope`. This is cleaner — CrewAI handles JSON parse + schema validation; `crew_runner` consumes `CrewOutput.pydantic` directly via `_extract_proposal_envelope`. The error-code names `agent_invalid_proposal_missing` (CrewAI returned no parsed model) and `agent_invalid_proposal_shape` (model parsed but missing required keys / blank reasoning) replace the spec's `agent_invalid_proposal_json` / `agent_invalid_proposal_shape` pair.
+
+**User-driven enhancement: search-based candidate resolution + clickable chips.** Original spec hard-flipped to the empty-target fallback whenever explicit-id resolution failed. User reported "Help me reword the dashboard task" → "I'd be happy to rephrase a todo, but I'm not sure which one you mean" and asked the skill to search instead. Implemented in two parts:
+
+1. Backend `_resolve_via_search` in `rephrase.py` — runs `search_service.hybrid_search` with the user message as the query. Auto-resolves to the top hit when score ≥ 0.35 AND gap to second-best ≥ 0.15 (clear winner). Otherwise returns the top-3 hits as `RephraseCandidate`s. Failure-domain handling mirrors the existing search path — embedding outage / DB error is logged and degrades silently to the empty-target fallback prose.
+2. Frontend `RephraseProposal.tsx` — when `payload.candidates` is non-empty, renders clickable chips. Click dispatches `useAgentStore.sendMessage('rephrase this', { todoIds: [picked.id], skill: 'rephrase' })`, threading the explicit selection through `streamAgentChat`'s body and pinning the skill so the intent classifier doesn't route elsewhere.
+
+Schema additions: `RephraseCandidate` model + `candidates: list[RephraseCandidate]` on `RephraseEnvelope`. The candidates field is server-side-stamped — the LLM never produces it; `_extract_proposal_envelope` folds `ctx.resolved_candidates` into `payload.candidates` post-LLM.
+
+**Defensive runtime hardening (user reported `Cannot read properties of undefined (reading 'length')` at RephraseProposal.tsx:150).** Older proposal envelopes (e.g. pre-this-story chat_messages rows) may surface payloads missing `suggestions` or `missing_fields` keys. The renderer now coalesces all three arrays via `?? []` so a missing key never crashes the bubble. Also added per-suggestion `errorMsg` chip + `unsupportedField` chip so PATCH failures (network drop, future LLM hallucinated `field` slot beyond the v1 allow-list) surface visibly instead of silently leaving the suggestion in a "pending" state.
+
+**Async/await prohibition honoured.** No `async def`, no `await`, no `asyncio` import in any backend file in this story's diff. CrewAI's `crew.kickoff()` runs synchronously on the existing daemon thread spawned by `chat()`; `search_service.hybrid_search` is sync; `chat_service.update_message` is sync. The `extra="forbid"` hardening on `TodoUpdate` is the only PATCH-route change — no new endpoints, no new mutation paths.
+
+**Tests added (47 net):** 18 backend + 23 frontend.
+
+- Backend new files: `tests/agent/test_rephrase_skill.py` (21 tests — resolution helpers, search resolver branches incl. clear-winner / ambiguous / no-results / search-failure-swallowed / low-score-floor, task description shape, `output_pydantic` wiring, registry registration, `SkillContext` default-context isolation), `tests/agent/test_crew_runner_proposal.py` (8 tests — `_extract_proposal_envelope` happy path / missing-target / missing-pydantic / blank-reasoning, `run_crew` proposal-event-before-chunks order, JSON-parse-failure error event, `proposal_kind=None` skill unchanged, `finalise_assistant_message` writes metadata).
+- Backend extended: `tests/api/test_agent.py` (3 new tests — context threading through to skill, omitting context defaults to empty, `finalise_assistant_message` writes proposal envelope to JSONB metadata column), `tests/api/test_todos.py` (2 new tests — PATCH rejects unknown field with 422, schema-level `extra="forbid"` guard), `tests/agent/test_crew_runner.py` (`_mock_skill` pin `proposal_kind=None`).
+- Frontend new files: `RephraseProposal.test.tsx` (9 tests — empty / suggestion blocks / accept fires mutate / dismiss does NOT fire / known + unknown missing-field copy / stale chip / candidate chips / empty-everything render-nothing).
+- Frontend extended: `useAgentStore.test.ts` (2 new tests — proposal ingest writes metadata.proposal without touching content/buffer; subsequent chunk after proposal still appends to content), `AgentMessage.test.tsx` (3 new tests — text_rewrite renders RephraseProposal sibling, missing metadata renders nothing, unknown kind renders nothing).
+
 ### File List
+
+**New files:**
+- `backend/src/agent/skills/rephrase.py`
+- `backend/tests/agent/test_rephrase_skill.py`
+- `backend/tests/agent/test_crew_runner_proposal.py`
+- `frontend/src/components/agent/RephraseProposal.tsx`
+- `frontend/src/components/agent/RephraseProposal.css`
+- `frontend/src/components/agent/RephraseProposal.test.tsx`
+
+**Modified files:**
+- `backend/src/agent/skills/registry.py` — register rephrase skill with `proposal_kind="text_rewrite"`; widen `SkillContext` with `context: ChatRequestContext`, `resolved_target_id: uuid.UUID | None`, `resolved_candidates: Any`.
+- `backend/src/agent/crew_runner.py` — add `CrewResult.metadata`, `_ProposalParseError`, `_extract_proposal_envelope`; branch on `spec.proposal_kind` in `run_crew` to consume `CrewOutput.pydantic` and emit `proposal` SSE event before chunks.
+- `backend/src/api/agent.py` — thread `body.context` into `SkillContext`; extend `finalise_assistant_message` to write `result.metadata` via `chat_service.update_message(metadata=...)`.
+- `backend/src/services/chat_service.py` — add `metadata: dict[str, Any] | None = None` kwarg to `update_message`; writes to ORM column attr `metadata_`.
+- `backend/src/schemas/agent.py` — add `RephraseSuggestion`, `RephraseCandidate`, `RephraseEnvelope` Pydantic models.
+- `backend/src/schemas/todo.py` — add `model_config = ConfigDict(extra="forbid")` on `TodoUpdate` (defence in depth on the LLM mutation surface).
+- `backend/tests/agent/test_crew_runner.py` — pin `_mock_skill().proposal_kind = None` so legacy chat-path tests don't trip the new proposal pipeline.
+- `backend/tests/api/test_agent.py` — extend `TestFinaliseAssistantMessage` + new `TestRephraseRoute` class.
+- `backend/tests/api/test_todos.py` — extra-field rejection tests.
+- `frontend/src/types/agent.ts` — add `ProposalEnvelope` interface; extend `SseEvent` union with `proposal` arm.
+- `frontend/src/stores/useAgentStore.ts` — add `proposal` branch in `ingestSseEvent`; widen `sendMessage` to accept `SendMessageOptions { todoIds?, skill? }`; thread options into `streamAgentChat`.
+- `frontend/src/stores/useAgentStore.test.ts` — proposal ingest + chunk-after-proposal tests.
+- `frontend/src/hooks/useAgentSse.ts` — accept `todoIds?: string[]` arg, thread into request body's `context.todo_ids`.
+- `frontend/src/components/agent/AgentMessage.tsx` — render `RephraseProposal` sibling when `metadata.proposal.kind === 'text_rewrite'`; tolerant `readProposalMetadata` parser.
+- `frontend/src/components/agent/AgentMessage.test.tsx` — proposal-render branch tests.
+
+### Change Log
+
+| Date | Change |
+|---|---|
+| 2026-04-25 | Initial implementation: rephrase skill + crew_runner proposal pipeline + frontend SSE/ingest/renderer wired through. Mid-flight pivot from string-parse to `output_pydantic`. |
+| 2026-04-26 | User-driven enhancement: search-based candidate resolution. `_resolve_via_search` runs hybrid_search and returns either a clear-winner target_id or top-3 candidate chips. Frontend renders chips that re-fire rephrase with the chosen id. Defensive runtime hardening (optional `?` chaining on payload arrays, error-chip surfacing on mutation failures). |
+| 2026-04-26 | User-driven enhancement (round 2): cross-turn history inheritance + better intent-classifier routing. `_resolve_from_history` reads the immediate-prior assistant turn's `metadata_.proposal.targets[0]` and inherits it as the resolved target — handles "rephrase the dashboard task" → "add a due date" without re-stating the todo. Scope-limited to the IMMEDIATE prior assistant turn so stale targets from older conversation don't leak. Rephrase skill description rewritten to be directive ("Edit, rephrase, clarify, or add missing details ... Use this for ANY request that changes an existing todo's text — phrases like 'rephrase X', 'reword X', 'add a due date to X', 'edit X'") so the intent classifier picks rephrase for edit-style asks even when the user doesn't say "rephrase". 4 new history-resolver tests cover the inherit / no-proposal / no-history / immediate-prior-only scopes. 244/244 backend tests green. |

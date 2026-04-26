@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Html } from '@react-three/drei';
 import type { Todo } from '../../types';
+import { NeonDateTimePicker } from './NeonDateTimePicker';
 import { NeonScrollbar } from './NeonScrollbar';
 import { NeonTooltip } from './NeonTooltip';
 import { PopupColorSwatch } from './PopupColorSwatch';
 import { usePondStore } from '../../stores/usePondStore';
 import { useWorldStore } from '../../stores/useWorldStore';
-import { formatTimestamp, formatRelative } from '../../utils/formatTodoMeta';
+import { formatTimestamp, formatRelative, formatDueDate } from '../../utils/formatTodoMeta';
+import { useUpdateTodo } from '../../api/todoApi';
 import './InfoPopup.css';
 
 const INFO_PANEL_OFFSET_X = 280;
@@ -101,6 +103,12 @@ export function InfoPopup({
   // Swatch sub-panel state (merged from ActionPopup, focused-only).
   const [swatchOpen, setSwatchOpen] = useState(false);
   const [previewColor, setPreviewColor] = useState<string | null>(null);
+  // Story 6.3: due-date picker open/close (focused-only). The picker
+  // dismisses itself on Escape / outside-click via its own effect; we
+  // also close it after a successful save / clear via the mutation's
+  // onSuccess callback.
+  const [duePickerOpen, setDuePickerOpen] = useState(false);
+  const updateTodo = useUpdateTodo();
   // Notify parent on preview change so pad can lerp the preview color.
   useEffect(() => {
     onPreviewColor?.(previewColor);
@@ -568,6 +576,51 @@ export function InfoPopup({
               <MetaRow label="Updated">
                 {formatTimestamp(todo.updatedAt)}{' '}
                 <span style={{ opacity: 0.7 }}>{formatRelative(todo.updatedAt)}</span>
+              </MetaRow>
+            )}
+            {(todo.dueDate !== null || focused) && (
+              <MetaRow label="Due">
+                <span className="info-popup__due-row">
+                  <button
+                    type="button"
+                    className={[
+                      'info-popup__due-button',
+                      todo.dueDate === null
+                        ? 'info-popup__due-button--unset'
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => {
+                      if (focused) setDuePickerOpen((open) => !open);
+                    }}
+                    disabled={!focused}
+                  >
+                    {todo.dueDate !== null
+                      ? formatDueDate(todo.dueDate)
+                      : '+ set due date'}
+                  </button>
+                  {duePickerOpen && (
+                    <span className="info-popup__due-picker-anchor">
+                      <NeonDateTimePicker
+                        value={todo.dueDate}
+                        onSave={(iso) => {
+                          updateTodo.mutate(
+                            { id: todo.id, dueDate: iso },
+                            { onSuccess: () => setDuePickerOpen(false) },
+                          );
+                        }}
+                        onClear={() => {
+                          updateTodo.mutate(
+                            { id: todo.id, dueDate: null },
+                            { onSuccess: () => setDuePickerOpen(false) },
+                          );
+                        }}
+                        onCancel={() => setDuePickerOpen(false)}
+                      />
+                    </span>
+                  )}
+                </span>
               </MetaRow>
             )}
             <MetaRow label="Status">{statusBadges}</MetaRow>

@@ -16,6 +16,7 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
     positionY: 2,
     rotationY: 0.5,
     driftSeed: 0.9,
+    dueDate: null,
     embeddingStatus: 'complete',
     archived: false,
     archivedAt: null,

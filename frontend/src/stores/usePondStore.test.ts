@@ -12,6 +12,7 @@ function makeTodo(id: string, overrides: Partial<Todo> = {}): Todo {
     positionY: 0,
     rotationY: 0,
     driftSeed: 0,
+    dueDate: null,
     embeddingStatus: 'pending',
     archived: false,
     archivedAt: null,

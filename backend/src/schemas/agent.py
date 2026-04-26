@@ -70,6 +70,69 @@ class ChatRequestContext(BaseModel):
     todo_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
 
 
+class RephraseSuggestion(BaseModel):
+    """Story 6.3 — one per-field rewrite suggestion in a rephrase
+    envelope. v1 only emits suggestions for `field: "text"`, but the
+    schema is widened so future fields (notes, etc.) require no
+    contract change. The corresponding frontend renderer is
+    `RephraseProposal.tsx`.
+
+    `extra="forbid"` is defence in depth: the LLM produces this via
+    CrewAI's `output_pydantic` path, and rejecting unknown keys means
+    a hallucinated `"id"` or `"created_at"` field can't slip into the
+    proposal envelope and surprise the renderer.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    original: str
+    revised: str
+    reason: str
+
+
+class RephraseCandidate(BaseModel):
+    """Story 6.3 — disambiguation candidate. When the rephrase skill
+    can't pin down a single target todo from the user message, the
+    server-side resolver runs a hybrid search and surfaces the top
+    matches as `RephraseCandidate`s so the user can click through to
+    pick one. The frontend renderer fires a fresh `rephrase` chat with
+    `context.todo_ids: [chosen.id]` on click.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: uuid.UUID
+    text: str
+
+
+class RephraseEnvelope(BaseModel):
+    """Story 6.3 — structured output contract for the `rephrase` skill.
+
+    `reasoning` becomes the chat-bubble prose (the assistant's plain-text
+    response). `suggestions` and `missing_fields` are rendered as a
+    proposal block below the bubble by `RephraseProposal.tsx`. The
+    matching frontend type is in `frontend/src/types/agent.ts`'s
+    `proposal` SSE arm; keep both in sync.
+
+    Used as `Task.output_pydantic` so CrewAI handles JSON parsing +
+    schema validation; `crew_runner` consumes `CrewOutput.pydantic`
+    directly rather than re-parsing `str(result)`.
+
+    `candidates` is populated by the resolver (NOT the LLM) when the
+    user's request is ambiguous — the renderer turns each entry into a
+    clickable chip that re-dispatches the rephrase with the chosen
+    todo id. Empty list on the unambiguous-target path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reasoning: str
+    suggestions: list[RephraseSuggestion] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    candidates: list[RephraseCandidate] = Field(default_factory=list)
+
+
 class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     # DB column is `String(64)` — capping here means an over-long skill

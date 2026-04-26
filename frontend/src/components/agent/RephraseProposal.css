@@ -1,0 +1,217 @@
+/* Story 6.3: rephrase proposal renderer styles. Sits BELOW the
+ * assistant bubble (sibling, not descendant). Vocabulary mirrors the
+ * panel's neon-cyan + var(--font-mono) micro-text style. */
+
+.rephrase-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 4px 18px; /* aligns with bubble's left edge + tail */
+  max-width: 100%;
+}
+
+.rephrase-proposal__header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  opacity: 0.85;
+}
+
+.rephrase-proposal__suggestion {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--neon-cyan);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.18);
+  transition:
+    opacity 0.18s ease,
+    background 0.18s ease;
+}
+
+.rephrase-proposal__suggestion--applied {
+  background: rgba(57, 255, 20, 0.08); /* faint green tint */
+  border-color: var(--neon-green, #39ff14);
+}
+
+.rephrase-proposal__suggestion--dismissed {
+  opacity: 0.5;
+}
+
+.rephrase-proposal__suggestion--stale {
+  border-style: dashed;
+  opacity: 0.7;
+}
+
+.rephrase-proposal__diff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.rephrase-proposal__original {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.rephrase-proposal__arrow {
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.rephrase-proposal__revised {
+  font-weight: 500;
+}
+
+.rephrase-proposal__reason {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
+
+.rephrase-proposal__stale-chip {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--neon-pink);
+  text-transform: uppercase;
+}
+
+.rephrase-proposal__applied-chip {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--neon-green, #39ff14);
+}
+
+.rephrase-proposal__error {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--neon-pink);
+  padding: 4px 6px;
+  border-left: 2px solid var(--neon-pink);
+  background: rgba(255, 16, 240, 0.06);
+}
+
+.rephrase-proposal__candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rephrase-proposal__candidate-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.rephrase-proposal__candidate-chip {
+  border: 1px solid var(--neon-cyan);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--neon-cyan);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  /* Allow chips to wrap their text and break long todos so they
+     don't push the proposal block past the panel's right edge. */
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.3;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
+}
+
+.rephrase-proposal__candidate-chip:hover {
+  background: rgba(0, 255, 255, 0.12);
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.55);
+  color: #fff;
+}
+
+.rephrase-proposal__actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+}
+
+.rephrase-proposal__btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  background: transparent;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
+}
+
+.rephrase-proposal__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.rephrase-proposal__btn--accept {
+  border: 1px solid var(--neon-green, #39ff14);
+  color: var(--neon-green, #39ff14);
+}
+
+.rephrase-proposal__btn--accept:not(:disabled):hover {
+  background: rgba(57, 255, 20, 0.12);
+  box-shadow: 0 0 6px rgba(57, 255, 20, 0.6);
+}
+
+.rephrase-proposal__btn--dismiss {
+  border: 1px solid var(--neon-pink);
+  color: var(--neon-pink);
+}
+
+.rephrase-proposal__btn--dismiss:not(:disabled):hover {
+  background: rgba(255, 16, 240, 0.12);
+  box-shadow: 0 0 6px rgba(255, 16, 240, 0.6);
+}
+
+.rephrase-proposal__missing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rephrase-proposal__missing-row {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--neon-cyan);
+  opacity: 0.85;
+  padding: 4px 8px;
+  border-left: 2px solid var(--neon-cyan);
+  background: rgba(0, 255, 255, 0.04);
+}

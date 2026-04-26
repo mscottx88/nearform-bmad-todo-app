@@ -65,6 +65,15 @@ class Todo(Base):
         nullable=False,
         server_default=sa.text("random() * 2 * pi()"),
     )
+    # Story 6.3 user-driven enhancement: optional deadline (date +
+    # time, timezone-aware). Nullable because the rephrase skill only
+    # populates it when the user explicitly supplies a date and
+    # because most todos don't have a deadline. The InfoPopup's
+    # NeonDateTimePicker lets the user pick a specific hour/minute.
+    due_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     embedding = mapped_column(Vector(768), nullable=True)
     embedding_status: Mapped[str] = mapped_column(
         String(20),

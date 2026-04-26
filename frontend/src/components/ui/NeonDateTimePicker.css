@@ -1,0 +1,264 @@
+/* Story 6.3: neon-themed date+time picker. Vocabulary mirrors the
+ * agent panel (`var(--neon-cyan)`, `var(--font-mono)`, glow on
+ * hover/focus, dim grid lines on near-black background). */
+
+/* Modal backdrop — covers the whole viewport, dims the world below,
+ * intercepts clicks so anything outside the picker dismisses via
+ * onCancel. The `z-index` is high enough to sit above the agent
+ * panel + InfoPopup `<Html>` overlay. */
+.neon-dtp-backdrop,
+.neon-dtp-backdrop *,
+.neon-dtp,
+.neon-dtp *,
+.neon-dtp *::before,
+.neon-dtp *::after {
+  /* Defeat the user-agent stylesheet's `cursor: pointer/text/...`
+     on every interactive descendant (nav buttons, day cells, the
+     `<input type="number">` time fields). The project's custom
+     firefly canvas paints its own cursor glyph at z-index
+     2147483647; reintroducing the OS cursor inside the modal
+     doubles up. `!important` is necessary because some browsers
+     (Chromium notably) ship `cursor: text` on focused number
+     inputs with default specificity that beats a plain class
+     selector. */
+  cursor: none !important;
+}
+
+.neon-dtp-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5000;
+}
+
+.neon-dtp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+  padding: 10px 12px 12px;
+  background: rgba(0, 0, 0, 0.92);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 8px;
+  box-shadow: 0 0 12px rgba(0, 255, 255, 0.35);
+  font-family: var(--font-mono);
+  color: var(--neon-cyan);
+  z-index: 1000;
+  user-select: none;
+}
+
+/* ── Month header ── */
+
+.neon-dtp__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.neon-dtp__nav-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--neon-cyan);
+  background: transparent;
+  color: var(--neon-cyan);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
+}
+
+.neon-dtp__nav-btn:hover {
+  background: rgba(0, 255, 255, 0.12);
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.6);
+  color: #fff;
+}
+
+.neon-dtp__month-label {
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 0 6px rgba(0, 255, 255, 0.5);
+}
+
+/* ── Day labels ── */
+
+.neon-dtp__day-labels {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+.neon-dtp__day-label {
+  padding: 2px 0;
+}
+
+/* ── Day grid ── */
+
+.neon-dtp__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.neon-dtp__cell {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease,
+    color 0.1s ease,
+    box-shadow 0.1s ease;
+}
+
+.neon-dtp__cell:hover {
+  background: rgba(0, 255, 255, 0.12);
+  border-color: var(--neon-cyan);
+  color: #fff;
+}
+
+.neon-dtp__cell--out {
+  opacity: 0.3;
+}
+
+.neon-dtp__cell--today {
+  border-color: rgba(0, 255, 255, 0.6);
+  border-style: dashed;
+}
+
+.neon-dtp__cell--selected {
+  background: rgba(0, 255, 255, 0.25);
+  border-color: var(--neon-cyan);
+  color: #fff;
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.7);
+}
+
+/* ── Time row ── */
+
+.neon-dtp__time-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(0, 255, 255, 0.18);
+}
+
+.neon-dtp__time-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.neon-dtp__time-label {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.neon-dtp__time-input {
+  width: 44px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--neon-cyan);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  text-align: center;
+  border-radius: 4px;
+  -moz-appearance: textfield;
+  outline: none;
+  transition: box-shadow 0.12s ease;
+  /* Hide the blinking text caret inside number inputs — the user
+     edits via increment/decrement keystrokes, not free typing, so
+     the caret is just visual noise. */
+  caret-color: transparent;
+}
+
+.neon-dtp__time-input::-webkit-outer-spin-button,
+.neon-dtp__time-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.neon-dtp__time-input:focus {
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.7);
+}
+
+.neon-dtp__time-sep {
+  font-size: 16px;
+  color: var(--neon-cyan);
+  margin-top: 12px; /* aligns with input baseline */
+}
+
+/* ── Action row ── */
+
+.neon-dtp__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 255, 255, 0.18);
+}
+
+.neon-dtp__btn {
+  flex: 1;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    background 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.12s ease;
+}
+
+.neon-dtp__btn--clear {
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+}
+
+.neon-dtp__btn--clear:hover {
+  background: rgba(255, 16, 240, 0.14);
+  box-shadow: 0 0 6px rgba(255, 16, 240, 0.65);
+  color: #fff;
+}
+
+.neon-dtp__btn--save:hover {
+  background: rgba(0, 255, 255, 0.14);
+  box-shadow: 0 0 6px rgba(0, 255, 255, 0.65);
+  color: #fff;
+}

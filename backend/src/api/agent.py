@@ -123,12 +123,18 @@ def finalise_assistant_message(
 
         if result.success:
             with SessionLocal() as session:
+                # Story 6.3: proposal-producing skills populate
+                # `result.metadata` with `{"proposal": <envelope>}`;
+                # plain chat skills leave it None. The frontend
+                # rehydrates `metadata.proposal` from this row when
+                # the panel re-opens.
                 chat_service.update_message(
                     session,
                     assistant_msg_id,
                     content=result.prose,
                     status="complete",
                     skill=resolved_skill,
+                    metadata=result.metadata,
                 )
             return
 
@@ -298,6 +304,9 @@ def chat(
         llm=get_llm_for_agent(),
         event_queue=q,
         history=history,
+        # Story 6.3 AC 2: skills like `rephrase` resolve their target
+        # todo from `context.todo_ids[0]`. The chat skill ignores it.
+        context=body.context,
     )
 
     def _run_and_finalise() -> None:

@@ -37,3 +37,34 @@ export function formatRelative(iso: string): string {
   if (diffWeeks < 8) return `(${diffWeeks} weeks ago)`;
   return `(on ${formatTimestamp(iso).slice(0, 10)})`;
 }
+
+/**
+ * Story 6.3: format a due deadline (ISO datetime string with
+ * timezone, e.g. "2026-05-01T17:00:00+00:00") for the InfoPopup.
+ * Renders "YYYY-MM-DD HH:mm" plus a relative day-bucket hint:
+ * "today", "tomorrow", "in 4d", "overdue 2d", etc. Day-bucket
+ * comparison snaps both timestamps to local midnight so a 1am visit
+ * doesn't show "yesterday" for a deadline later today.
+ */
+export function formatDueDate(iso: string): string {
+  if (!iso) return '—';
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return '—';
+
+  const now = new Date();
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const dayMs = 86_400_000;
+  const diffDays = Math.round((dueMidnight.getTime() - todayMidnight.getTime()) / dayMs);
+
+  let hint: string;
+  if (diffDays === 0) hint = '(today)';
+  else if (diffDays === 1) hint = '(tomorrow)';
+  else if (diffDays === -1) hint = '(yesterday — overdue 1d)';
+  else if (diffDays > 1) hint = `(in ${diffDays}d)`;
+  else hint = `(overdue ${Math.abs(diffDays)}d)`;
+
+  // Reuse formatTimestamp for the "YYYY-MM-DD HH:mm" rendering so
+  // both Created/Updated and Due rows look consistent.
+  return `${formatTimestamp(iso)} ${hint}`;
+}

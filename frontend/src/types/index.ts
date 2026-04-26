@@ -7,6 +7,10 @@ export interface Todo {
   positionY: number | null;
   rotationY: number;
   driftSeed: number;
+  /** Story 6.3: optional ISO date string (YYYY-MM-DD). The rephrase
+   *  skill's `due_date` field suggestions write this via the existing
+   *  PATCH /api/todos/{id} route. Null when no deadline is set. */
+  dueDate: string | null;
   embeddingStatus: 'pending' | 'complete' | 'failed';
   archived: boolean;
   archivedAt: string | null;

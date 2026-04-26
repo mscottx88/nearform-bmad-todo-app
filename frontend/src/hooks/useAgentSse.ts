@@ -21,6 +21,13 @@ interface StreamArgs {
   sessionId: string;
   content: string;
   skill: string | null;
+  /**
+   * Story 6.3: explicit todo selection (e.g. from a candidate-chip
+   * click in RephraseProposal). Threaded into the request body's
+   * `context.todo_ids` so the rephrase skill resolves the target
+   * directly, skipping the search-disambiguation path.
+   */
+  todoIds?: string[];
   onEvent: (event: SseEvent) => void;
   /**
    * Called after the network stream ends cleanly OR after an error.
@@ -51,6 +58,7 @@ export async function streamAgentChat({
   sessionId,
   content,
   skill,
+  todoIds,
   onEvent,
   onClose,
 }: StreamArgs): Promise<AgentChatStreamHandle> {
@@ -69,7 +77,11 @@ export async function streamAgentChat({
     response = await fetch(`/api/agent/sessions/${sessionId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, skill, context: { todo_ids: [] } }),
+      body: JSON.stringify({
+        content,
+        skill,
+        context: { todo_ids: todoIds ?? [] },
+      }),
       signal: controller.signal,
     });
   } catch (err) {

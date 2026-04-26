@@ -473,3 +473,149 @@ class TestFinaliseAssistantMessage:
         rows = chat_service.list_messages(db_session, session.id)
         assert rows[0].status == "cancelled"
         assert rows[0].content == "Cancelled."
+
+    # Story 6.3: success path with metadata writes the envelope to the
+    # JSONB metadata column so the frontend can rehydrate the proposal
+    # block on panel reopen.
+    def test_success_with_metadata_writes_proposal_envelope(
+        self, db_session: Session
+    ) -> None:
+        from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+        from src.api.agent import finalise_assistant_message  # noqa: PLC0415
+
+        session = chat_service.create_session(db_session)
+        msg = chat_service.create_message(
+            db_session,
+            session.id,
+            role="assistant",
+            content="",
+            status="pending",
+        )
+
+        envelope = {
+            "proposal": {
+                "kind": "text_rewrite",
+                "payload": {
+                    "suggestions": [
+                        {
+                            "field": "text",
+                            "original": "old",
+                            "revised": "new",
+                            "reason": "clearer",
+                        }
+                    ],
+                    "missing_fields": ["due_date"],
+                },
+                "targets": [str(uuid.uuid4())],
+                "reasoning": "Made it crisper.",
+            }
+        }
+        finalise_assistant_message(
+            msg.id,
+            "rephrase",
+            CrewResult(
+                success=True,
+                prose="Made it crisper.",
+                error=None,
+                metadata=envelope,
+            ),
+        )
+
+        rows = chat_service.list_messages(db_session, session.id)
+        assert rows[0].content == "Made it crisper."
+        assert rows[0].status == "complete"
+        assert rows[0].skill == "rephrase"
+        # Pydantic exposes the JSONB column under `metadata_` (the
+        # trailing underscore avoids the Base.metadata clash).
+        assert rows[0].metadata_ == envelope
+
+
+class TestRephraseRoute:
+    """Story 6.3 E2E coverage of the /chat route with the rephrase skill."""
+
+    def test_chat_threads_context_through_to_skill(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """`body.context.todo_ids` must arrive in `SkillContext.context`
+        so the rephrase skill can resolve `target_id` from it.
+        """
+        session = chat_service.create_session(db_session)
+        target_id = uuid.uuid4()
+
+        captured: dict[str, Any] = {}
+
+        def _capture_run(
+            ctx: Any, _skill: str, _msg_id: Any, _cancel_event: Any = None
+        ) -> Any:
+            from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+
+            captured["context"] = ctx.context
+            return CrewResult(success=True, prose="ok", error=None)
+
+        def _fake_stream(_q: Any) -> Iterator[str]:
+            yield 'data: {"type":"done"}\n\n'
+
+        class _ImmediateThread:
+            def __init__(self, target: Any, daemon: bool = False) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        with (
+            patch("src.api.agent.threading.Thread", _ImmediateThread),
+            patch("src.api.agent.get_llm_for_agent", return_value=MagicMock()),
+            patch("src.api.agent.run_crew", side_effect=_capture_run),
+            patch("src.api.agent.stream_sse", side_effect=_fake_stream),
+        ):
+            resp = client.post(
+                f"/api/agent/sessions/{session.id}/chat",
+                json={
+                    "content": "rephrase this",
+                    "skill": "rephrase",
+                    "context": {"todo_ids": [str(target_id)]},
+                },
+            )
+        assert resp.status_code == 200
+        assert captured["context"].todo_ids == [target_id]
+
+    def test_chat_omitting_context_uses_empty_default(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        """Pre-existing call sites (no `context`) keep working — the
+        body schema fills in an empty ChatRequestContext."""
+        session = chat_service.create_session(db_session)
+
+        captured: dict[str, Any] = {}
+
+        def _capture_run(
+            ctx: Any, _skill: str, _msg_id: Any, _cancel_event: Any = None
+        ) -> Any:
+            from src.agent.crew_runner import CrewResult  # noqa: PLC0415
+
+            captured["context"] = ctx.context
+            return CrewResult(success=True, prose="ok", error=None)
+
+        def _fake_stream(_q: Any) -> Iterator[str]:
+            yield 'data: {"type":"done"}\n\n'
+
+        class _ImmediateThread:
+            def __init__(self, target: Any, daemon: bool = False) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                self._target()
+
+        with (
+            patch("src.api.agent.threading.Thread", _ImmediateThread),
+            patch("src.api.agent._classify_intent", return_value="chat"),
+            patch("src.api.agent.get_llm_for_agent", return_value=MagicMock()),
+            patch("src.api.agent.run_crew", side_effect=_capture_run),
+            patch("src.api.agent.stream_sse", side_effect=_fake_stream),
+        ):
+            resp = client.post(
+                f"/api/agent/sessions/{session.id}/chat",
+                json={"content": "hi"},
+            )
+        assert resp.status_code == 200
+        assert captured["context"].todo_ids == []

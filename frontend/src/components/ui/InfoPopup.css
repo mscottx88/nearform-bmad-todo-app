@@ -161,6 +161,55 @@
   align-items: center;
 }
 
+/* Story 6.3: clickable due-date row that opens the
+ * NeonDateTimePicker. Wrapper is `position: relative` so the
+ * picker anchors below it via `position: absolute`. */
+.info-popup__due-row {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.info-popup__due-button {
+  background: transparent;
+  border: 1px dashed transparent;
+  color: var(--neon-cyan);
+  font: inherit;
+  /* Custom firefly cursor stays in charge — don't reintroduce the
+     OS pointer cursor on this clickable affordance. */
+  cursor: none;
+  padding: 1px 6px;
+  border-radius: 3px;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.info-popup__due-button:hover:not(:disabled) {
+  background: rgba(0, 255, 255, 0.1);
+  border-color: var(--neon-cyan);
+  color: #fff;
+}
+
+.info-popup__due-button:disabled {
+  cursor: none;
+  opacity: 1;
+  border-color: transparent;
+}
+
+.info-popup__due-button--unset {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* The picker now renders modally via a portal at document.body, so
+ * we don't anchor to the row any more — this wrapper is only here so
+ * the JSX shape stays stable when the picker is mounted/unmounted. */
+.info-popup__due-picker-anchor {
+  display: contents;
+}
+
 .info-popup__badge {
   display: inline-block;
   padding: 1px 6px;

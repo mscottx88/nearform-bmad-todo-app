@@ -37,6 +37,10 @@ class GetTodoTool(PooledTool):
                     "color": todo.color,
                     "x": todo.position_x,
                     "z": todo.position_y,
+                    # Story 6.3: surface the due deadline (datetime
+                    # + tz) so the rephrase skill can tell whether
+                    # the user already has one set.
+                    "due_date": (todo.due_date.isoformat() if todo.due_date else None),
                     "created": todo.created_at.isoformat(),
                 }
             )

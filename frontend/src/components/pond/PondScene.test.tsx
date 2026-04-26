@@ -73,6 +73,7 @@ function makeTodo(id: string): Todo {
     positionY: 0,
     rotationY: 0,
     driftSeed: 0,
+    dueDate: null,
     embeddingStatus: 'pending',
     archived: false,
     archivedAt: null,

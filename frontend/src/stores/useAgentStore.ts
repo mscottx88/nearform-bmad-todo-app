@@ -46,6 +46,18 @@ export type OracleAgentState =
   | 'success'
   | 'error';
 
+/**
+ * Story 6.3 user-driven enhancement: per-call options for
+ * `sendMessage`. Lets a candidate-chip click in `RephraseProposal`
+ * dispatch a fresh chat turn with `context.todo_ids` populated AND
+ * the skill pinned to `rephrase` so the intent classifier doesn't
+ * route elsewhere on the second turn.
+ */
+export interface SendMessageOptions {
+  todoIds?: string[];
+  skill?: string;
+}
+
 export interface AgentState {
   panelOpen: boolean;
   activeSessionId: string | null;
@@ -78,7 +90,10 @@ export interface AgentState {
   deleteSession: (id: string) => Promise<void>;
   loadActiveMessages: () => Promise<void>;
 
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    options?: SendMessageOptions,
+  ) => Promise<void>;
   ingestSseEvent: (event: SseEvent) => void;
   cancelStreaming: () => Promise<void>;
 
@@ -273,7 +288,7 @@ export const useAgentStore = create<AgentState>()(
         }
       },
 
-      sendMessage: async (content) => {
+      sendMessage: async (content, options) => {
         const trimmed = content.trim();
         if (!trimmed) return;
         let sessionId = get().activeSessionId;
@@ -327,7 +342,8 @@ export const useAgentStore = create<AgentState>()(
           activeStreamHandle = await streamAgentChat({
             sessionId,
             content: trimmed,
-            skill: null,
+            skill: options?.skill ?? null,
+            todoIds: options?.todoIds,
             onEvent: (event) => {
               // P3 + P2 token gate: drop any event whose stream has
               // been superseded (newer send, cancel, or switch).
@@ -398,6 +414,37 @@ export const useAgentStore = create<AgentState>()(
       },
 
       ingestSseEvent: (event) => {
+        if (event.type === 'proposal') {
+          // Story 6.3: skills with a non-null `proposal_kind` emit this
+          // event AFTER `start` but BEFORE the first `chunk`, so
+          // `streamingMessageId` is already bound. Write the envelope
+          // onto the streaming bubble's `metadata.proposal`; do NOT
+          // touch `content` or `streamingBuffer` — the chat bubble's
+          // prose is still streamed via subsequent `chunk` events.
+          set((s) => {
+            const id = s.streamingMessageId;
+            if (id === null) return {};
+            return {
+              messages: s.messages.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      metadata: {
+                        ...m.metadata,
+                        proposal: {
+                          kind: event.kind,
+                          payload: event.payload,
+                          targets: event.targets,
+                          reasoning: event.reasoning,
+                        },
+                      },
+                    }
+                  : m,
+              ),
+            };
+          });
+          return;
+        }
         if (event.type === 'start') {
           // Replace the optimistic assistant id with the canonical
           // server-issued id so subsequent `chunk` / `done` events

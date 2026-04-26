@@ -18,6 +18,7 @@ function makeTodo(overrides: Partial<Todo> & Pick<Todo, 'id'>): Todo {
     positionY: overrides.positionY ?? null,
     rotationY: overrides.rotationY ?? 0,
     driftSeed: overrides.driftSeed ?? 0,
+    dueDate: overrides.dueDate ?? null,
     embeddingStatus: overrides.embeddingStatus ?? 'complete',
     archived: overrides.archived ?? false,
     archivedAt: overrides.archivedAt ?? null,
