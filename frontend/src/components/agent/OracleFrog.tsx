@@ -1,57 +1,57 @@
 /**
  * Story 6.7: the Oracle Frog mesh.
  *
- * Procedural geometry — no GLB/GLTF asset. Body is assembled from
- * primitive geometries grouped under a single <group> so the whole
- * frog can sway / lean / hop together. Outline is a single closed
- * Catmull-Rom curve wrapped in a TubeGeometry so it reads as a
- * smooth flowing neon contour rather than the triangulated edges of
- * the body geometry. Eyes are small <sphereGeometry> instances with
- * a basic neon-green material.
+ * **Visual direction (per user reference images, 2026-04-25):**
+ * neon-wireframe holographic frog. Reference shapes have:
+ *   - a wide, low-profile body (frog sitting on its haunches);
+ *   - large bulging eye spheres on top of the head with dark pupils;
+ *   - splayed back legs in a folded "V" pose (knees out to sides);
+ *   - short front legs propping the front of the body up;
+ *   - all geometry rendered as wireframe with neon stroke + a faint
+ *     glass-like fill so it reads as "lit volumetric wireframe"
+ *     rather than a solid mesh.
+ *
+ * Each body part is rendered TWICE: once as a translucent glass
+ * fill (MeshPhysicalMaterial with low opacity + emissive glow), and
+ * once as a wireframe (MeshBasicMaterial wireframe=true) for the
+ * bright neon outline. This double-render is cheap — these are
+ * small geometries with low segment counts.
  *
  * Animation:
  *   - One useFrame loop reads `agentState` from useAgentStore and
  *     drives per-state body / eye / emissive math.
- *   - prefers-reduced-motion is read once on mount into a useRef and
- *     cached; when set, body / eye motion is skipped but emissive
- *     intensity still ramps so state changes remain visible.
- *   - The throat-sac scale-pulse on each `chunk` event is queued via
- *     a subscription to streamingBuffer length so we get one pulse
- *     per chunk arrival (the buffer length only ever grows; new
- *     chunks bump it).
+ *   - prefers-reduced-motion is read once on mount into a useRef
+ *     and cached; when set, body / eye motion is skipped but
+ *     emissive intensity still ramps so state changes remain
+ *     visible.
+ *   - Throat-sac scale-pulses on each `chunk` event are driven via
+ *     a subscription to `streamingBuffer` length — each chunk grows
+ *     the buffer and we push a pulse onto a small queue.
  */
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useAgentStore, type OracleAgentState } from '../../stores/useAgentStore';
-import {
-  createFrogOutlineGeometry,
-  FROG_EMISSIVE_INTENSITY,
-} from './oracleFrogGeometry';
+import { FROG_EMISSIVE_INTENSITY } from './oracleFrogGeometry';
 
 const NEON_CYAN = '#00eeff';
 const NEON_GREEN = '#39ff14';
-// AC 4 'error' branch: emissive shifts toward red-orange for ~1500ms
-// then reverts to cyan. Held as a literal because Three.js material
-// constructors don't read CSS variables.
+const NEON_DARK = '#001818';
 const NEON_ERROR = '#ff6600';
 
 const SUCCESS_HOP_HEIGHT = 0.15;
 const SUCCESS_HOP_DURATION_S = 0.5;
 const ERROR_DURATION_S = 0.6;
 const ERROR_COLOUR_REVERT_S = 1.5;
-// Each chunk pushes one entry onto the throat-pulse queue; entries
-// expire after CHUNK_PULSE_DURATION_S so the throat reads as "still
-// puffing the last word" between chunks.
 const CHUNK_PULSE_DURATION_S = 0.6;
 
 interface Props {
   /**
    * Emissive intensity scale — applied as a multiplier over the
-   * AC 4 per-state values. Defaults to 1.0 (full intensity). The
-   * aquarium-window <View> sometimes runs without postprocessing,
-   * so callers can boost the emissive there to compensate.
+   * AC 4 per-state values. Defaults to 1.0. The aquarium-window
+   * <View> sometimes runs without postprocessing, so callers can
+   * boost the emissive there to compensate.
    */
   emissiveScale?: number;
 }
@@ -68,26 +68,45 @@ interface ChunkPulse {
   startedAt: number;
 }
 
+/**
+ * Reusable shared material builder for the body parts. Each part
+ * renders one of these as the "glass fill" plus a wireframe overlay
+ * with `<meshBasicMaterial wireframe />`.
+ */
+const GLASS_PROPS = {
+  transmission: 0.4,
+  opacity: 0.18,
+  transparent: true,
+  roughness: 0.2,
+  metalness: 0,
+  ior: 1.4,
+};
+
 export function OracleFrog({ emissiveScale = 1.0 }: Props) {
-  // Whole-frog group; transforms drive sway / lean / hop.
   const groupRef = useRef<THREE.Group>(null);
-  // Body mesh — emissive material lives here so per-state intensity
-  // ramps mutate one place.
-  const bodyMaterialRef = useRef<THREE.MeshPhysicalMaterial>(null);
+
+  // Materials we mutate per-state. Refs to the glass materials of
+  // the body + head — emissive intensity ramps mutate these. The
+  // wireframe overlays don't need to mutate since their colour is
+  // already part of the "always-on" neon line.
+  const bodyGlassRef = useRef<THREE.MeshPhysicalMaterial>(null);
+  const headGlassRef = useRef<THREE.MeshPhysicalMaterial>(null);
+  const bodyWireRef = useRef<THREE.MeshBasicMaterial>(null);
+  const headWireRef = useRef<THREE.MeshBasicMaterial>(null);
+
   // Eye + throat refs — animated independently.
-  const leftEyeRef = useRef<THREE.Mesh>(null);
-  const rightEyeRef = useRef<THREE.Mesh>(null);
+  const leftEyeRef = useRef<THREE.Group>(null);
+  const rightEyeRef = useRef<THREE.Group>(null);
   const throatRef = useRef<THREE.Mesh>(null);
+  const throatWireRef = useRef<THREE.Mesh>(null);
 
-  // Per-mount random phase so multiple frogs (e.g. main view + the
-  // aquarium-window duplicate) don't blink in lockstep.
-  const seedRef = useRef<number>(Math.random() * Math.PI * 2);
-
-  // Per-mount blink schedule: next blink time + duration.
+  // Lazy useState initialiser keeps the impure Math.random() call
+  // out of the render body (react-hooks/components-and-hooks-must-be-pure).
+  // Same pattern as Firefly.tsx.
+  const [seed] = useState(() => Math.random() * Math.PI * 2);
   const nextBlinkAtRef = useRef<number>(0);
   const blinkUntilRef = useRef<number>(0);
 
-  // Reduce-motion preference — read ONCE on mount per Dev Notes.
   const reduceMotionRef = useRef<boolean>(false);
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -96,15 +115,10 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
     ).matches;
   }, []);
 
-  // One-shot animation tracking: hop on transition into 'success',
-  // contract pose on transition into 'error'. We track the previous
-  // state to detect the transition edge.
   const prevStateRef = useRef<OracleAgentState>('idle');
   const successHopRef = useRef<SuccessHop | null>(null);
   const errorPoseRef = useRef<ErrorPose | null>(null);
 
-  // Throat-sac pulse queue. Subscribed to streamingBuffer length —
-  // each chunk grows the buffer; we push a pulse per growth event.
   const throatPulsesRef = useRef<ChunkPulse[]>([]);
   useEffect(() => {
     let lastLen = useAgentStore.getState().streamingBuffer.length;
@@ -112,9 +126,6 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
       const len = state.streamingBuffer.length;
       if (len > lastLen) {
         throatPulsesRef.current.push({ startedAt: performance.now() / 1000 });
-        // Cap the queue so a hyper-chunky stream doesn't grow it
-        // unbounded; older entries past the active window are
-        // pruned in useFrame anyway, this is a safety belt.
         if (throatPulsesRef.current.length > 16) {
           throatPulsesRef.current.shift();
         }
@@ -124,15 +135,8 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
     return unsub;
   }, []);
 
-  // Outline geometry — built once per mount.
-  const outlineGeom = useMemo(() => createFrogOutlineGeometry().tube, []);
-  // Dispose the outline tube when the component unmounts to free
-  // GPU buffers — the Three.js GC won't clean it on its own.
-  useEffect(() => () => outlineGeom.dispose(), [outlineGeom]);
-
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    const seed = seedRef.current;
     const reduceMotion = reduceMotionRef.current;
     const agentState = useAgentStore.getState().agentState;
 
@@ -143,24 +147,19 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
       }
       if (agentState === 'error') {
         errorPoseRef.current = { startedAt: t };
-        // Tint emissive immediately on entering error.
-        bodyMaterialRef.current?.emissive.set(NEON_ERROR);
+        bodyGlassRef.current?.emissive.set(NEON_ERROR);
+        headGlassRef.current?.emissive.set(NEON_ERROR);
+        bodyWireRef.current?.color.set(NEON_ERROR);
+        headWireRef.current?.color.set(NEON_ERROR);
       }
-      // Leaving 'error' (revert ~2s after error event fires; here we
-      // also revert the emissive colour back to cyan once enough
-      // time has passed — covered by the per-frame check below).
       prevStateRef.current = agentState;
     }
 
     // ── Emissive intensity (always runs, even with reduce-motion) ──
     const baseIntensity = pickEmissive(agentState);
     let emissiveIntensity = baseIntensity;
-    // Success flash: brief 1.2 → 0.4 ramp over 200ms after the hop's
-    // first 200ms. Decoupled from the body hop so the flash reads
-    // even with reduce-motion on.
     if (agentState === 'success' && successHopRef.current) {
       const dt = t - successHopRef.current.startedAt;
-      // 0..0.2s: full 1.2 flash. 0.2..0.4s: linear decay to idle 0.4.
       if (dt < 0.2) {
         emissiveIntensity = 1.2;
       } else if (dt < 0.4) {
@@ -169,24 +168,23 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
         emissiveIntensity = 0.4;
       }
     }
-    if (bodyMaterialRef.current) {
-      bodyMaterialRef.current.emissiveIntensity = emissiveIntensity * emissiveScale;
-    }
+    const eff = emissiveIntensity * emissiveScale;
+    if (bodyGlassRef.current) bodyGlassRef.current.emissiveIntensity = eff;
+    if (headGlassRef.current) headGlassRef.current.emissiveIntensity = eff;
 
-    // ── Error → emissive colour revert ──
+    // ── Error → emissive colour revert after ~1.5s ──
     if (errorPoseRef.current) {
       const dt = t - errorPoseRef.current.startedAt;
-      if (dt > ERROR_COLOUR_REVERT_S && bodyMaterialRef.current) {
-        bodyMaterialRef.current.emissive.set(NEON_CYAN);
-        // Leave errorPoseRef set until the contract pose finishes
-        // (handled below) — only the colour revert is independent.
+      if (dt > ERROR_COLOUR_REVERT_S) {
+        bodyGlassRef.current?.emissive.set(NEON_CYAN);
+        headGlassRef.current?.emissive.set(NEON_CYAN);
+        bodyWireRef.current?.color.set(NEON_CYAN);
+        headWireRef.current?.color.set(NEON_CYAN);
       }
     }
 
     // ── Reduce-motion: skip body / eye position math ──
     if (reduceMotion) {
-      // Still tick the throat pulse queue cleanup so it doesn't grow
-      // unbounded across long sessions.
       pruneThroatPulses(throatPulsesRef.current, t);
       return;
     }
@@ -194,8 +192,6 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
     // ── Body group transforms ──
     const group = groupRef.current;
     if (group) {
-      // Reset to a known baseline each frame; per-state branches
-      // override what matters.
       group.position.x = 0;
       group.position.y = 0;
       group.position.z = 0;
@@ -206,8 +202,11 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
 
       switch (agentState) {
         case 'idle': {
-          // Gentle Y-axis sway, period ~3s, ±0.04
-          group.position.y = Math.sin((t * 2 * Math.PI) / 3 + seed) * 0.04;
+          // No idle Y-sway here per user feedback (2026-04-25):
+          // "the frog should ride the lily pad ... it should not
+          // be floating up and down on its own". The pad's parent
+          // group in OracleFrogManager bobs with the water surface;
+          // the frog inherits that motion automatically.
           break;
         }
         case 'listening': {
@@ -215,20 +214,14 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
           group.rotation.z = Math.sin(t * 1.2 + seed) * 0.05;
           break;
         }
-        case 'thinking': {
-          // Body upright; eyes track horizontally — handled below.
+        case 'thinking':
+        case 'speaking':
           break;
-        }
-        case 'speaking': {
-          // Body upright; throat sac pulses (handled below).
-          break;
-        }
         case 'success': {
           if (successHopRef.current) {
             const dt = t - successHopRef.current.startedAt;
             if (dt < SUCCESS_HOP_DURATION_S) {
               const u = dt / SUCCESS_HOP_DURATION_S;
-              // Ease-out arc: parabola peaking at u=0.5.
               group.position.y = SUCCESS_HOP_HEIGHT * 4 * u * (1 - u);
             } else {
               successHopRef.current = null;
@@ -241,7 +234,6 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
             const dt = t - errorPoseRef.current.startedAt;
             if (dt < ERROR_DURATION_S) {
               const u = dt / ERROR_DURATION_S;
-              // Contract: scale 1 → 0.92 then back; same drooping rotation.
               const contract = 1 - 0.08 * Math.sin(u * Math.PI);
               group.scale.setScalar(contract);
               group.rotation.x = -0.15 * Math.sin(u * Math.PI);
@@ -252,48 +244,37 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
       }
     }
 
-    // ── Eyes ──
+    // ── Eyes (groups now: each holds a sphere + pupil) ──
     const leftEye = leftEyeRef.current;
     const rightEye = rightEyeRef.current;
     if (leftEye && rightEye) {
-      // Reset eye positions to their rest offsets each frame; the
-      // 'thinking' branch overrides position.x.
-      const eyeY = leftEye.userData.restY ?? leftEye.position.y;
-      const leftRestX = leftEye.userData.restX ?? leftEye.position.x;
-      const rightRestX = rightEye.userData.restX ?? rightEye.position.x;
-      leftEye.position.x = leftRestX;
-      rightEye.position.x = rightRestX;
-      leftEye.position.y = eyeY;
-      rightEye.position.y = eyeY;
-
       // Per-state eye Y-scale (open/closed/wide/squinch).
-      let yScale = 0.4; // idle baseline (half-closed)
+      let yScale = 1.0; // baseline — bulging eyes show fully
       switch (agentState) {
+        case 'idle':
+          yScale = 0.95;
+          break;
         case 'listening':
-          yScale = 1.2;
+          yScale = 1.15;
           break;
         case 'thinking':
         case 'speaking':
-          yScale = 0.6;
+          yScale = 0.9;
           break;
         case 'success':
-          // Eye crinkle — brief inflate to 0.8 over the hop window.
           if (successHopRef.current) {
             const dt = t - successHopRef.current.startedAt;
-            if (dt < SUCCESS_HOP_DURATION_S) {
-              yScale = 0.8;
-            }
+            if (dt < SUCCESS_HOP_DURATION_S) yScale = 0.7;
           }
           break;
         case 'error':
-          yScale = 0.4;
+          yScale = 0.5;
           break;
       }
 
-      // Idle blink: random ~4-6s schedule; close eyes (yScale -> 0.05) for ~120ms.
+      // Idle blink: random ~4-6s schedule; close eyes briefly.
       if (agentState === 'idle') {
         if (t > nextBlinkAtRef.current && t > blinkUntilRef.current) {
-          // Schedule a fresh blink with the current frame as start.
           blinkUntilRef.current = t + 0.12;
           nextBlinkAtRef.current = t + 4 + Math.random() * 2;
         }
@@ -305,166 +286,188 @@ export function OracleFrog({ emissiveScale = 1.0 }: Props) {
       leftEye.scale.y = yScale;
       rightEye.scale.y = yScale;
 
-      // Thinking: eyes track left → right, period ~1.5s; modulate
-      // eye position.x within ±0.02 around the rest offset.
+      // Thinking: eyes track horizontally — modulate eye GROUP
+      // rotation.y so the pupil shifts visibly within the bulge.
       if (agentState === 'thinking') {
-        const tx = Math.sin((t * 2 * Math.PI) / 1.5) * 0.02;
-        leftEye.position.x = leftRestX + tx;
-        rightEye.position.x = rightRestX + tx;
+        const tx = Math.sin((t * 2 * Math.PI) / 1.5) * 0.3;
+        leftEye.rotation.y = tx;
+        rightEye.rotation.y = tx;
+      } else {
+        leftEye.rotation.y = 0;
+        rightEye.rotation.y = 0;
       }
     }
 
     // ── Throat sac ──
     const throat = throatRef.current;
+    const throatWire = throatWireRef.current;
     if (throat) {
       const pulses = throatPulsesRef.current;
       pruneThroatPulses(pulses, t);
+      let scale = 1;
       if (agentState === 'speaking' && pulses.length > 0) {
-        // Sum overlapping pulse contributions (with attenuation) so
-        // a burst of chunks reads as a sustained inflate; otherwise
-        // a single pulse ramps up then back to rest.
         let inflate = 0;
         for (const p of pulses) {
           const dt = t - p.startedAt;
           if (dt < 0 || dt > CHUNK_PULSE_DURATION_S) continue;
           const u = dt / CHUNK_PULSE_DURATION_S;
-          // Triangular envelope: 0 → 1 → 0 over the pulse window.
           const env = u < 0.4 ? u / 0.4 : 1 - (u - 0.4) / 0.6;
           inflate = Math.max(inflate, env);
         }
-        throat.scale.setScalar(1 + inflate * 0.6);
-      } else {
-        throat.scale.setScalar(1);
+        scale = 1 + inflate * 0.6;
       }
+      throat.scale.setScalar(scale);
+      if (throatWire) throatWire.scale.setScalar(scale);
     }
   });
 
   return (
     <group ref={groupRef}>
-      {/* Body — ellipsoid (sphere stretched in z). */}
-      <mesh>
-        <sphereGeometry args={[0.32, 24, 16]} />
+      {/* ─── Body: wide flattened ellipsoid (frog sitting). ─────── */}
+      {/* Glass fill */}
+      <mesh scale={[1.4, 0.55, 1.0]}>
+        <sphereGeometry args={[0.32, 20, 14]} />
         <meshPhysicalMaterial
-          ref={bodyMaterialRef}
+          ref={bodyGlassRef}
           color={NEON_CYAN}
           emissive={NEON_CYAN}
           emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
-          transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
+          {...GLASS_PROPS}
         />
       </mesh>
-      {/* Head — smaller sphere offset forward. */}
-      <mesh position={[0, 0.18, 0.30]}>
-        <sphereGeometry args={[0.20, 20, 14]} />
+      {/* Wireframe overlay — bright neon edges. Lower segment
+          count gives a more "low-poly" wireframe look closer to
+          the reference images. */}
+      <mesh scale={[1.4, 0.55, 1.0]}>
+        <sphereGeometry args={[0.325, 14, 10]} />
+        <meshBasicMaterial
+          ref={bodyWireRef}
+          color={NEON_CYAN}
+          wireframe
+          transparent
+          opacity={0.95}
+        />
+      </mesh>
+
+      {/* ─── Head: smaller flattened sphere in front of body. ──── */}
+      <mesh position={[0, 0.04, 0.32]} scale={[1.0, 0.7, 0.85]}>
+        <sphereGeometry args={[0.26, 18, 14]} />
         <meshPhysicalMaterial
+          ref={headGlassRef}
           color={NEON_CYAN}
           emissive={NEON_CYAN}
           emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
-          transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
+          {...GLASS_PROPS}
         />
       </mesh>
-      {/* Back legs — capsules along the haunch. */}
-      <mesh position={[0.22, 0.05, -0.18]} rotation={[0, 0, -0.3]}>
-        <capsuleGeometry args={[0.06, 0.18, 4, 8]} />
-        <meshPhysicalMaterial
+      <mesh position={[0, 0.04, 0.32]} scale={[1.0, 0.7, 0.85]}>
+        <sphereGeometry args={[0.265, 12, 9]} />
+        <meshBasicMaterial
+          ref={headWireRef}
           color={NEON_CYAN}
-          emissive={NEON_CYAN}
-          emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
+          wireframe
           transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
+          opacity={0.95}
         />
       </mesh>
-      <mesh position={[-0.22, 0.05, -0.18]} rotation={[0, 0, 0.3]}>
-        <capsuleGeometry args={[0.06, 0.18, 4, 8]} />
-        <meshPhysicalMaterial
-          color={NEON_CYAN}
-          emissive={NEON_CYAN}
-          emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
-          transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
-        />
-      </mesh>
-      {/* Front legs — shorter, forward-leaning. */}
-      <mesh position={[0.18, 0.0, 0.18]} rotation={[0.6, 0, -0.2]}>
-        <capsuleGeometry args={[0.045, 0.13, 4, 6]} />
-        <meshPhysicalMaterial
-          color={NEON_CYAN}
-          emissive={NEON_CYAN}
-          emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
-          transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
-        />
-      </mesh>
-      <mesh position={[-0.18, 0.0, 0.18]} rotation={[0.6, 0, 0.2]}>
-        <capsuleGeometry args={[0.045, 0.13, 4, 6]} />
-        <meshPhysicalMaterial
-          color={NEON_CYAN}
-          emissive={NEON_CYAN}
-          emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
-          transmission={0.3}
-          opacity={0.55}
-          transparent
-          roughness={0.15}
-          metalness={0}
-          ior={1.4}
-        />
-      </mesh>
-      {/* Eyes — small bright neon-green spheres on top of the head. */}
-      <mesh
-        ref={leftEyeRef}
-        position={[-0.09, 0.34, 0.36]}
-        userData={{ restX: -0.09, restY: 0.34 }}
-      >
-        <sphereGeometry args={[0.04, 12, 8]} />
-        <meshBasicMaterial color={NEON_GREEN} />
-      </mesh>
-      <mesh
-        ref={rightEyeRef}
-        position={[0.09, 0.34, 0.36]}
-        userData={{ restX: 0.09, restY: 0.34 }}
-      >
-        <sphereGeometry args={[0.04, 12, 8]} />
-        <meshBasicMaterial color={NEON_GREEN} />
-      </mesh>
-      {/* Throat sac — small sphere under the chin; inflates per chunk. */}
-      <mesh ref={throatRef} position={[0, 0.06, 0.42]}>
-        <sphereGeometry args={[0.07, 14, 10]} />
+
+      {/* ─── Eyes: large bulging spheres ON TOP of the head. ───── */}
+      {/* Each eye is a group so we can scale-Y for blinking and
+          rotate-Y for tracking, while the pupil rides along. */}
+      <group ref={leftEyeRef} position={[-0.13, 0.20, 0.36]}>
+        {/* Eye sphere — bright neon green */}
+        <mesh>
+          <sphereGeometry args={[0.10, 14, 10]} />
+          <meshBasicMaterial color={NEON_GREEN} />
+        </mesh>
+        {/* Wireframe overlay on the eye */}
+        <mesh>
+          <sphereGeometry args={[0.105, 10, 8]} />
+          <meshBasicMaterial color={NEON_GREEN} wireframe transparent opacity={0.7} />
+        </mesh>
+        {/* Pupil — small dark sphere on the front of the eye. The
+            parent group's rotation.y orbits this around the eye
+            sphere so the pupil tracks left-right. */}
+        <mesh position={[0, 0, 0.085]}>
+          <sphereGeometry args={[0.04, 10, 8]} />
+          <meshBasicMaterial color={NEON_DARK} />
+        </mesh>
+      </group>
+      <group ref={rightEyeRef} position={[0.13, 0.20, 0.36]}>
+        <mesh>
+          <sphereGeometry args={[0.10, 14, 10]} />
+          <meshBasicMaterial color={NEON_GREEN} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[0.105, 10, 8]} />
+          <meshBasicMaterial color={NEON_GREEN} wireframe transparent opacity={0.7} />
+        </mesh>
+        <mesh position={[0, 0, 0.085]}>
+          <sphereGeometry args={[0.04, 10, 8]} />
+          <meshBasicMaterial color={NEON_DARK} />
+        </mesh>
+      </group>
+
+      {/* ─── Back legs: folded haunches splayed sideways. ──────── */}
+      {/* Upper haunch — capsule from hip OUT and slightly UP. */}
+      <FrogLeg origin={[0.30, -0.02, -0.05]} rotation={[0, -0.3, -0.6]} />
+      <FrogLeg origin={[-0.30, -0.02, -0.05]} rotation={[0, 0.3, 0.6]} />
+      {/* Lower haunch / calf — capsule from knee BACK and DOWN.
+          Approximate the bent knee by chaining two segments per
+          side. The reference frog images all show the classic
+          "sitting frog" bent-knee shape. */}
+      <FrogLeg origin={[0.42, -0.06, -0.18]} rotation={[0.3, 0, -0.2]} length={0.18} radius={0.05} />
+      <FrogLeg origin={[-0.42, -0.06, -0.18]} rotation={[0.3, 0, 0.2]} length={0.18} radius={0.05} />
+
+      {/* ─── Front legs: short verticals propping the front. ──── */}
+      <FrogLeg origin={[0.18, -0.13, 0.22]} rotation={[0.4, 0, 0]} length={0.13} radius={0.04} />
+      <FrogLeg origin={[-0.18, -0.13, 0.22]} rotation={[0.4, 0, 0]} length={0.13} radius={0.04} />
+
+      {/* ─── Throat sac: small sphere under the chin; pulses with chunks ── */}
+      <mesh ref={throatRef} position={[0, -0.04, 0.46]}>
+        <sphereGeometry args={[0.07, 12, 9]} />
         <meshPhysicalMaterial
           color={NEON_CYAN}
           emissive={NEON_CYAN}
           emissiveIntensity={0.6}
           transmission={0.4}
-          opacity={0.65}
+          opacity={0.45}
           transparent
-          roughness={0.18}
+          roughness={0.2}
           metalness={0}
           ior={1.4}
         />
       </mesh>
-      {/* Outline — single closed Catmull-Rom curve wrapped in a tube. */}
-      <mesh geometry={outlineGeom}>
-        <meshBasicMaterial color={NEON_CYAN} transparent opacity={0.95} />
+      <mesh ref={throatWireRef} position={[0, -0.04, 0.46]}>
+        <sphereGeometry args={[0.075, 10, 8]} />
+        <meshBasicMaterial color={NEON_CYAN} wireframe transparent opacity={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+interface LegProps {
+  origin: [number, number, number];
+  rotation: [number, number, number];
+  length?: number;
+  radius?: number;
+}
+
+function FrogLeg({ origin, rotation, length = 0.20, radius = 0.06 }: LegProps) {
+  return (
+    <group position={origin} rotation={rotation}>
+      <mesh>
+        <capsuleGeometry args={[radius, length, 4, 8]} />
+        <meshPhysicalMaterial
+          color={NEON_CYAN}
+          emissive={NEON_CYAN}
+          emissiveIntensity={FROG_EMISSIVE_INTENSITY.idle}
+          {...GLASS_PROPS}
+        />
+      </mesh>
+      <mesh>
+        <capsuleGeometry args={[radius * 1.02, length, 3, 6]} />
+        <meshBasicMaterial color={NEON_CYAN} wireframe transparent opacity={0.95} />
       </mesh>
     </group>
   );
@@ -480,8 +483,6 @@ function pickEmissive(s: OracleAgentState): number {
 }
 
 function pruneThroatPulses(pulses: ChunkPulse[], t: number): void {
-  // Drop entries whose lifetime is past — front-of-queue first since
-  // pulses are appended in order.
   while (pulses.length > 0 && t - pulses[0].startedAt > CHUNK_PULSE_DURATION_S) {
     pulses.shift();
   }

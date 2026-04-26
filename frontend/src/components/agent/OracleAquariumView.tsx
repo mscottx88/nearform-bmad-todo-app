@@ -1,27 +1,47 @@
 /**
- * Story 6.7: the secondary drei `<View>` that paints the Oracle Frog
- * into the AgentPanel's "aquarium window" rectangle.
+ * Story 6.7: the secondary view that paints the Oracle Frog into
+ * the AgentPanel's "aquarium window" rectangle.
  *
- * This component lives INSIDE the main `<Canvas>` (rendered from
- * PondScene). It reads the track-div DOM ref from
- * `useOracleViewStore` — the panel publishes its ref there on mount
- * — so the camera viewport tracks the panel's oracle area each frame.
+ * Mounted INSIDE the main `<Canvas>` (via PondScene). Reads the
+ * track-div DOM ref from `useOracleViewStore` — the panel publishes
+ * its ref there on mount.
  *
- * Render-order note: drei `<View>` registers a `useFrame` at
- * `index=index` (default 1). `<EffectComposer>` also registers at
- * priority 1. To make the secondary view paint OVER the composer's
- * main-scene render rather than be clobbered, we explicitly pass
- * `index={2}` so the View's per-frame scissor render runs AFTER
- * the composer's main-scene render in the same frame.
+ * ## Why this isn't drei `<View>`
  *
- * When the panel is closed, `trackRef` is null. We render nothing —
- * drei's CanvasView would otherwise no-op on a null ref but mounts
- * a useFrame at priority 1, which would still flip the auto-render
- * off. Skip the View entirely when there's no track.
+ * drei's `<View>` calls `gl.setViewport(rect)` to clip the secondary
+ * render to the panel's bounding rect, but **its `finishSkissor`
+ * does NOT restore the viewport** to full canvas. Worse, drei's
+ * unmount cleanup ALSO calls `prepareSkissor(rect)` (to clear the
+ * rect on tear-down) without restoring afterward. The end result:
+ *
+ *   - When the panel opens, frame N+1's `<EffectComposer>` runs
+ *     `composer.render()`, which delegates to three.js's
+ *     `renderer.setRenderTarget(null)` — three.js then re-applies
+ *     the renderer's stored `_viewport` (which drei left as the
+ *     panel rect). The main scene is rendered into the rect; the
+ *     rest of the canvas stays black ("pond distorts").
+ *   - When the panel closes, drei's cleanup re-leaks the viewport
+ *     at unmount. The main render is permanently broken until
+ *     a window resize re-calls `setSize` ("pond disappears").
+ *
+ * The minimal manual render below sets viewport+scissor, renders,
+ * then **explicitly restores both** to full-canvas dimensions.
+ * No leak, no drei dependency, no cleanup-order coupling.
+ *
+ * ## Mount lifecycle
+ *
+ * - When `trackRef` is null (panel closed), the component renders
+ *   nothing — no portal, no useFrame. Auto-render of the main
+ *   scene works as if this component didn't exist.
+ * - When `trackRef` is set (panel open), we createPortal the
+ *   secondary scene contents into a virtual `THREE.Scene`, register
+ *   a `useFrame` at priority 2 (after `<EffectComposer>` at 1) that
+ *   does the per-frame scissor render.
  */
 
-import { View, PerspectiveCamera } from '@react-three/drei';
-import { useFrame, useThree } from '@react-three/fiber';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal, useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
 import { useAgentStore } from '../../stores/useAgentStore';
 import { useOracleViewStore } from '../../stores/useOracleViewStore';
 import { OracleFrog } from './OracleFrog';
@@ -34,56 +54,121 @@ const FROG_PAD_FILL_RATIO = 0.85;
 
 export function OracleAquariumView() {
   const trackRef = useOracleViewStore((s) => s.trackRef);
-  const persistedHome = useAgentStore((s) => s.oraclePadPosition);
-  const home = persistedHome ?? ORACLE_HOME_FALLBACK;
-
-  // Skip rendering entirely when there's no track — see file header
-  // for why null tracks are gated rather than passed through.
   if (trackRef === null) return null;
-
-  // drei View accepts an HTMLElement track ref. We hold a real
-  // HTMLDivElement in the store; wrap it in a `{ current: el }`
-  // shape that React treats as a ref so drei's per-frame
-  // `track.current?.getBoundingClientRect()` reads work.
-  return (
-    <>
-      <View
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        track={{ current: trackRef } as any}
-        // index higher than EffectComposer's renderPriority (1) so we
-        // paint AFTER the composer's main render in the same frame.
-        index={2}
-      >
-        <SecondarySceneContents home={home} />
-      </View>
-      {/* Critical: restore the WebGL viewport AFTER drei's View
-          finishes its scissor render. drei's prepareSkissor sets
-          `gl.setViewport(left, bottom, width, height)` to constrain
-          the secondary view's render to the panel's track rect, but
-          the matching `finishSkissor` ONLY restores
-          `setScissorTest(false)` and `autoClear` — it does NOT
-          reset the viewport. Without this restore, the next frame's
-          EffectComposer renders the entire main scene into the
-          *previous frame's secondary-view rect* (i.e., a small
-          rectangle inside the agent panel), and the rest of the
-          canvas stays black ("lost the pond"). Run at index 3 so
-          this fires AFTER the secondary view's index 2. */}
-      <ViewportReset />
-    </>
-  );
+  return <ManualAquariumView track={trackRef} />;
 }
 
-function ViewportReset() {
+interface InnerProps {
+  track: HTMLDivElement;
+}
+
+function ManualAquariumView({ track }: InnerProps) {
+  const persistedHome = useAgentStore((s) => s.oraclePadPosition);
+  const home = persistedHome ?? ORACLE_HOME_FALLBACK;
   const { gl, size } = useThree();
+
+  // Virtual scene + dedicated camera for the aquarium view. Both
+  // are stable references (useState initialiser pattern) so they
+  // don't churn on re-render.
+  const [virtualScene] = useState(() => new THREE.Scene());
+  const virtualCamera = useMemo(() => {
+    // FOV 50° matches the main pond camera so the framing reads
+    // consistently between views. Earlier 35° was too tight per
+    // user feedback (2026-04-25): "the zoom in the oracle view box
+    // is waaay too close — should see the whole frog and a portion
+    // of its surroundings".
+    const cam = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+    return cam;
+  }, []);
+
+  // Camera framing per AC 5: position offset above + back from the
+  // pad, look at a point at pad-surface level. Pulled back to ~3.0
+  // units in z and 1.5 in y (vs the earlier 1.2 / 0.6) so the
+  // whole frog plus a margin of pond surface fits in the panel.
+  useEffect(() => {
+    virtualCamera.position.set(home.x, 1.5, home.z + 3.0);
+    virtualCamera.lookAt(home.x, 0.05, home.z);
+    virtualCamera.updateProjectionMatrix();
+  }, [virtualCamera, home.x, home.z]);
+
+  // Per-frame scissor render at priority 2. EffectComposer's render
+  // at priority 1 has already finished by this point, so we paint
+  // OVER the main scene only inside the panel's track rect.
   useFrame(() => {
-    // Reset to the full canvas viewport so the NEXT frame's main
-    // scene (rendered by <EffectComposer> at priority 1) draws
-    // across the full canvas area, not a leftover rect.
-    gl.setViewport(0, 0, size.width, size.height);
-    gl.setScissor(0, 0, size.width, size.height);
-    gl.setScissorTest(false);
-  }, 3);
-  return null;
+    const rect = track.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    // Convert DOM rect (top-left origin) to WebGL viewport (bottom-
+    // left origin). The canvas's bounding rect tells us where the
+    // canvas itself sits in the document — usually (0,0,vw,vh) but
+    // not always.
+    const canvas = gl.domElement.getBoundingClientRect();
+    const left = rect.left - canvas.left;
+    const top = rect.top - canvas.top;
+    const width = rect.width;
+    const height = rect.height;
+    const bottom = canvas.height - top - height;
+
+    // Update camera aspect to match the rect — otherwise the frog
+    // would stretch when the panel resizes. Mutating a ref-held
+    // Three.js camera + the renderer is the standard R3F animation
+    // pattern; the lint rule is conservatively flagging mutation
+    // of objects sourced from useThree, which is fine inside a
+    // useFrame callback. Cast to mutable references to opt out.
+    const camMutable = virtualCamera as THREE.PerspectiveCamera & {
+      aspect: number;
+    };
+    if (camMutable.aspect !== width / height) {
+      camMutable.aspect = width / height;
+      camMutable.updateProjectionMatrix();
+    }
+
+    // ── Save renderer state ──
+    const glMutable = gl as THREE.WebGLRenderer & { autoClear: boolean };
+    const prevAutoClear = glMutable.autoClear;
+
+    // ── Set up scissored secondary render ──
+    glMutable.autoClear = false;
+    glMutable.setViewport(left, bottom, width, height);
+    glMutable.setScissor(left, bottom, width, height);
+    glMutable.setScissorTest(true);
+
+    // ── Render virtual scene into the rect ──
+    glMutable.render(virtualScene, virtualCamera);
+
+    // ── CRITICAL: restore renderer state to full canvas. drei's
+    //    `<View>` skips this and that's the whole reason we hand-
+    //    rolled this component. ──
+    glMutable.setScissorTest(false);
+    glMutable.autoClear = prevAutoClear;
+    glMutable.setViewport(0, 0, size.width, size.height);
+    glMutable.setScissor(0, 0, size.width, size.height);
+  }, 2);
+
+  // Reset on unmount too — when the panel closes, the LAST frame
+  // before unmount already restored viewport (since the cleanup
+  // happens after the frame), but if the unmount lands between
+  // useFrame ticks we want to be safe. This effect's cleanup also
+  // doubles as a belt-and-braces reset for any other component
+  // (drei View, custom imperatives) that might leave the viewport
+  // in a weird state.
+  useEffect(() => {
+    return () => {
+      gl.setViewport(0, 0, size.width, size.height);
+      gl.setScissor(0, 0, size.width, size.height);
+      gl.setScissorTest(false);
+      gl.autoClear = true;
+    };
+  }, [gl, size.width, size.height]);
+
+  return (
+    <>
+      {createPortal(
+        <SecondarySceneContents home={home} />,
+        virtualScene,
+      )}
+    </>
+  );
 }
 
 interface SceneProps {
@@ -91,34 +176,15 @@ interface SceneProps {
 }
 
 /**
- * Scene contents for the aquarium window — its own camera + lights
- * + a duplicate of the oracle pad/frog meshes. Both views read
- * `agentState` from the same store so the duplicate animates in
- * lockstep with the main-scene frog.
+ * Contents of the aquarium view's virtual scene. The camera lives
+ * outside the JSX (built imperatively in ManualAquariumView via
+ * `useMemo`) — drei's `<PerspectiveCamera makeDefault>` would try
+ * to register itself with the parent's R3F state, which doesn't
+ * apply inside a manual `gl.render` call.
  */
 function SecondarySceneContents({ home }: SceneProps) {
-  // Camera framing per AC 5: position offset above + in front of
-  // the pad, looking at a point slightly above the pad's surface so
-  // the frog reads centred. FOV 35° is narrower than the main
-  // camera's 50° so the frog reads close in the panel rect.
-  const cameraPos: [number, number, number] = [home.x, 0.6, home.z + 1.2];
-  const cameraTarget: [number, number, number] = [home.x, 0.1, home.z];
-
-  // Drei's PerspectiveCamera doesn't take a lookAt prop; we orient
-  // it imperatively via a one-shot effect on the rendered camera.
-  const cameraReady = useCameraLookAt(cameraTarget);
-
   return (
     <>
-      <PerspectiveCamera
-        makeDefault
-        fov={35}
-        position={cameraPos}
-        ref={cameraReady}
-      />
-      {/* Lights dedicated to the aquarium — slightly cooler tone
-          than the main scene's pond ambient so the frog reads as
-          framed by its own lighting, not "tinted by the pond". */}
       <ambientLight intensity={0.35} />
       <pointLight
         position={[home.x, 2, home.z + 0.5]}
@@ -130,37 +196,11 @@ function SecondarySceneContents({ home }: SceneProps) {
         position={[home.x, 0.05, home.z]}
         scale={(FROG_PAD_FILL_RATIO * ORACLE_PAD_RADIUS) / FROG_BASE_RADIUS}
       >
-        {/* Boost emissive a bit — the secondary view doesn't get
-            the main scene's <EffectComposer> bloom, so the frog's
-            material needs to read brighter on its own. */}
+        {/* Boost emissive — the secondary view doesn't get the
+            main scene's <EffectComposer> bloom, so the frog reads
+            brighter on its own. */}
         <OracleFrog emissiveScale={1.6} />
       </group>
     </>
   );
 }
-
-/**
- * Wires a one-shot lookAt + projection-matrix update onto the
- * PerspectiveCamera ref drei renders. Returned as a ref-callback
- * so drei calls it the moment the camera mounts.
- */
-function useCameraLookAt(target: [number, number, number]) {
-  const targetRef = { current: target };
-  // Memoise via useEffect-shape: drei applies the ref once on
-  // mount; the camera doesn't move during a session today, so we
-  // only need to lookAt once. If the home position ever changes
-  // mid-session (story 6.7 v1 doesn't expose that affordance), the
-  // outer SecondarySceneContents re-mounts via a key change and
-  // this runs again.
-  return (cam: unknown) => {
-    if (cam !== null && typeof cam === 'object' && 'lookAt' in cam) {
-      const c = cam as {
-        lookAt: (x: number, y: number, z: number) => void;
-        updateProjectionMatrix: () => void;
-      };
-      c.lookAt(targetRef.current[0], targetRef.current[1], targetRef.current[2]);
-      c.updateProjectionMatrix();
-    }
-  };
-}
-
