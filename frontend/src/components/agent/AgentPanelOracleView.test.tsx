@@ -28,8 +28,10 @@ describe('AgentPanelOracleView (Story 6.7 — bitmap pivot)', () => {
     expect(oracle).not.toBeNull();
     const frog = oracle?.querySelector('.oracle-frog');
     expect(frog).not.toBeNull();
-    // Three stacked image layers for the RGB-split glitch effect.
-    expect(oracle?.querySelectorAll('.oracle-frog__layer').length).toBe(3);
+    // 3 RGB-split layers + 1 smile overlay = 4 image layers.
+    expect(oracle?.querySelectorAll('.oracle-frog__layer').length).toBe(4);
+    // The smile-specific layer is the one tagged with .oracle-frog__smile.
+    expect(oracle?.querySelector('.oracle-frog__smile')).not.toBeNull();
   });
 
   it('exposes the current agentState as a data-state attribute on the wrapper', () => {
@@ -50,11 +52,17 @@ describe('AgentPanelOracleView (Story 6.7 — bitmap pivot)', () => {
     }
   });
 
-  it('serves the bitmap from /oracle-frog.png on every layer', () => {
+  it('serves the closed-mouth bitmap on the RGB-split layers and the smile bitmap on the mouth-flap overlay', () => {
     const { container } = render(<AgentPanelOracleView />);
-    const layers = container.querySelectorAll('.oracle-frog__layer');
-    layers.forEach((layer) => {
+    const baseLayers = container.querySelectorAll(
+      '.oracle-frog__layer:not(.oracle-frog__smile)',
+    );
+    expect(baseLayers.length).toBe(3);
+    baseLayers.forEach((layer) => {
       expect((layer as HTMLImageElement).getAttribute('src')).toBe('/oracle-frog.png');
     });
+    const smile = container.querySelector('.oracle-frog__smile') as HTMLImageElement;
+    expect(smile).not.toBeNull();
+    expect(smile.getAttribute('src')).toBe('/oracle-frog-smile.png');
   });
 });

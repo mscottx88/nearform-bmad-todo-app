@@ -27,11 +27,13 @@ import { useEffect, useState } from 'react';
 import { useAgentStore } from '../../stores/useAgentStore';
 import './OracleFrogImage.css';
 
-// Resolved at build/serve time — Vite re-writes `/oracle-frog.png`
-// to a fingerprinted asset URL. If you swap the file, just put
-// the new PNG at `frontend/public/oracle-frog.png` (no code
-// change needed).
+// Vite serves anything in `frontend/public/` at the site root.
+// The closed-mouth bitmap is the always-on base; the smile
+// bitmap is overlaid (opacity 0 by default) and CSS-animated
+// during 'speaking' for a mouth-flap effect synced to the
+// streaming response.
 const FROG_IMAGE_SRC = '/oracle-frog.png';
+const FROG_SMILE_SRC = '/oracle-frog-smile.png';
 
 export function OracleFrogImage() {
   const agentState = useAgentStore((s) => s.agentState);
@@ -80,6 +82,18 @@ export function OracleFrogImage() {
         draggable={false}
       />
 
+      {/* Smile bitmap overlay — opacity 0 by default; during
+          'speaking' the CSS animation toggles its opacity at a
+          natural mouth-flap cadence so the frog appears to "talk"
+          while the agent's response is streaming. */}
+      <img
+        className="oracle-frog__layer oracle-frog__smile"
+        src={FROG_SMILE_SRC}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
+
       {/* Scanline overlay — repeating-linear-gradient via CSS so
           this is a free single layer. */}
       <div className="oracle-frog__scanlines" aria-hidden="true" />
@@ -95,6 +109,15 @@ export function OracleFrogImage() {
       {/* Tear-bar — occasional horizontal "scan tear" that slides
           across the frog. Pure CSS keyframe on infinite loop. */}
       <div className="oracle-frog__tear" aria-hidden="true" />
+
+      {/* Nameplate — neon-pink "ORACLE FROG" label pinned to the
+          bottom of the frame in the project's Share Tech Mono
+          font (matches every other neon affordance in the
+          panel). The plate sits above the scanlines and tear so
+          the chrome reads cleanly over the frog. */}
+      <div className="oracle-frog__nameplate" aria-hidden="true">
+        ORACLE FROG
+      </div>
     </div>
   );
 }

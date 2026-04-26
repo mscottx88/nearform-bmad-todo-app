@@ -62,11 +62,31 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
   // so the synchronous read says "not pinned" and the chat opens
   // showing the OLDEST messages. This flag forces the FIRST
   // grew/streamed tick to scroll to bottom unconditionally;
-  // subsequent ticks rely on the synchronous distance check.
+  // subsequent ticks rely on the snapshot-based pin check.
   const initialSnapDoneRef = useRef(false);
+  // Story 6.7 user report (2026-04-25): "when sending a chat
+  // message and scrolled to the bottom, the chat should always
+  // auto scroll to the bottom as new content arrives".
+  //
+  // The previous logic recomputed `distanceFromBottom` LIVE on
+  // each grow/stream tick, but by the time the effect runs the
+  // new bubble has ALREADY been added to the DOM, pushing the
+  // bottom further away than the threshold — so even when the
+  // user was at the bottom right before sending, the live read
+  // says "not pinned" and we suppress the snap. Track the
+  // PREVIOUS scroll snapshot from the last scroll event (which
+  // reflects pre-new-content DOM) and base the pin decision on
+  // THAT instead.
+  const lastObservedRef = useRef<{
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+  } | null>(null);
 
   // Keep `isPinnedRef` in sync with the actual scroll position. Fires
-  // on user-initiated scroll and on programmatic scrolls.
+  // on user-initiated scroll and on programmatic scrolls. Also
+  // refreshes `lastObservedRef` so the next grow/stream tick has a
+  // pre-new-content snapshot to read pinned-state from.
   useEffect(() => {
     const el = scrollRef.current;
     if (el === null) return;
@@ -76,6 +96,11 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
       const pinned = distanceFromBottom <= PIN_THRESHOLD_PX;
       setPinned(pinned);
       if (pinned) setShowNewMessagesPill(false);
+      lastObservedRef.current = {
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      };
     };
     el.addEventListener('scroll', recompute, { passive: true });
     // Initial compute after mount so a freshly-opened panel with
@@ -99,18 +124,15 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
   }, []);
 
   // On message-list change OR streaming-buffer change, scroll to
-  // bottom if pinned; otherwise show the pill.
+  // bottom if the user was pinned BEFORE the new content arrived.
   //
-  // Story 6.2 Group C polish (user report 2026-04-25): re-check pin
-  // status synchronously before snapping. The 'scroll' event fires
-  // asynchronously after a programmatic `inner.scrollTop` mutation
-  // (which is what NeonScrollbar's thumb drag does on every
-  // mousemove). If a chunk arrives mid-drag, this effect can run
-  // BEFORE the scroll event handler updates `isPinnedRef.current`,
-  // reading a stale `true` from the pre-drag state and snapping the
-  // user's hard-won scroll position back to the bottom. Recompute
-  // distance-from-bottom here so we trust the live DOM layout, not
-  // the cached ref.
+  // We base "was-pinned-before" on `lastObservedRef` (snapshot from
+  // the most recent scroll event) — NOT on a live recompute against
+  // the just-mutated DOM. The live recompute is what broke the
+  // common case "user at bottom, sends a message": after the
+  // grow, the new bubble has already pushed `scrollHeight` past
+  // threshold, so a live read says "not pinned" even though the
+  // user WAS at the bottom. Reading the snapshot avoids that.
   useEffect(() => {
     const el = scrollRef.current;
     if (el === null) return;
@@ -128,10 +150,7 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
 
     if (!grew && !streamed) return;
 
-    // First non-empty tick after mount: always snap to bottom,
-    // regardless of synchronous distance — the user just opened
-    // the panel and expects the LATEST messages, not history from
-    // the top of the scroll buffer.
+    // First non-empty tick after mount: always snap to bottom.
     const isInitialSnap = !initialSnapDoneRef.current && messages.length > 0;
     if (isInitialSnap) {
       initialSnapDoneRef.current = true;
@@ -142,16 +161,19 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
       return;
     }
 
-    const distanceFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
-    const pinnedNow = distanceFromBottom <= PIN_THRESHOLD_PX;
-    // Sync the ref with our synchronous read so subsequent paths
-    // (and the next scroll-event recompute) start from the truth.
-    if (isPinnedRef.current !== pinnedNow) {
-      isPinnedRef.current = pinnedNow;
+    // Was the user pinned BEFORE this new content? Use the
+    // snapshot from the last scroll event, falling back to the
+    // ref if no snapshot exists yet.
+    const snap = lastObservedRef.current;
+    let wasPinned = isPinnedRef.current;
+    if (snap !== null) {
+      const oldDistance = snap.scrollHeight - snap.clientHeight - snap.scrollTop;
+      wasPinned = oldDistance <= PIN_THRESHOLD_PX;
     }
 
-    if (pinnedNow) {
+    if (wasPinned) {
       el.scrollTop = el.scrollHeight;
+      isPinnedRef.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowNewMessagesPill(false);
     } else {

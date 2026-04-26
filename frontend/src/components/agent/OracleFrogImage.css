@@ -86,6 +86,30 @@
   animation: oracle-frog-rgb-shift-cyan 6s steps(1, end) infinite;
 }
 
+/* ── Smile overlay — mouth-flap during 'speaking' ───────────
+   Above the RGB-split layers but below the scanlines so the CRT
+   stripes still read across the mouth. Default opacity 0; CSS
+   keyframe alternates while the agent's response is streaming
+   so the frog appears to "talk". `steps(2, jump-end)` gives a
+   sharp cartoon flap rather than a smooth crossfade. */
+.oracle-frog__smile {
+  z-index: 4;
+  opacity: 0;
+}
+
+.oracle-frog[data-state='speaking'] .oracle-frog__smile {
+  /* Per user feedback (2026-04-25): "slightly less flapping".
+     Bumped 280ms → 420ms (each mouth-state holds 210ms) so the
+     cadence reads as deliberate speech rather than chatter. */
+  animation: oracle-frog-mouth-flap 420ms steps(2, jump-end) infinite;
+}
+
+@keyframes oracle-frog-mouth-flap {
+  0%   { opacity: 0; }
+  50%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* RGB-shift keyframes — each colour layer shifts independently
    on its own period. 6s loop, with a 200ms "jitter window" near
    the end where the layers nudge apart and back. Subtle enough
@@ -114,7 +138,10 @@
 .oracle-frog__scanlines {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  /* z-index ladder: 1 base / 2 red / 3 cyan / 4 smile / 5 scan
+     / 6 tear / 7 chunk-fx. Scanlines sit ABOVE the smile so the
+     CRT stripes read across both mouth states. */
+  z-index: 5;
   pointer-events: none;
   background: repeating-linear-gradient(
     to bottom,
@@ -134,7 +161,7 @@
 .oracle-frog__tear {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 6;
   pointer-events: none;
   --tear-y: 100%;
   background: linear-gradient(
@@ -176,7 +203,7 @@
 .oracle-frog__chunk-fx {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: 7;
   pointer-events: none;
   background: rgba(0, 238, 255, 0);
   mix-blend-mode: screen;
@@ -266,6 +293,55 @@
   animation-duration: 2.4s;
 }
 
+/* ── Nameplate ─────────────────────────────────────────────── */
+
+.oracle-frog__nameplate {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 8;
+  transform: translateX(-50%);
+  pointer-events: none;
+  user-select: none;
+  /* Per user feedback (2026-04-25): "Name plate is a little hard
+     to read". Bumped legibility:
+       - cyan (assistant/agent palette family) on a fully-opaque
+         deep-water bg gives high contrast against the white
+         oracle-area backdrop;
+       - font-size 13px (was 11px);
+       - thicker neon halo via two-stage text-shadow;
+       - extra padding so the chrome doesn't crowd the letters. */
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--neon-cyan);
+  text-shadow:
+    0 0 4px rgba(0, 238, 255, 0.95),
+    0 0 12px rgba(0, 238, 255, 0.55);
+  padding: 4px 16px;
+  border: 1px solid var(--neon-cyan);
+  border-radius: 999px;
+  background: var(--water-deep);
+  box-shadow:
+    0 0 8px rgba(0, 238, 255, 0.55),
+    inset 0 0 4px rgba(0, 238, 255, 0.30);
+  white-space: nowrap;
+}
+
+/* Error state — flips the plate to the red-orange family. */
+.oracle-frog[data-state='error'] .oracle-frog__nameplate {
+  color: #ff6600;
+  border-color: #ff6600;
+  text-shadow:
+    0 0 4px rgba(255, 102, 0, 0.95),
+    0 0 12px rgba(255, 60, 0, 0.55);
+  box-shadow:
+    0 0 8px rgba(255, 102, 0, 0.55),
+    inset 0 0 4px rgba(255, 102, 0, 0.30);
+}
+
 /* ── Reduce-motion ───────────────────────────────────────────
    Suppress all keyframe animations. The static RGB-split + base
    scanlines stay (those are non-animated colour overlays), so
@@ -275,6 +351,7 @@
   .oracle-frog,
   .oracle-frog__layer--red,
   .oracle-frog__layer--cyan,
+  .oracle-frog__smile,
   .oracle-frog__tear,
   .oracle-frog__chunk-fx {
     animation: none;
