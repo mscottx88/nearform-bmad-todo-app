@@ -1,6 +1,6 @@
 # Story 6.3: Rephrase Skill
 
-Status: review
+Status: done
 
 > **Scope note:** First "skill" beyond the free-form `chat` skill in
 > Epic 6 ("The Intelligent Pond Companion"). Lands the entire

@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-26 # story 6-3-rephrase-skill → review. Mid-implementation pivot from string-parse to CrewAI output_pydantic (RephraseEnvelope schema; crew_runner consumes CrewOutput.pydantic). User-driven enhancement: server-side hybrid-search resolver — when explicit/UUID resolution fails, hybrid_search auto-resolves clear-winner targets (score≥0.35 + gap≥0.15) or surfaces top-3 candidates as clickable chips that re-fire rephrase with context.todo_ids on click. Schema additions: RephraseSuggestion / RephraseCandidate / RephraseEnvelope; SkillContext widens with context + resolved_target_id + resolved_candidates; CrewResult gains optional metadata; finalise_assistant_message writes metadata.proposal to chat_messages JSONB. TodoUpdate hardened with extra="forbid" (defence in depth on LLM mutation surface). 240/240 backend + 544/544 frontend tests green.
+last_updated: 2026-04-26 # 6-3-rephrase-skill → done (CR landed in 43dad3e: today-date prompt anchor, ISO-instant staleness, cancel-gate, explicit-id hard-flip, candidate-chip prompt-reuse, NeonDateTimePicker seconds + malformed-ISO + value-resync, DST-safe day-bucket, +9 tests; 249/249 backend + 560/560 frontend). 6-7-oracle-frog → done. 6-8-create-todo-skill added as backlog (conversational create-todo skill, todo_draft proposal envelope, reuses POST /api/todos on commit; cross-turn draft inheritance via metadata.proposal, three-way status drafting/ready/cancelled, clarification-chip dispatch). Mid-implementation pivot for 6-3 from string-parse to CrewAI output_pydantic (RephraseEnvelope schema; crew_runner consumes CrewOutput.pydantic). Server-side hybrid-search resolver — explicit/UUID/history → search auto-resolves clear-winner targets (score≥0.35 + gap≥0.15, plus single-result floor 0.55) or surfaces top-3 candidate chips that re-fire rephrase with the user's prior message. TodoUpdate hardened with extra="forbid" (defence in depth on LLM mutation surface).
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -113,11 +113,12 @@ development_status:
   epic-6: in-progress
   6-1-agent-foundation: done  # schema regen (chat_sessions/chat_messages/display_metadata) + chat_service + SkillContext + BaseTool tools + crew_runner + intent_classifier + chat skill + SSE endpoint
   6-2-chat-panel: done  # AgentPanel + useAgentStore + useAgentSse + F1/Escape + /help + sessions UX + free-form chat E2E. Adds 3-section layout (Oracle-Frog placeholder slot + chat + controls), speech-bubble shapes with tails, NeonScrollbar wrap, fetch+ReadableStream SSE consumer (POST endpoint), start-event message_id extension to crew_runner. Polish round 2026-04-25 added: keyboard hint banners (chat composer + InfoPopup edit mode), TodoLink with hover/click-to-pad + neon pointer-finger cursor, NeonTooltip portal + viewport clamping, custom-cursor system extended (point/text/no-access modes + I-beam over selectable text + global useGlobalCursorMode hook), always-visible KeyboardShortcutsHint footer, /help registered in slash-command menu, EmptyPondHint trimmed + space-glyph fix, CrewAI 1.6→1.14 upgrade with [anthropic] extra, _chunk_words space-preservation fix, list_recent_messages helper for AC-12 history window. 487 frontend + 199 backend tests green.
-  6-3-rephrase-skill: review
+  6-3-rephrase-skill: done  # 2026-04-26: code review complete — 1 decision-needed resolved (AC 3/AC 7 widened to ratify due_date as v1 field), ~28 patches applied across backend/frontend/tests (today-date prompt anchor, ISO-instant staleness via Date.getTime, status-gate on cancelled bubbles, hard-flip on explicit-id failure, etc.), 3 deferred (frozen-dataclass mutation pattern, chip text overflow, modal Escape conflict), 10 dismissed. Commits f3aedc3 + 43dad3e.
   6-4-plan-skill: backlog
   6-5-organize-skill: backlog
   6-6-reformat-skill: backlog
-  6-7-oracle-frog: review
+  6-7-oracle-frog: done  # 2026-04-26: closed via user "complete the pending review stories" after Dev Agent Record + DoD reconciliation in ff0ed48.
+  6-8-create-todo-skill: backlog  # NEW 2026-04-26 — conversational create-todo skill, mirrors 6.3's proposal-envelope architecture, reuses POST /api/todos for commit; LLM stays read-only.
   epic-6-retrospective: pending
 
   # Epic 7: The Living Ecosystem

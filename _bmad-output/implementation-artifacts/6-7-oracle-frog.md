@@ -1,6 +1,6 @@
 # Story 6.7: The Oracle Frog
 
-Status: review
+Status: done
 
 > **Scope note:** Final story of Epic 6 ("The Intelligent Pond Companion").
 > Frontend-only — no schema, API, or backend agent changes. Builds the
