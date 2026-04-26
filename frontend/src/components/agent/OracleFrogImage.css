@@ -1,0 +1,282 @@
+/*
+ * Story 6.7: Oracle Frog as a bitmap image with glitch FX.
+ *
+ * The frog itself is /oracle-frog.png (drop the user-supplied
+ * neon-frog bitmap into frontend/public/oracle-frog.png — Vite
+ * resolves the public-prefix URL automatically). Glitch effects
+ * are layered on via CSS:
+ *
+ *   1. Three stacked copies of the image (base + red + cyan) for
+ *      a constant subtle RGB-split, with mix-blend-mode: screen
+ *      so the tinted copies only contribute their channel.
+ *   2. A repeating-linear-gradient scanline overlay.
+ *   3. An occasional horizontal "scan tear" that slides across
+ *      the frog (pseudo-element on infinite loop).
+ *   4. A one-shot chunk-FX flash that re-runs on each chunk
+ *      arrival via React `key` remount in OracleFrogImage.tsx.
+ *   5. Per-state intensity bumps (error = much stronger glitch).
+ *
+ * Existing per-state animations (idle breathe, listening lean,
+ * thinking transform, success hop, error shake) all still apply
+ * to the .oracle-frog wrapper.
+ */
+
+.oracle-frog {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Layered drop-shadow for the panel's signature neon glow on
+     the bitmap — even non-glowing frog images pick up an outer
+     halo. */
+  filter:
+    drop-shadow(0 0 6px rgba(255, 16, 240, 0.35))
+    drop-shadow(0 0 14px rgba(0, 238, 255, 0.25));
+  transition: filter 240ms ease-out;
+  /* The wrapper itself participates in state-driven animations
+     (breath, hop, shake) — see per-state rules below. */
+  transform-origin: center;
+}
+
+.oracle-frog[data-state='error'] {
+  filter:
+    drop-shadow(0 0 6px rgba(255, 60, 0, 0.65))
+    drop-shadow(0 0 14px rgba(255, 102, 0, 0.40));
+}
+
+/* ── Stacked image layers ────────────────────────────────────
+   All three copies are absolutely positioned and identically
+   sized so they stack pixel-perfect. The red + cyan tinted
+   copies sit on top in `mix-blend-mode: screen` so they only
+   add their channel into the composite. */
+
+.oracle-frog__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.oracle-frog__layer--base {
+  z-index: 1;
+}
+
+.oracle-frog__layer--red {
+  z-index: 2;
+  /* Tint the image to the red channel only via filter chain.
+     sepia + hue-rotate + saturate is a standard way to shift any
+     image toward a target hue without needing an offscreen
+     canvas. */
+  filter: brightness(0.85) saturate(2) hue-rotate(330deg) contrast(1.1);
+  mix-blend-mode: screen;
+  /* Subtle constant offset — accentuates during the glitch
+     keyframe below. */
+  transform: translateX(0.5px);
+  animation: oracle-frog-rgb-shift-red 6s steps(1, end) infinite;
+}
+
+.oracle-frog__layer--cyan {
+  z-index: 3;
+  filter: brightness(0.85) saturate(2) hue-rotate(150deg) contrast(1.1);
+  mix-blend-mode: screen;
+  transform: translateX(-0.5px);
+  animation: oracle-frog-rgb-shift-cyan 6s steps(1, end) infinite;
+}
+
+/* RGB-shift keyframes — each colour layer shifts independently
+   on its own period. 6s loop, with a 200ms "jitter window" near
+   the end where the layers nudge apart and back. Subtle enough
+   to read as "alive electronics" rather than a broken display. */
+@keyframes oracle-frog-rgb-shift-red {
+  0%, 88%, 100% { transform: translateX(0.5px); }
+  90%           { transform: translate(2.5px, -1px); }
+  92%           { transform: translate(3.5px, 1px); }
+  94%           { transform: translate(1.5px, 0); }
+  96%           { transform: translateX(0.5px); }
+}
+
+@keyframes oracle-frog-rgb-shift-cyan {
+  0%, 88%, 100% { transform: translateX(-0.5px); }
+  90%           { transform: translate(-2.5px, 1px); }
+  92%           { transform: translate(-3.5px, -1px); }
+  94%           { transform: translate(-1.5px, 0); }
+  96%           { transform: translateX(-0.5px); }
+}
+
+/* ── Scanlines ───────────────────────────────────────────────
+   Repeating horizontal stripes — gives the bitmap a CRT/monitor
+   feel without needing an extra image. Rendered as a pseudo-
+   element so it sits above the image stack but below any FX
+   overlays. */
+.oracle-frog__scanlines {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.18) 3px,
+    rgba(0, 0, 0, 0.18) 4px
+  );
+  mix-blend-mode: multiply;
+  opacity: 0.65;
+}
+
+/* ── Scan tear ───────────────────────────────────────────────
+   Thin horizontal slice that slides down the frog on a long
+   loop — fires roughly once every 7 seconds with a quick
+   downward sweep. */
+.oracle-frog__tear {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  --tear-y: 100%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent calc(var(--tear-y) - 6px),
+    rgba(0, 238, 255, 0.35) calc(var(--tear-y) - 4px),
+    rgba(255, 16, 240, 0.45) calc(var(--tear-y) - 2px),
+    rgba(255, 255, 255, 0.55) var(--tear-y),
+    rgba(255, 16, 240, 0.45) calc(var(--tear-y) + 2px),
+    rgba(0, 238, 255, 0.35) calc(var(--tear-y) + 4px),
+    transparent calc(var(--tear-y) + 6px),
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  animation: oracle-frog-tear 7s linear infinite;
+}
+
+@keyframes oracle-frog-tear {
+  0%, 88%, 100% { --tear-y: -10%; }
+  90%           { --tear-y: 25%; }
+  93%           { --tear-y: 60%; }
+  96%           { --tear-y: 105%; }
+}
+
+/* The custom property `--tear-y` is registered as <length> so
+   the gradient interpolates smoothly. Without `@property`, the
+   keyframe's --tear-y values would step rather than interpolate. */
+@property --tear-y {
+  syntax: '<length-percentage>';
+  inherits: false;
+  initial-value: 100%;
+}
+
+/* ── Per-chunk flash ─────────────────────────────────────────
+   A brief white-cyan overlay that runs once per chunk arrival
+   (the React `key` on the element re-mounts, restarting the
+   keyframe). */
+.oracle-frog__chunk-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: rgba(0, 238, 255, 0);
+  mix-blend-mode: screen;
+}
+
+.oracle-frog[data-state='speaking'] .oracle-frog__chunk-fx {
+  animation: oracle-frog-chunk-flash 280ms ease-out;
+}
+
+@keyframes oracle-frog-chunk-flash {
+  0%   { background: rgba(0, 238, 255, 0); }
+  20%  { background: rgba(0, 238, 255, 0.30); }
+  100% { background: rgba(0, 238, 255, 0); }
+}
+
+/* ── State-driven wrapper animations ────────────────────────
+   The wrapper carries the frog through breath / lean / hop /
+   shake. Each is keyed off the data-state attribute. */
+
+.oracle-frog[data-state='idle'] {
+  animation: oracle-frog-breathe 4s ease-in-out infinite;
+}
+
+@keyframes oracle-frog-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50%      { transform: scale(1.018, 0.99); }
+}
+
+.oracle-frog[data-state='listening'] {
+  transform: translateY(-2px) skewY(-1.5deg);
+}
+
+.oracle-frog[data-state='thinking'],
+.oracle-frog[data-state='speaking'] {
+  transform: translateY(-1px);
+}
+
+.oracle-frog[data-state='success'] {
+  animation: oracle-frog-hop 500ms ease-out;
+}
+
+@keyframes oracle-frog-hop {
+  0%   { transform: translateY(0) scale(1, 1); }
+  30%  { transform: translateY(-12px) scale(1.04, 0.96); }
+  70%  { transform: translateY(-4px) scale(0.98, 1.02); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+.oracle-frog[data-state='error'] {
+  animation: oracle-frog-shake 600ms ease-in-out;
+}
+
+@keyframes oracle-frog-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-3px); }
+  40%      { transform: translateX(3px); }
+  60%      { transform: translateX(-2px); }
+  80%      { transform: translateX(2px); }
+}
+
+/* Error state — much stronger constant glitch: bigger RGB
+   offset, faster tear cadence, more saturated channel tints. */
+.oracle-frog[data-state='error'] .oracle-frog__layer--red {
+  animation-duration: 1.6s;
+  filter: brightness(0.95) saturate(3) hue-rotate(330deg) contrast(1.3);
+}
+
+.oracle-frog[data-state='error'] .oracle-frog__layer--cyan {
+  animation-duration: 1.6s;
+  filter: brightness(0.95) saturate(3) hue-rotate(150deg) contrast(1.3);
+}
+
+.oracle-frog[data-state='error'] .oracle-frog__tear {
+  animation-duration: 2.4s;
+}
+
+/* Thinking + speaking states bump the RGB cadence too — gives
+   the agent's "active" states a slightly twitchier read than
+   idle. */
+.oracle-frog[data-state='thinking'] .oracle-frog__layer--red,
+.oracle-frog[data-state='thinking'] .oracle-frog__layer--cyan {
+  animation-duration: 3s;
+}
+
+.oracle-frog[data-state='speaking'] .oracle-frog__layer--red,
+.oracle-frog[data-state='speaking'] .oracle-frog__layer--cyan {
+  animation-duration: 2.4s;
+}
+
+/* ── Reduce-motion ───────────────────────────────────────────
+   Suppress all keyframe animations. The static RGB-split + base
+   scanlines stay (those are non-animated colour overlays), so
+   the frog still reads as a "techie" image even without motion. */
+
+@media (prefers-reduced-motion: reduce) {
+  .oracle-frog,
+  .oracle-frog__layer--red,
+  .oracle-frog__layer--cyan,
+  .oracle-frog__tear,
+  .oracle-frog__chunk-fx {
+    animation: none;
+  }
+}
