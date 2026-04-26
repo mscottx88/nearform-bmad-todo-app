@@ -397,7 +397,7 @@ WebGL context** as the main `<Canvas>` in `PondScene.tsx`.
 
 ### Task 1 — Extend `useAgentStore` with `agentState` + `oraclePadPosition` (AC 2, AC 4)
 
-- [ ] In [`frontend/src/stores/useAgentStore.ts`](frontend/src/stores/useAgentStore.ts):
+- [x] In [`frontend/src/stores/useAgentStore.ts`](frontend/src/stores/useAgentStore.ts):
   - Add `agentState: 'idle' | 'listening' | 'thinking' | 'speaking' | 'success' | 'error'`
     field, default `'idle'`.
   - Add `oraclePadPosition: { x: number; z: number } | null`, default `null`.
@@ -417,23 +417,23 @@ WebGL context** as the main `<Canvas>` in `PondScene.tsx`.
     clear any pending `agentState`-revert timer and force `agentState = 'idle'`.
   - Update `persist` middleware's `partialize` to include
     `oraclePadPosition` (do NOT persist `agentState` — that's per-session).
-- [ ] Extend
+- [x] Extend
   [`frontend/src/stores/useAgentStore.test.ts`](frontend/src/stores/useAgentStore.test.ts)
   with the cases listed in AC 6.
 
 ### Task 2 — Wire `'listening'` to composer focus (AC 4)
 
-- [ ] In [`frontend/src/components/agent/AgentComposer.tsx`](frontend/src/components/agent/AgentComposer.tsx):
+- [x] In [`frontend/src/components/agent/AgentComposer.tsx`](frontend/src/components/agent/AgentComposer.tsx):
   add an effect that synchronises `useAgentStore.agentState` with composer
   focus + non-empty draft (AND no in-flight stream). On mount cleanup,
   revert to `'idle'`.
-- [ ] Extend
+- [x] Extend
   [`AgentComposer.test.tsx`](frontend/src/components/agent/AgentComposer.test.tsx)
   with the listening-state cases in AC 6.
 
 ### Task 3 — Build the `<OracleFrog>` mesh component (AC 1, AC 4)
 
-- [ ] Create [`frontend/src/components/agent/OracleFrog.tsx`](frontend/src/components/agent/OracleFrog.tsx):
+- [x] Create [`frontend/src/components/agent/OracleFrog.tsx`](frontend/src/components/agent/OracleFrog.tsx):
   - Body geometry: low-poly assembly of primitive geometries grouped under
     a single `<group ref={bodyRef}>` (head + body + 4 legs).
   - `MeshPhysicalMaterial` per AC 1 specs.
@@ -449,18 +449,18 @@ WebGL context** as the main `<Canvas>` in `PondScene.tsx`.
     once on mount (cache in `useRef`); when true, short-circuit useFrame
     body before any mesh mutation (still updates emissive intensity from
     state, just skips body/eye position math).
-- [ ] Create [`OracleFrog.test.tsx`](frontend/src/components/agent/OracleFrog.test.tsx)
+- [x] Create [`OracleFrog.test.tsx`](frontend/src/components/agent/OracleFrog.test.tsx)
   per AC 6.
 
 ### Task 4 — Build `<OracleLilyPad>` + `<OracleFrogManager>` (AC 1, AC 2, AC 3)
 
-- [ ] Create
+- [x] Create
   [`frontend/src/components/agent/OracleLilyPad.tsx`](frontend/src/components/agent/OracleLilyPad.tsx):
   the pad mesh — thin disc geometry matching the regular `LilyPad`'s
   visual rim, neon-cyan emissive border. NO completion egg, NO drag,
   NO hover, NO halo color-lerps. Reads its current world position from
   a prop (driven by the boundary-return state machine in `OracleFrogManager`).
-- [ ] Create [`frontend/src/components/agent/OracleFrogManager.tsx`](frontend/src/components/agent/OracleFrogManager.tsx):
+- [x] Create [`frontend/src/components/agent/OracleFrogManager.tsx`](frontend/src/components/agent/OracleFrogManager.tsx):
   the orchestrator. Owns:
   - First-mount position initialiser (AC 2 idempotent setup).
   - The boundary-return state machine (`'idle' | 'dissolving' | 'teleporting' | 'rematerializing'`)
@@ -472,11 +472,11 @@ WebGL context** as the main `<Canvas>` in `PondScene.tsx`.
     pad transforms.
   - Particle bursts for dissolve + rematerialize (small one-shot `<Points>`
     instances; lifecycle-tracked via state).
-- [ ] Mount `<OracleFrogManager />` inside [`PondScene.tsx`](frontend/src/components/pond/PondScene.tsx)
+- [x] Mount `<OracleFrogManager />` inside [`PondScene.tsx`](frontend/src/components/pond/PondScene.tsx)
   alongside `<WaterSurface />` and the `{renderTodos.map(... LilyPad)}`
   loop. Position-wise, mount AFTER the LilyPad map so it renders on top
   of any pad that overlaps it (last-rendered-wins for transparency).
-- [ ] Create [`OracleFrogManager.test.tsx`](frontend/src/components/agent/OracleFrogManager.test.tsx)
+- [x] Create [`OracleFrogManager.test.tsx`](frontend/src/components/agent/OracleFrogManager.test.tsx)
   per AC 6.
 
 ### Task 5 — Replace placeholder with real `<View>` (AC 5)

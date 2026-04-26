@@ -13,6 +13,7 @@ import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
+import { OracleFrogManager } from '../agent/OracleFrogManager';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { InfoPopup } from '../ui/InfoPopup';
@@ -288,6 +289,12 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
+      {/* Story 6.7: Oracle Frog rides on his own dedicated lily pad,
+          rendered AFTER the todo-pad map so transparency layering
+          favors the oracle pad if a stray todo overlaps it. The
+          oracle pad is frontend-only — never returned by GET
+          /api/todos and never participates in cascade-displacement. */}
+      <OracleFrogManager />
       {displayedInfoTodo && (
         <InfoPopup
           key={displayedInfoTodo.id}
