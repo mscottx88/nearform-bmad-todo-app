@@ -45,6 +45,9 @@ function resetStore() {
     inputDraft: '',
     streamingMessageId: null,
     streamingBuffer: '',
+    // Story 6.7
+    agentState: 'idle',
+    oraclePadPosition: null,
   });
 }
 
@@ -238,5 +241,209 @@ describe('useAgentStore', () => {
 
     expect(mockedAgentApi.createSession).toHaveBeenCalled();
     expect(useAgentStore.getState().activeSessionId).toBe('session-new');
+  });
+});
+
+// ─── Story 6.7: Oracle-frog state machine ────────────────────────────
+
+describe('useAgentStore — Story 6.7 agentState transitions', () => {
+  beforeEach(() => {
+    resetStore();
+    vi.clearAllMocks();
+    mockedAgentApi.listSessions.mockResolvedValue([]);
+    mockedAgentApi.getMessages.mockResolvedValue([]);
+    mockedAgentApi.createSession.mockResolvedValue({
+      id: 'session-new',
+      title: null,
+      createdAt: '2026-04-25T00:00:00Z',
+      updatedAt: '2026-04-25T00:00:00Z',
+    });
+    mockedStream.mockResolvedValue({ abort: vi.fn() });
+  });
+
+  it('initial agentState is "idle"', () => {
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+
+  it('start event flips agentState to "thinking"', async () => {
+    useAgentStore.setState({ activeSessionId: 'sess-a' });
+    await useAgentStore.getState().sendMessage('hi');
+    useAgentStore.getState().ingestSseEvent({
+      type: 'start',
+      session_id: 'sess-a',
+      skill: 'chat',
+      message_id: 'm-1',
+    });
+    expect(useAgentStore.getState().agentState).toBe('thinking');
+  });
+
+  it('chunk while thinking transitions to "speaking"; further chunks stay speaking', async () => {
+    useAgentStore.setState({ activeSessionId: 'sess-a' });
+    await useAgentStore.getState().sendMessage('hi');
+    useAgentStore.getState().ingestSseEvent({
+      type: 'start',
+      session_id: 'sess-a',
+      skill: 'chat',
+      message_id: 'm-1',
+    });
+    expect(useAgentStore.getState().agentState).toBe('thinking');
+
+    useAgentStore.getState().ingestSseEvent({ type: 'chunk', text: 'hi ' });
+    expect(useAgentStore.getState().agentState).toBe('speaking');
+
+    useAgentStore.getState().ingestSseEvent({ type: 'chunk', text: 'there' });
+    expect(useAgentStore.getState().agentState).toBe('speaking');
+  });
+
+  it('done event sets "success" and reverts to "idle" after 1200ms', async () => {
+    vi.useFakeTimers();
+    try {
+      useAgentStore.setState({ activeSessionId: 'sess-a' });
+      await useAgentStore.getState().sendMessage('hi');
+      useAgentStore.getState().ingestSseEvent({
+        type: 'start',
+        session_id: 'sess-a',
+        skill: 'chat',
+        message_id: 'm-1',
+      });
+      useAgentStore.getState().ingestSseEvent({ type: 'chunk', text: 'hi' });
+      useAgentStore.getState().ingestSseEvent({ type: 'done' });
+      expect(useAgentStore.getState().agentState).toBe('success');
+
+      vi.advanceTimersByTime(1199);
+      expect(useAgentStore.getState().agentState).toBe('success');
+      vi.advanceTimersByTime(1);
+      expect(useAgentStore.getState().agentState).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('error event sets "error" and reverts to "idle" after 2000ms', async () => {
+    vi.useFakeTimers();
+    try {
+      useAgentStore.setState({ activeSessionId: 'sess-a' });
+      await useAgentStore.getState().sendMessage('hi');
+      useAgentStore.getState().ingestSseEvent({
+        type: 'start',
+        session_id: 'sess-a',
+        skill: 'chat',
+        message_id: 'm-1',
+      });
+      useAgentStore.getState().ingestSseEvent({
+        type: 'error',
+        code: 'agent_crew_failed',
+        message: 'boom',
+        recoverable: false,
+      });
+      expect(useAgentStore.getState().agentState).toBe('error');
+
+      vi.advanceTimersByTime(1999);
+      expect(useAgentStore.getState().agentState).toBe('error');
+      vi.advanceTimersByTime(1);
+      expect(useAgentStore.getState().agentState).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancelStreaming clears the pending success → idle revert and forces idle', async () => {
+    vi.useFakeTimers();
+    try {
+      useAgentStore.setState({ activeSessionId: 'sess-a' });
+      await useAgentStore.getState().sendMessage('hi');
+      useAgentStore.getState().ingestSseEvent({
+        type: 'start',
+        session_id: 'sess-a',
+        skill: 'chat',
+        message_id: 'm-1',
+      });
+      useAgentStore.getState().ingestSseEvent({ type: 'done' });
+      // The done handler scheduled a 1200ms revert; cancelStreaming
+      // should clear it AND immediately set idle.
+      await useAgentStore.getState().cancelStreaming();
+      // Even after enough time for the original timer to have fired,
+      // agentState must remain 'idle' because cancelStreaming forced
+      // it and cleared the pending revert.
+      vi.advanceTimersByTime(5000);
+      expect(useAgentStore.getState().agentState).toBe('idle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a fresh start cancels the pending success-revert from the previous turn', async () => {
+    vi.useFakeTimers();
+    try {
+      useAgentStore.setState({ activeSessionId: 'sess-a' });
+      await useAgentStore.getState().sendMessage('first');
+      useAgentStore.getState().ingestSseEvent({
+        type: 'start',
+        session_id: 'sess-a',
+        skill: 'chat',
+        message_id: 'm-1',
+      });
+      useAgentStore.getState().ingestSseEvent({ type: 'done' });
+      expect(useAgentStore.getState().agentState).toBe('success');
+
+      // 600ms in — fresh send before the 1200ms revert fires.
+      vi.advanceTimersByTime(600);
+      await useAgentStore.getState().sendMessage('second');
+      useAgentStore.getState().ingestSseEvent({
+        type: 'start',
+        session_id: 'sess-a',
+        skill: 'chat',
+        message_id: 'm-2',
+      });
+      // Even after the original 1200ms timer should have expired, the
+      // new turn's 'thinking' state must not have been clobbered by a
+      // late `success → idle` from the previous turn.
+      vi.advanceTimersByTime(2000);
+      expect(useAgentStore.getState().agentState).toBe('thinking');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('switchSession resets agentState to "idle"', async () => {
+    useAgentStore.setState({ activeSessionId: 'sess-a', agentState: 'thinking' });
+    await useAgentStore.getState().switchSession('sess-b');
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+
+  it('setAgentState directly sets the field', () => {
+    useAgentStore.getState().setAgentState('listening');
+    expect(useAgentStore.getState().agentState).toBe('listening');
+    useAgentStore.getState().setAgentState('idle');
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+
+  it('setOraclePadPosition stores the home position', () => {
+    expect(useAgentStore.getState().oraclePadPosition).toBeNull();
+    useAgentStore.getState().setOraclePadPosition({ x: -3.5, z: 3.5 });
+    expect(useAgentStore.getState().oraclePadPosition).toEqual({ x: -3.5, z: 3.5 });
+  });
+
+  it('persist partialize includes oraclePadPosition (not agentState)', () => {
+    // Reach into the persist middleware's options to verify partialize
+    // shape. The store factory captured the partialize fn at create
+    // time; we rebuild a representative input and assert the output
+    // shape directly.
+    useAgentStore.setState({
+      panelOpen: true,
+      activeSessionId: 'sess-x',
+      oraclePadPosition: { x: -3.5, z: 3.5 },
+      agentState: 'thinking',
+    });
+    const persisted = JSON.parse(localStorage.getItem('agent-store-v1') ?? '{}');
+    // The persist middleware writes after each set(); the last one
+    // above triggers a flush. Stored shape should include only
+    // panelOpen, activeSessionId, oraclePadPosition.
+    expect(persisted.state).toBeDefined();
+    expect(persisted.state.panelOpen).toBe(true);
+    expect(persisted.state.activeSessionId).toBe('sess-x');
+    expect(persisted.state.oraclePadPosition).toEqual({ x: -3.5, z: 3.5 });
+    // agentState is per-session; partialize must exclude it.
+    expect(persisted.state.agentState).toBeUndefined();
   });
 });

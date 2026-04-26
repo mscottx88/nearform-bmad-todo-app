@@ -175,3 +175,63 @@ describe('AgentComposer history navigation (Up/Down at first character)', () => 
     expect(useAgentStore.getState().inputDraft).toBe('');
   });
 });
+
+// ─── Story 6.7: 'listening' state wiring ───────────────────────────────
+
+describe('AgentComposer — Story 6.7 listening state', () => {
+  beforeEach(() => {
+    resetStore();
+    useAgentStore.setState({ agentState: 'idle' });
+  });
+
+  it('focus + non-empty draft + no in-flight stream → "listening"', () => {
+    useAgentStore.setState({ inputDraft: 'hello' });
+    const { container } = render(<AgentComposer onSubmit={() => {}} />);
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    expect(useAgentStore.getState().agentState).toBe('listening');
+  });
+
+  it('blur reverts "listening" → "idle"', () => {
+    useAgentStore.setState({ inputDraft: 'hello' });
+    const { container } = render(<AgentComposer onSubmit={() => {}} />);
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    expect(useAgentStore.getState().agentState).toBe('listening');
+    fireEvent.blur(textarea);
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+
+  it('clearing the draft while focused reverts "listening" → "idle"', () => {
+    useAgentStore.setState({ inputDraft: 'hi' });
+    const { container } = render(<AgentComposer onSubmit={() => {}} />);
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    expect(useAgentStore.getState().agentState).toBe('listening');
+    fireEvent.change(textarea, { target: { value: '' } });
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+
+  it('focus + non-empty draft does NOT transition to "listening" while a stream is in flight', () => {
+    useAgentStore.setState({
+      inputDraft: 'mid-stream typing',
+      streamingMessageId: 'in-flight',
+      agentState: 'speaking',
+    });
+    const { container } = render(<AgentComposer onSubmit={() => {}} />);
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    // 'speaking' must not be clobbered by the listening branch.
+    expect(useAgentStore.getState().agentState).toBe('speaking');
+  });
+
+  it('unmount clears a lingering "listening" state', () => {
+    useAgentStore.setState({ inputDraft: 'typing' });
+    const { container, unmount } = render(<AgentComposer onSubmit={() => {}} />);
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.focus(textarea);
+    expect(useAgentStore.getState().agentState).toBe('listening');
+    unmount();
+    expect(useAgentStore.getState().agentState).toBe('idle');
+  });
+});

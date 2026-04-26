@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-25 # story 6-2 → done after 5-group code review (A/B/C/D/E) — 38 patches applied, 18 deferred items logged, 6 spec amendments via DN reconciliations. 512 frontend + 209 backend tests green.
+last_updated: 2026-04-25 # story 6-7-oracle-frog → in-progress (developer started implementation)
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -117,7 +117,7 @@ development_status:
   6-4-plan-skill: backlog
   6-5-organize-skill: backlog
   6-6-reformat-skill: backlog
-  6-7-oracle-frog: backlog
+  6-7-oracle-frog: in-progress
   epic-6-retrospective: pending
 
   # Epic 7: The Living Ecosystem

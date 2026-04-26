@@ -27,12 +27,21 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
     const draft = useAgentStore((s) => s.inputDraft);
     const setDraft = useAgentStore((s) => s.setDraft);
     const messages = useAgentStore((s) => s.messages);
+    // Story 6.7: read streamingMessageId via a selector so the
+    // listening-state effect re-evaluates when a turn starts/ends.
+    const streamingMessageId = useAgentStore((s) => s.streamingMessageId);
     const internalRef = useRef<HTMLTextAreaElement>(null);
     // Tick state used solely to force a re-render after focus / blur
     // so the keyboard-hint visibility tracks the textarea's actual
     // focus state. (`document.activeElement` reads can't drive a
     // re-render on their own.)
     const [, forceHintTick] = useState(0);
+    // Story 6.7: drive the oracle frog's 'listening' state from
+    // textarea focus + non-empty draft, gated on no-active-stream.
+    // We track focus via a separate piece of state so the effect can
+    // depend on it deterministically (the `forceHintTick` counter
+    // works for re-render but isn't a clean dependency signal).
+    const [focused, setFocused] = useState(false);
     // -1 = no history navigation in progress (composer holds the
     // user's in-progress draft). 0 = the most recent prior user
     // message; 1 = the next-most-recent, etc.
@@ -62,6 +71,39 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
       el.style.height = 'auto';
       el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
     }, [draft]);
+
+    // Story 6.7: synchronise the oracle frog's 'listening' state with
+    // composer focus + non-empty draft. We DON'T transition to
+    // 'listening' while a stream is in flight (the agent is
+    // 'thinking' / 'speaking') — typing in the composer mid-stream
+    // shouldn't yank the frog out of speak/think state. On unmount
+    // (panel close) revert to 'idle' so a re-open doesn't inherit a
+    // stale 'listening'.
+    useEffect(() => {
+      const setAgentState = useAgentStore.getState().setAgentState;
+      const shouldListen =
+        focused && draft.length > 0 && streamingMessageId === null;
+      const current = useAgentStore.getState().agentState;
+      if (shouldListen) {
+        if (current === 'idle') {
+          setAgentState('listening');
+        }
+      } else if (current === 'listening') {
+        setAgentState('idle');
+      }
+    }, [focused, draft, streamingMessageId]);
+
+    useEffect(() => {
+      // Cleanup-only effect: on composer unmount (panel close) drop
+      // any 'listening' state we might have set. Decoupled from the
+      // sync effect above because cleanup callbacks there fire on
+      // every dep change, not just unmount.
+      return () => {
+        if (useAgentStore.getState().agentState === 'listening') {
+          useAgentStore.getState().setAgentState('idle');
+        }
+      };
+    }, []);
 
     // Reset history navigation whenever the user types (changes the
     // draft outside the recall path). The simplest signal: a fresh
@@ -155,8 +197,14 @@ export const AgentComposer = forwardRef<HTMLTextAreaElement, Props>(
             setDraft(e.target.value);
           }}
           onKeyDown={onKeyDown}
-          onFocus={() => forceHintTick((t) => t + 1)}
-          onBlur={() => forceHintTick((t) => t + 1)}
+          onFocus={() => {
+            setFocused(true);
+            forceHintTick((t) => t + 1);
+          }}
+          onBlur={() => {
+            setFocused(false);
+            forceHintTick((t) => t + 1);
+          }}
           rows={1}
           style={{ maxHeight: MAX_HEIGHT_PX }}
         />

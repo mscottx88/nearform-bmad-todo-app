@@ -26,6 +26,26 @@ import type {
   SseEvent,
 } from '../types/agent';
 
+/**
+ * Story 6.7: Oracle-Frog state machine. Drives both the procedural
+ * frog animation and the emissive-intensity ramp.
+ *
+ * Wiring (set by `ingestSseEvent` + `AgentComposer`):
+ *   - `start`  → 'thinking'
+ *   - `chunk`  → 'thinking' → 'speaking' on first chunk
+ *   - `done`   → 'success', then auto-revert to 'idle' after 1200ms
+ *   - `error`  → 'error',   then auto-revert to 'idle' after 2000ms
+ *   - composer focus + non-empty draft + no in-flight stream → 'listening'
+ *   - cancel/switch/blur/empty-draft → 'idle'
+ */
+export type OracleAgentState =
+  | 'idle'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'success'
+  | 'error';
+
 export interface AgentState {
   panelOpen: boolean;
   activeSessionId: string | null;
@@ -42,6 +62,15 @@ export interface AgentState {
   /** Accumulated chunks for the streaming message (mirror of `messages[i].content`). */
   streamingBuffer: string;
 
+  /** Story 6.7: Oracle-frog procedural-animation state machine. */
+  agentState: OracleAgentState;
+  /**
+   * Story 6.7: Oracle pad's persisted home position. `null` until the
+   * first OracleFrogManager mount seeds it; survives reloads via the
+   * `persist` middleware's partialize.
+   */
+  oraclePadPosition: { x: number; z: number } | null;
+
   openPanel: () => void;
   closePanel: () => void;
   togglePanel: () => void;
@@ -56,11 +85,15 @@ export interface AgentState {
   sendMessage: (content: string) => Promise<void>;
   ingestSseEvent: (event: SseEvent) => void;
   cancelStreaming: () => Promise<void>;
+
+  setAgentState: (state: OracleAgentState) => void;
+  setOraclePadPosition: (pos: { x: number; z: number }) => void;
 }
 
 interface PersistedShape {
   panelOpen: boolean;
   activeSessionId: string | null;
+  oraclePadPosition: { x: number; z: number } | null;
 }
 
 /** Stable client-side id used for the optimistic assistant placeholder
@@ -104,6 +137,22 @@ let activeStreamId = 0;
  *  resolves last would paint A's messages while `activeSessionId === 'b'`. */
 let activeMessagesLoadId = 0;
 
+/**
+ * Story 6.7: pending `agentState` revert timer. `done` schedules a
+ * 'success' → 'idle' transition after 1200ms; `error` schedules an
+ * 'error' → 'idle' transition after 2000ms. Held in module-scope so
+ * back-to-back sends, cancels, and session switches can clear the
+ * pending revert before it clobbers a fresh turn's state.
+ */
+let agentStateRevertHandle: ReturnType<typeof setTimeout> | null = null;
+
+function clearAgentStateRevert(): void {
+  if (agentStateRevertHandle !== null) {
+    clearTimeout(agentStateRevertHandle);
+    agentStateRevertHandle = null;
+  }
+}
+
 function abortActiveStream(): void {
   // Story 6.2 Group B CR P1: pulled out so `switchSession` can call
   // it too. Bumps the token to invalidate any in-flight callbacks
@@ -112,6 +161,12 @@ function abortActiveStream(): void {
   activeStreamHandle?.abort();
   activeStreamHandle = null;
   pendingOptimisticAssistantId = null;
+  // Story 6.7: a stream that's been aborted shouldn't still flip the
+  // frog from 'success' / 'error' back to 'idle' on a later tick — a
+  // fresh send may have already entered 'thinking' by then. Clear the
+  // pending revert; callers (cancelStreaming / switchSession) decide
+  // whether to force agentState back to 'idle' explicitly.
+  clearAgentStateRevert();
 }
 
 export const useAgentStore = create<AgentState>()(
@@ -124,6 +179,9 @@ export const useAgentStore = create<AgentState>()(
       inputDraft: '',
       streamingMessageId: null,
       streamingBuffer: '',
+      // Story 6.7: oracle-frog state machine + persisted pad home.
+      agentState: 'idle',
+      oraclePadPosition: null,
 
       openPanel: () => set({ panelOpen: true }),
       closePanel: () => set({ panelOpen: false }),
@@ -178,6 +236,10 @@ export const useAgentStore = create<AgentState>()(
           messages: [],
           streamingMessageId: null,
           streamingBuffer: '',
+          // Story 6.7: switching sessions resets the oracle to idle —
+          // the previous session's `thinking` / `speaking` state must
+          // not persist across the switch.
+          agentState: 'idle',
         });
         const messages = await agentApi.getMessages(id);
         if (requestId !== activeMessagesLoadId) return;
@@ -363,8 +425,14 @@ export const useAgentStore = create<AgentState>()(
                 m.id === optimisticId ? { ...m, id: event.message_id } : m,
               ),
               streamingMessageId: event.message_id,
+              // Story 6.7: a fresh turn cancels any pending revert
+              // from the previous turn's `done` / `error` and forces
+              // the frog into 'thinking' — `success` → `idle` doesn't
+              // get to clobber the new turn.
+              agentState: 'thinking',
             };
           });
+          clearAgentStateRevert();
           pendingOptimisticAssistantId = null;
           return;
         }
@@ -373,11 +441,18 @@ export const useAgentStore = create<AgentState>()(
             const id = s.streamingMessageId;
             if (id === null) return {};
             const nextBuffer = s.streamingBuffer + event.text;
+            // Story 6.7: first chunk after `start` flips the frog
+            // from 'thinking' to 'speaking'; subsequent chunks while
+            // already 'speaking' don't transition (the throat-sac
+            // pulse driven by chunk arrival lives inside <OracleFrog>).
+            const nextAgentState =
+              s.agentState === 'thinking' ? 'speaking' : s.agentState;
             return {
               streamingBuffer: nextBuffer,
               messages: s.messages.map((m) =>
                 m.id === id ? { ...m, content: nextBuffer } : m,
               ),
+              agentState: nextAgentState,
             };
           });
           return;
@@ -385,21 +460,46 @@ export const useAgentStore = create<AgentState>()(
         if (event.type === 'done') {
           set((s) => {
             const id = s.streamingMessageId;
-            if (id === null) return { streamingMessageId: null, streamingBuffer: '' };
+            if (id === null) {
+              return {
+                streamingMessageId: null,
+                streamingBuffer: '',
+                agentState: 'success',
+              };
+            }
             return {
               messages: s.messages.map((m) =>
                 m.id === id ? { ...m, status: 'complete' } : m,
               ),
               streamingMessageId: null,
               streamingBuffer: '',
+              agentState: 'success',
             };
           });
+          // Story 6.7: schedule the 1200ms revert to idle. Cancel any
+          // earlier pending revert first so back-to-back done events
+          // don't double-fire.
+          clearAgentStateRevert();
+          agentStateRevertHandle = setTimeout(() => {
+            agentStateRevertHandle = null;
+            // Only revert if we're still in 'success' — a fresh send
+            // may have already moved the frog to 'thinking'.
+            if (useAgentStore.getState().agentState === 'success') {
+              useAgentStore.setState({ agentState: 'idle' });
+            }
+          }, 1200);
           return;
         }
         if (event.type === 'error') {
           set((s) => {
             const id = s.streamingMessageId;
-            if (id === null) return { streamingMessageId: null, streamingBuffer: '' };
+            if (id === null) {
+              return {
+                streamingMessageId: null,
+                streamingBuffer: '',
+                agentState: 'error',
+              };
+            }
             return {
               messages: s.messages.map((m) =>
                 m.id === id
@@ -413,8 +513,18 @@ export const useAgentStore = create<AgentState>()(
               ),
               streamingMessageId: null,
               streamingBuffer: '',
+              agentState: 'error',
             };
           });
+          // Story 6.7: 2000ms revert to idle (same cancel-on-fresh-turn
+          // pattern as `done`).
+          clearAgentStateRevert();
+          agentStateRevertHandle = setTimeout(() => {
+            agentStateRevertHandle = null;
+            if (useAgentStore.getState().agentState === 'error') {
+              useAgentStore.setState({ agentState: 'idle' });
+            }
+          }, 2000);
         }
       },
 
@@ -429,16 +539,28 @@ export const useAgentStore = create<AgentState>()(
         const sessionId = get().activeSessionId;
         // Abort the local fetch + bump the token so any late-arriving
         // events from the cancelled stream bail at the onEvent gate.
+        // Also clears any pending agentState revert (story 6.7) so a
+        // late `success → idle` from the cancelled turn doesn't fire.
         abortActiveStream();
         set((s) => {
           const id = s.streamingMessageId;
-          if (id === null) return { streamingMessageId: null, streamingBuffer: '' };
+          if (id === null) {
+            return {
+              streamingMessageId: null,
+              streamingBuffer: '',
+              // Story 6.7: cancel always returns the frog to idle —
+              // a cancelled turn shouldn't leave the frog stuck in
+              // `thinking` / `speaking`.
+              agentState: 'idle',
+            };
+          }
           return {
             messages: s.messages.map((m) =>
               m.id === id ? { ...m, status: 'cancelled' } : m,
             ),
             streamingMessageId: null,
             streamingBuffer: '',
+            agentState: 'idle',
           };
         });
         if (sessionId !== null) {
@@ -453,12 +575,28 @@ export const useAgentStore = create<AgentState>()(
           }
         }
       },
+
+      // Story 6.7: Oracle-frog state-machine setters. `setAgentState`
+      // is a pure setter; ingestSseEvent + AgentComposer are the only
+      // call sites today. `setOraclePadPosition` is the entry point
+      // OracleFrogManager's first-mount initialiser uses to seed the
+      // home position when there's no persisted value.
+      setAgentState: (state) => {
+        set({ agentState: state });
+      },
+      setOraclePadPosition: (pos) => {
+        set({ oraclePadPosition: pos });
+      },
     }),
     {
       name: 'agent-store-v1',
       partialize: (s): PersistedShape => ({
         panelOpen: s.panelOpen,
         activeSessionId: s.activeSessionId,
+        // Story 6.7: persist the oracle home so it survives reloads.
+        // `agentState` is intentionally NOT persisted — it's a
+        // per-session animation state that must reset on reload.
+        oraclePadPosition: s.oraclePadPosition,
       }),
     },
   ),
