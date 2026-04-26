@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act } from '@testing-library/react';
 
 vi.mock('../../api/agentApi', () => ({
   listSessions: vi.fn(async () => []),
@@ -17,6 +17,33 @@ vi.mock('../../api/agentApi', () => ({
 
 vi.mock('../../hooks/useAgentSse', () => ({
   streamAgentChat: vi.fn(async () => ({ abort: vi.fn() })),
+}));
+
+// Story 6.7: mock @react-three/drei's <View> + <PerspectiveCamera>
+// so the AgentPanel test doesn't try to instantiate R3F. We render
+// the View as a plain div with the same className/track shape so
+// existing assertions on `.agent-panel__oracle` still pass.
+vi.mock('@react-three/drei', () => {
+  const React = require('react') as typeof import('react');
+  return {
+    View: ({
+      as: As = 'div',
+      className,
+      style,
+      children,
+    }: {
+      as?: keyof React.JSX.IntrinsicElements;
+      className?: string;
+      style?: React.CSSProperties;
+      children?: React.ReactNode;
+    }) => React.createElement(As, { className, style }, children),
+    PerspectiveCamera: () => null,
+  };
+});
+
+// Sub the @react-three/fiber pieces too — OracleFrog uses useFrame.
+vi.mock('@react-three/fiber', () => ({
+  useFrame: vi.fn(),
 }));
 
 import { AgentPanel } from './AgentPanel';
@@ -57,10 +84,15 @@ describe('AgentPanel', () => {
     expect(document.querySelectorAll('.agent-panel__divider')).toHaveLength(2);
   });
 
-  it('shows the Oracle-Frog placeholder caption (Story 6.7 will replace it)', () => {
+  it('renders the AgentPanelOracleView (replaces 6.2 placeholder per Story 6.7)', () => {
     useAgentStore.setState({ panelOpen: true });
     render(<AgentPanel />);
-    expect(screen.getByText(/oracle frog/i)).toBeTruthy();
+    // The mocked drei View renders as a div with the same
+    // agent-panel__oracle className the placeholder used. The
+    // surrounding section--oracle wrapper still drives the 16:10
+    // aspect-ratio rule.
+    expect(document.querySelector('.agent-panel__section--oracle')).not.toBeNull();
+    expect(document.querySelector('.agent-panel__oracle')).not.toBeNull();
   });
 
   it('Escape closes the panel when the composer is unfocused', () => {

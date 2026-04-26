@@ -14,6 +14,7 @@ import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
 import { OracleFrogManager } from '../agent/OracleFrogManager';
+import { OracleAquariumView } from '../agent/OracleAquariumView';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { InfoPopup } from '../ui/InfoPopup';
@@ -347,6 +348,15 @@ export function PondScene() {
           intensity={glowIntensity}
         />
       </EffectComposer>
+      {/* Story 6.7: secondary view rendering the Oracle Frog into
+          the AgentPanel's "aquarium window". Mounted directly inside
+          the shared Canvas (NOT via tunnel-rat / View.Port) so the
+          render order is deterministic — drei's <View> registers a
+          useFrame at index=2 (vs EffectComposer's renderPriority=1)
+          so the panel's frog viewport paints AFTER the main bloom
+          render in the same frame. The track DOM ref is published
+          by AgentPanelOracleView via useOracleViewStore. */}
+      <OracleAquariumView />
     </Canvas>
     <PondSearchOverlay hasVisiblePads={renderTodos.length > 0} />
     </>

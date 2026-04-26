@@ -25,7 +25,7 @@ import { NeonScrollbar } from '../ui/NeonScrollbar';
 import { AgentComposer } from './AgentComposer';
 import { AgentControlsRow } from './AgentControlsRow';
 import { AgentMessageList } from './AgentMessageList';
-import { AgentPanelOraclePlaceholder } from './AgentPanelOraclePlaceholder';
+import { AgentPanelOracleView } from './AgentPanelOracleView';
 import { AgentSessionsMenu } from './AgentSessionsMenu';
 import './AgentPanel.css';
 
@@ -129,7 +129,7 @@ export function AgentPanel() {
   return (
     <aside className="agent-panel" role="complementary" aria-label="Agent chat">
       <section className="agent-panel__section agent-panel__section--oracle">
-        <AgentPanelOraclePlaceholder />
+        <AgentPanelOracleView />
       </section>
       <div className="agent-panel__divider" role="separator" />
       <section className="agent-panel__section agent-panel__section--chat">
