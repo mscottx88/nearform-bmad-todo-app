@@ -112,8 +112,9 @@ The `proposal_kind` field (already on `SkillSpec`) is now meaningful — it's `N
 
 **Field semantics:**
 - `reasoning` — REQUIRED. Becomes the chat-bubble prose typed via the standard chunk stream (so the user sees a normal assistant reply); also written to `chat_messages.content`.
-- `suggestions` — list of zero-or-more per-field rewrites. v1 only ever produces suggestions for `field: "text"` (no other fields are user-editable today via `PATCH /api/todos/{id}` text-content path). Schema is widened anyway so future fields (e.g. notes) require no contract change.
-  - `field` — must be a key the existing `PATCH /api/todos/{id}` endpoint accepts. v1 valid values: `"text"`. Anything else triggers AC 7 server-side validation rejection.
+- `suggestions` — list of zero-or-more per-field rewrites. v1 produces suggestions for **`field: "text"`** (todo body wording) and **`field: "due_date"`** (deadline as ISO 8601 datetime). Schema is widened so future fields (e.g. notes) require no contract change.
+  - `field` — must be a key the existing `PATCH /api/todos/{id}` endpoint accepts. v1 valid values: `"text"`, `"due_date"`. Anything else triggers AC 7 server-side validation rejection (`TodoUpdate` is `extra="forbid"`).
+  - For `field: "due_date"`: `original` is the current ISO datetime string (or empty string when no deadline is set), `revised` is the new ISO 8601 datetime with timezone offset (e.g. `"2026-05-01T17:00:00+00:00"`). The LLM is given the current calendar date in the task description so phrases like "May 1", "next Monday", "by 5pm Friday" anchor correctly.
   - `original` — exact current value. Exposed in the diff so the user sees what's being replaced; not strictly required for the PATCH (the backend doesn't compare originals), but required for the diff renderer (AC 5).
   - `revised` — new value to apply.
   - `reason` — short justification, displayed under the diff per AC 5.
@@ -257,9 +258,11 @@ Or equivalently, the `build()` function returns `Crew` AND publishes the resolve
 
 **When** the request reaches the existing PATCH route
 
-**Then** Pydantic (the existing [`TodoUpdate` schema](backend/src/schemas/todo.py)) MUST reject any field not already in its allowlist with a 422 — NO new endpoints, NO new server-side validation needed. Verify the existing schema disallows arbitrary keys (`extra="forbid"` or equivalent) so a malicious or buggy LLM proposal can't write to fields like `id` or `created_at`.
+**Then** Pydantic (the existing [`TodoUpdate` schema](backend/src/schemas/todo.py)) MUST reject any field not in its allowlist with a 422 — NO new endpoints, NO new server-side validation needed. The schema disallows arbitrary keys via `model_config = ConfigDict(extra="forbid")` so a malicious or buggy LLM proposal can't write to fields like `id` or `created_at`.
 
-If `extra="forbid"` is NOT already set on `TodoUpdate`, this story adds it. Document the existing state in dev notes and only widen if needed. A fast confirmation: `grep -n 'extra' backend/src/schemas/todo.py`.
+**v1 allowlist:** `text`, `completed`, `color`, `position_x`, `position_y`, `due_date`. The rephrase skill's LLM is constrained by its prompt to emit only `field: "text"` or `field: "due_date"`; any drift outside that pair fails Pydantic validation before reaching service code.
+
+This story adds the `extra="forbid"` config (it was not set previously). A fast confirmation: `grep -n 'extra' backend/src/schemas/todo.py`.
 
 ### AC 8 — Tests
 
@@ -592,3 +595,61 @@ Schema additions: `RephraseCandidate` model + `candidates: list[RephraseCandidat
 | 2026-04-25 | Initial implementation: rephrase skill + crew_runner proposal pipeline + frontend SSE/ingest/renderer wired through. Mid-flight pivot from string-parse to `output_pydantic`. |
 | 2026-04-26 | User-driven enhancement: search-based candidate resolution. `_resolve_via_search` runs hybrid_search and returns either a clear-winner target_id or top-3 candidate chips. Frontend renders chips that re-fire rephrase with the chosen id. Defensive runtime hardening (optional `?` chaining on payload arrays, error-chip surfacing on mutation failures). |
 | 2026-04-26 | User-driven enhancement (round 2): cross-turn history inheritance + better intent-classifier routing. `_resolve_from_history` reads the immediate-prior assistant turn's `metadata_.proposal.targets[0]` and inherits it as the resolved target — handles "rephrase the dashboard task" → "add a due date" without re-stating the todo. Scope-limited to the IMMEDIATE prior assistant turn so stale targets from older conversation don't leak. Rephrase skill description rewritten to be directive ("Edit, rephrase, clarify, or add missing details ... Use this for ANY request that changes an existing todo's text — phrases like 'rephrase X', 'reword X', 'add a due date to X', 'edit X'") so the intent classifier picks rephrase for edit-style asks even when the user doesn't say "rephrase". 4 new history-resolver tests cover the inherit / no-proposal / no-history / immediate-prior-only scopes. 244/244 backend tests green. |
+
+### Review Findings
+
+Code review of commit `f3aedc3` — three parallel layers (Blind Hunter / Edge Case Hunter / Acceptance Auditor) over the full diff + spec. Triaged 2026-04-26.
+
+#### Decision Needed
+
+- [x] [Review][Decision] **Scope expansion: `due_date` field added to `text_rewrite` proposals** — Resolved 2026-04-26 (option a): keep the expansion. AC 3 and AC 7 updated to list `text` + `due_date` as v1-supported `field` values.
+
+#### Patch (to apply)
+
+Critical / High:
+- [ ] [Review][Patch] **LLM picks wrong year for date phrases (e.g. "May 1" → 2025 instead of 2026) because the prompt says "based on today's calendar" but never tells the LLM what today is** [backend/src/agent/skills/rephrase.py:_build_task_description] — inject `datetime.now(UTC)` (date + day-of-week) into the task description so the model has a concrete anchor for "next Monday", "May 1", "by Friday".
+- [x] [Review][Dismissed] **Migration `0001_schema.py` edited in place** — dismissed per user policy: project keeps a single migration with no add-column revisions; existing dev databases are recreated rather than migrated.
+- [ ] [Review][Patch] **`due_date` staleness false-positive: string equality on ISO datetimes (e.g. `+00:00` vs `Z`, missing microseconds) flags every suggestion as stale** [frontend/src/components/agent/RephraseProposal.tsx:113-118] — compare via `Date.getTime()` with NaN guards.
+- [ ] [Review][Patch] **Cancelled bubble shows clickable Accept/Dismiss when cancel arrives between proposal-emit and first chunk** [frontend/src/components/agent/AgentMessage.tsx:299] — gate `RephraseProposal` render on `message.status === 'complete'`.
+- [ ] [Review][Patch] **Bad explicit `todo_ids[0]` falls through to history+search using "rephrase this" as query, surfacing arbitrary noisy chips** [backend/src/agent/skills/rephrase.py:392-398] — when `_fetch_todo_content` fails for an explicit/UUID-extracted target, hard-flip to empty-target rather than degrading to search.
+- [ ] [Review][Patch] **Soft-deleted target slips past staleness check** [frontend/src/components/agent/RephraseProposal.tsx:221-223] — when `targetId` is set but `liveTarget === undefined` AND `useTodos` has settled, treat as stale-deleted with disabled Accept and a distinct chip.
+
+Medium:
+- [ ] [Review][Patch] **Reasoning prose not stripped on proposal path (chat path strips, proposal path doesn't)** [backend/src/agent/crew_runner.py:361] — `prose = envelope["reasoning"].strip()` for symmetry.
+- [ ] [Review][Patch] **`MAX_CHUNKS_PER_RUN` truncates streamed reasoning but `metadata.proposal.reasoning` is persisted in full — reload shows different text than the live stream** [backend/src/agent/crew_runner.py:365 + 394-396] — either truncate the persisted reasoning too, or drop the cap on proposal-path reasoning.
+- [ ] [Review][Patch] **`proposal` SSE event silently dropped when `streamingMessageId` is null (no warning, no retry)** [frontend/src/stores/useAgentStore.ts:417-447] — at minimum log a `console.warn`; ideally queue and apply when `start` lands.
+- [ ] [Review][Patch] **`AgentMessage.readProposalMetadata` casts `message.metadata` without null guard — older rows with `null` metadata throw** [frontend/src/components/agent/AgentMessage.tsx:309-332].
+- [ ] [Review][Patch] **`_resolve_via_search` single-result auto-resolve at score=0.35 has no comparison signal (second_score defaults to 0.0)** [backend/src/agent/skills/rephrase.py:170-176] — require a higher floor (e.g. 0.55) when only one candidate exists, or fall through to chip-display.
+- [ ] [Review][Patch] **Candidate-chip click re-fires hardcoded `'rephrase this'` losing the user's original instruction** [frontend/src/components/agent/RephraseProposal.tsx:236-242] — re-send the user's prior message text (or store it on the proposal envelope).
+- [ ] [Review][Patch] **`useTodos` cache-miss / loading / error states all silently skip the staleness check, leaving Accept enabled** [frontend/src/components/agent/RephraseProposal.tsx:220-223] — disable Accept while `todosQuery.isLoading || todosQuery.isError`.
+- [ ] [Review][Patch] **Accept button doesn't disable while mutation is pending — dual-click double-mutates** [frontend/src/components/agent/RephraseProposal.tsx:122-148] — fold `updateTodo.isPending` into `acceptDisabled`.
+- [ ] [Review][Patch] **`SUPPORTED_FIELDS` and `MUTATION_FIELD_KEY` are parallel constants that drift independently** [frontend/src/components/agent/RephraseProposal.tsx:80-90] — derive `SUPPORTED_FIELDS` from `Object.keys(MUTATION_FIELD_KEY)`.
+- [ ] [Review][Patch] **Empty `original` for unset due_date renders "→ revised" with a leading arrow and no left side** [frontend/src/components/agent/RephraseProposal.tsx:166-172] — render `(none)` placeholder when `original === ''`.
+- [ ] [Review][Patch] **`NeonDateTimePicker` falls through to "next hour" when parsing a malformed ISO `value` — silently overwrites the bad data on save** [frontend/src/components/ui/NeonDateTimePicker.tsx ~:55-64] — show a warning chip and disable Save until user explicitly chooses.
+- [ ] [Review][Patch] **`NeonDateTimePicker` truncates seconds to `:00` on save** [frontend/src/components/ui/NeonDateTimePicker.tsx ~:34-46] — preserve sub-minute precision from the input.
+- [ ] [Review][Patch] **`NeonDateTimePicker` doesn't resync draft state when `value` prop changes mid-mount** [frontend/src/components/ui/NeonDateTimePicker.tsx ~:69-70] — `useEffect` on `[value]` to reset.
+- [ ] [Review][Patch] **`formatDueDate` day-bucket via `Math.round(ms/dayMs)` is off-by-one across DST boundaries** [frontend/src/utils/formatTodoMeta.ts:55-61].
+- [ ] [Review][Patch] **`_resolve_via_search` query embeds verbs like "rephrase"/"reword" — biases FTS/embedding ranking** [backend/src/agent/skills/rephrase.py:154] — strip leading verb-phrases before searching.
+- [ ] [Review][Patch] **`_extract_proposal_envelope` overwrites `payload["candidates"]` only when truthy — possible LLM-supplied list leak** [backend/src/agent/crew_runner.py:217-224] — set `payload["candidates"] = []` unconditionally first.
+- [ ] [Review][Patch] **`_resolve_from_history` `metadata_.get` would `AttributeError` if `metadata_` is `None`** [backend/src/agent/skills/rephrase.py:123] — guard with `(message.metadata_ or {}).get(...)`.
+- [ ] [Review][Patch] **TOCTOU: `_resolve_via_search` ranks via `hybrid_search` then re-fetches via `_fetch_todo_content`** [backend/src/agent/skills/rephrase.py:420-422] — reuse `top.todo` from the search result instead of opening a second session.
+
+Low / Tests / Docs:
+- [ ] [Review][Patch] **Missing test: `agent_invalid_proposal_shape` for missing-`suggestions`-key path** [backend/tests/agent/test_crew_runner_proposal.py] — current shape-error test only covers blank-reasoning.
+- [ ] [Review][Patch] **Missing test: E2E intent-classifier routes "rephrase this" to rephrase skill (mocked LLM)** — spec AC 8 line 280.
+- [ ] [Review][Patch] **Missing test: `due_date` staleness chip parallel to text-staleness test** [frontend/src/components/agent/RephraseProposal.test.tsx].
+- [ ] [Review][Patch] **InfoPopup test mocks `useUpdateTodo` as `{ mutate: vi.fn() }` without asserting payload shape — wouldn't catch a `due_date` (snake) vs `dueDate` (camel) regression** [frontend/src/components/ui/InfoPopup.test.tsx:9-12].
+- [ ] [Review][Patch] **Verify `finalise_assistant_message` error/cancel branches don't wipe `metadata.proposal`** [backend/src/api/agent.py:124-149] — proposal can fire before failure; metadata should survive on the row.
+- [ ] [Review][Patch] **Spec drift: AC 3 / AC 7 still say "v1 valid values: `text`"** [_bmad-output/implementation-artifacts/6-3-rephrase-skill.md:115-116] — update to reflect the `due_date` expansion (or revert the impl per the Decision above).
+- [ ] [Review][Patch] **Document `formatDueDate`'s viewer-local-time day-bucket semantics** [frontend/src/utils/formatTodoMeta.ts:40-67] — comment that "today/tomorrow/overdue Xd" is relative to viewer's local timezone, so collaborators in different zones may see different buckets for the same instant.
+- [ ] [Review][Patch] **`update_message`'s "Replace-and-set" semantic wipes pre-existing metadata keys when caller passes a partial dict** [backend/src/services/chat_service.py:157-162] — comment claims replace-not-merge, which is correct, but worth a docstring note + a test that exercises pre-existing keys.
+
+#### Deferred (pre-existing or low-impact follow-up)
+
+- [x] [Review][Defer] **Frozen-dataclass mutation via `object.__setattr__` on `SkillContext`** [backend/src/agent/skills/rephrase.py:434-435] — deferred. Spec sanctioned the pattern (line 175), tests cover the visible behaviour. A future refactor could move the publish channel to a mutable holder field; not urgent.
+- [x] [Review][Defer] **Unbounded candidate / `original` strings overflow chip layout for 1000-char single-word todos** [frontend/src/components/agent/RephraseProposal.css] — deferred. Visual-only edge case; truncation at ~80 chars with ellipsis can land alongside other UX polish.
+- [x] [Review][Defer] **`NeonDateTimePicker` window-level Escape listener with `preventDefault` may compete with other Escape handlers** — deferred. Standard modal pattern; no currently-broken interaction observed.
+
+#### Dismissed (not findings — verified or speculative future-proofing)
+
+10 items dismissed: half-hour timezone offset (code is correct via `Math.abs`); two-tab race on rephrase resolution (edge hunter explicitly verified safe); `_chunk_words` blank-reasoning edge (already guarded upstream); `streamAgentChat` UUID validation (speculative); `ChatRequestContext` 51+ entries cap (intentional); `_resolve_from_history` loop-walks-but-bails comment (matches behaviour); persist-middleware sync audit (speculative); test brittleness from `crew.kickoff.return_value = "string"` (functionally equivalent to real `CrewOutput.__str__`); UUID-from-message regex matches non-todo UUIDs (degrades safely via fetch failure); `composeIsoLocal` lacks fractional seconds for `DateTime(timezone=True)` column (intentional minute precision).

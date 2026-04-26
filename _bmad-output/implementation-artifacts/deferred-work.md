@@ -314,3 +314,9 @@ If this file grows faster than it drains, something's wrong with the process, no
 - `[OPEN]` AC 1 migration round-trip is a manual deploy gate per Story DoD, not a unit test. (backend/migrations/versions/0001_schema.py)
 </content>
 </invoke>
+## Deferred from: code review of 6-3-rephrase-skill (2026-04-26)
+
+- [OPEN] **Frozen-dataclass mutation via `object.__setattr__` on `SkillContext`** — `rephrase.py:434-435` publishes `resolved_target_id` / `resolved_candidates` by bypassing `frozen=True`. Spec sanctioned (line 175); not urgent. Future refactor: move to a mutable holder field on the dataclass or have `build()` return both the crew and the resolution dict.
+- [OPEN] **Unbounded candidate / suggestion `original` strings overflow chip layout** — visual-only; truncation at ~80 chars with ellipsis can land alongside other UX polish.
+- [OPEN] **`NeonDateTimePicker` window-level Escape listener with `preventDefault`** — standard modal pattern; no currently-broken interaction observed. Watch for conflicts when more global Escape handlers land.
+- [OPEN] **Lily-pad text re-wraps unstably with single mouse-wheel zoom notch** — observed live during 6-3 testing 2026-04-26 (NOT from this commit's diff; pre-existing in pond/LilyPad rendering). Text inside the pad reflows to noticeably different line counts with one notch of zoom — should be more stable. Likely cause: text width is measured against a viewport-scaled basis, and tiny camera-zoom deltas cross word-boundary thresholds. Investigation: snap text-wrap basis to discrete zoom buckets, or use a hysteresis band around the wrap threshold.

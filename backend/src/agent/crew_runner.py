@@ -214,6 +214,18 @@ def _extract_proposal_envelope(
             code="agent_invalid_proposal_shape",
             message="Structured output `reasoning` must be a non-empty string",
         )
+    # CR: clamp the reasoning to its stripped form so the streamed prose
+    # doesn't carry trailing whitespace that creates empty chunks +
+    # blank lines in the chat bubble. Symmetric with `chat`'s
+    # `str(result).strip()`.
+    reasoning = reasoning.strip()
+    # CR: reset `candidates` to an empty list before stamping the
+    # server-side resolver's chips. Without this, an LLM that
+    # hallucinated entries into the `candidates` field (which IS part of
+    # the schema, so `extra="forbid"` doesn't reject it) would leak
+    # through whenever the resolver had nothing to add. The wire shape
+    # always has the resolver as the single source of truth.
+    payload["candidates"] = []
     if resolved_candidates:
         # Pydantic models in the candidates list need to round-trip
         # through model_dump for JSON serialisation; UUIDs become
@@ -264,6 +276,12 @@ def run_crew(
     """
     q: queue.Queue[dict[str, Any] | None] = ctx.event_queue
     prose = ""
+    # CR: track the proposal envelope across the run so a cancel that
+    # arrives AFTER the proposal SSE emit but BEFORE done still
+    # persists the envelope to the assistant row. Without this, the
+    # bubble shows the proposal block live but loses it on panel
+    # close+reopen.
+    envelope_metadata: dict[str, Any] | None = None
 
     # P5: pre-check the skill name. Previously a missing skill produced
     # a `KeyError` caught by the broad-except below and reported as
@@ -290,6 +308,7 @@ def run_crew(
             prose=prose,
             error="cancelled",
             cancelled=True,
+            metadata=envelope_metadata,
         )
 
     try:
@@ -327,7 +346,6 @@ def run_crew(
         # event before any chunks fire. On extraction failure, emit
         # `agent_invalid_proposal` and fail the run — never silently
         # fall back to streaming the raw output.
-        envelope_metadata: dict[str, Any] | None = None
         if spec.proposal_kind is not None:
             extracted = _extract_proposal_envelope(
                 result,
@@ -362,6 +380,20 @@ def run_crew(
 
         chunks = _chunk_words(prose)
         chunk_count = len(chunks)
+
+        # CR: if the chunk pipeline truncated the prose, the persisted
+        # `metadata.proposal.reasoning` (and `chat_messages.content`)
+        # would otherwise carry the FULL untrustracted text, so a panel
+        # close+reopen would show different text than the live stream.
+        # Re-derive both from the actually-emitted chunks so the live
+        # view and the persisted view match. Per `_chunk_words`'s
+        # spacing rules, `"".join(chunks)` reconstructs the streamed
+        # prose with the same whitespace collapse the user sees.
+        if chunks and chunks[-1] == "…[truncated]":
+            truncated_prose = "".join(chunks)
+            prose = truncated_prose
+            if envelope_metadata is not None:
+                envelope_metadata["proposal"]["reasoning"] = truncated_prose
 
         if chunk_count == 0:
             q.put(

@@ -42,20 +42,30 @@ export function formatRelative(iso: string): string {
  * Story 6.3: format a due deadline (ISO datetime string with
  * timezone, e.g. "2026-05-01T17:00:00+00:00") for the InfoPopup.
  * Renders "YYYY-MM-DD HH:mm" plus a relative day-bucket hint:
- * "today", "tomorrow", "in 4d", "overdue 2d", etc. Day-bucket
- * comparison snaps both timestamps to local midnight so a 1am visit
- * doesn't show "yesterday" for a deadline later today.
+ * "today", "tomorrow", "in 4d", "overdue 2d", etc.
+ *
+ * **Viewer-local timezone:** the day-bucket comparison snaps both
+ * timestamps to LOCAL midnight, so a Sydney user and a London user
+ * looking at the same UTC instant may see different buckets when the
+ * deadline straddles their respective midnight. This is intentional
+ * — the user wants "is this due today _for me_". The exact ISO
+ * datetime is rendered alongside, so the underlying value is always
+ * unambiguous.
+ *
+ * **DST-safe day diff:** computing `(due - today) / 86_400_000`
+ * across a DST boundary yields 23 or 25 hours instead of 24, and
+ * `Math.round` flips the bucket. We compare ordinal calendar-day
+ * indices (`Date.UTC(local Y, local M, local D)` rounded to days)
+ * which is purely calendar-based and stable across DST.
  */
 export function formatDueDate(iso: string): string {
   if (!iso) return '—';
   const due = new Date(iso);
   if (Number.isNaN(due.getTime())) return '—';
 
-  const now = new Date();
-  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueMidnight = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const dayMs = 86_400_000;
-  const diffDays = Math.round((dueMidnight.getTime() - todayMidnight.getTime()) / dayMs);
+  const todayIndex = calendarDayIndex(new Date());
+  const dueIndex = calendarDayIndex(due);
+  const diffDays = dueIndex - todayIndex;
 
   let hint: string;
   if (diffDays === 0) hint = '(today)';
@@ -67,4 +77,14 @@ export function formatDueDate(iso: string): string {
   // Reuse formatTimestamp for the "YYYY-MM-DD HH:mm" rendering so
   // both Created/Updated and Due rows look consistent.
   return `${formatTimestamp(iso)} ${hint}`;
+}
+
+/**
+ * Ordinal calendar-day index that increments by exactly 1 between
+ * consecutive LOCAL-time calendar days. Stable across DST.
+ */
+function calendarDayIndex(d: Date): number {
+  return Math.floor(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000,
+  );
 }

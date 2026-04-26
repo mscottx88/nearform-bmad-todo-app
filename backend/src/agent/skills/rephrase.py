@@ -14,6 +14,7 @@ import logging
 import re
 import textwrap
 import uuid
+from datetime import UTC, date, datetime
 from typing import Any
 
 from crewai import Crew, Process, Task
@@ -23,6 +24,7 @@ from src.agent.skills.registry import SkillContext
 from src.agent.tools.get_todo import GetTodoTool
 from src.exceptions import TodoNotFoundError
 from src.schemas.agent import RephraseCandidate, RephraseEnvelope
+from src.schemas.todo import TodoResponse
 from src.services import search_service, todo_service
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,19 @@ _REPHRASE_UNTRUSTED_DATA_FRAMING = (
 _UUID_RE = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
+# CR P29: leading verb phrases like "rephrase the dashboard task" bias
+# the FTS / embedding ranking against the verb itself ("rephrase" rarely
+# appears in actual todo content, but the embedding similarity isn't
+# zero either). Strip the verb (and an optional polite "please") before
+# the search query so the resolver sees the user's noun phrase. Only
+# the FIRST match is removed to keep the rest of the message intact.
+_REPHRASE_VERB_RE = re.compile(
+    r"^\s*(?:please\s+)?"
+    r"(?:rephrase|reword|edit|fix|tighten|clarify|update|change|"
+    r"modify|reframe|rewrite)\s+",
+    re.IGNORECASE,
 )
 
 # Empty-target fallback prose: when no target todo can be resolved we
@@ -120,7 +135,12 @@ def _resolve_from_history(ctx: SkillContext) -> uuid.UUID | None:
     for message in reversed(ctx.history):
         if message.role != "assistant":
             continue
-        proposal = message.metadata_.get("proposal")
+        # Defence in depth: schema gives `metadata_` a `default_factory=dict`
+        # (never None at validation time), but a directly-constructed
+        # ChatMessageResponse in tests or a future migration that left
+        # legacy rows with NULL metadata could surface None here. The
+        # `or {}` guard keeps the resolver from raising on those rows.
+        proposal = (message.metadata_ or {}).get("proposal")
         if not isinstance(proposal, dict):
             return None  # immediate-prior assistant had no proposal
         targets = proposal.get("targets")
@@ -133,54 +153,94 @@ def _resolve_from_history(ctx: SkillContext) -> uuid.UUID | None:
     return None
 
 
+# CR: when the hybrid search returns a single result with no
+# competitor to compare against, the gap-based "clear winner" rule
+# is meaningless (gap = top - 0 = top.score). A higher absolute
+# floor is the only signal we have left. 0.55 is well into "the
+# query strongly matches this todo" territory on the [0, 1] hybrid
+# score scale.
+_SINGLE_RESULT_AUTO_RESOLVE_MIN_SCORE = 0.55
+
+
 def _resolve_via_search(
     ctx: SkillContext,
-) -> tuple[uuid.UUID | None, list[RephraseCandidate]]:
+) -> tuple[uuid.UUID | None, TodoResponse | None, list[RephraseCandidate]]:
     """Run hybrid search over the user message and decide between
     auto-resolve (clear winner) and "show candidates for user pick".
 
-    Returns `(target_id, candidates)`:
-    - `(uuid, [])` when the top hit is a clear winner (score gap +
-      absolute-score floor both met).
-    - `(None, [candidate, ...])` when results are ambiguous — the
-      caller surfaces them to the user as clickable chips.
-    - `(None, [])` when search returns no usable results.
+    Returns `(target_id, target_todo, candidates)`:
+    - `(uuid, TodoResponse, [])` when the top hit is a clear winner.
+      The TodoResponse is the search result's already-fetched row, so
+      the caller does NOT need to round-trip back to `_fetch_todo_content`
+      (eliminates the TOCTOU window between rank and read).
+    - `(None, None, [candidate, ...])` when results are ambiguous —
+      the caller surfaces them to the user as clickable chips.
+    - `(None, None, [])` when search returns no usable results.
 
     Embedding-service or DB failures are swallowed and logged; the
     skill silently degrades to the empty-target fallback path so a
     transient search outage doesn't take down the whole rephrase
-    feature.
+    feature. `ValueError` from an unsearchable query (emoji-only,
+    stop-words-only) is treated as a non-event — debug log only — to
+    keep the noise floor low for legitimately-non-FTS-able input.
     """
-    query = ctx.user_message.strip()
-    if not query:
-        return None, []
+    raw = ctx.user_message.strip()
+    if not raw:
+        return None, None, []
+    # CR P29: strip leading verb phrases ("rephrase ", "edit the ",
+    # "please reword ", etc.) so the search ranker sees the noun
+    # phrase rather than the command word. Only the FIRST match is
+    # consumed; verbs that appear mid-sentence are left alone.
+    query = _REPHRASE_VERB_RE.sub("", raw, count=1).strip() or raw
     try:
         with ctx.session_factory() as session:
             response = search_service.hybrid_search(session, query)
+    except ValueError:
+        # Unsearchable query (empty tsquery: emoji-only, stop-words-only,
+        # punctuation-only). Distinguish from genuine outages so ops
+        # don't get paged on a "user said 'huh?'" no-op.
+        return None, None, []
     except Exception as exc:  # noqa: BLE001
         # Mirrors search_service's own broad-except handling — any
         # search failure is non-fatal here; we just lose the
         # candidate-suggestion affordance.
         logger.debug("rephrase search resolver failed: %s", exc)
-        return None, []
+        return None, None, []
     results = response.results
     if not results:
-        return None, []
+        return None, None, []
     top = results[0]
-    second_score = results[1].score if len(results) > 1 else 0.0
+    if len(results) == 1:
+        # No comparison signal — require a higher absolute floor before
+        # auto-picking the only hit. Anything below the high floor falls
+        # through to chip-display so the user gets a deliberate confirm.
+        if top.score >= _SINGLE_RESULT_AUTO_RESOLVE_MIN_SCORE:
+            return top.todo.id, top.todo, []
+        return None, None, [RephraseCandidate(id=top.todo.id, text=top.todo.text)]
+    second_score = results[1].score
     # Clear winner: top score is meaningful AND meaningfully ahead of
     # the next match. Use the explicit target.
     if (
         top.score >= _AUTO_RESOLVE_MIN_SCORE
         and (top.score - second_score) >= _CLEAR_WINNER_GAP
     ):
-        return top.todo.id, []
+        return top.todo.id, top.todo, []
     # Otherwise build candidate chips for the top-N.
     candidates = [
         RephraseCandidate(id=r.todo.id, text=r.todo.text)
         for r in results[:_MAX_CANDIDATES]
     ]
-    return None, candidates
+    return None, None, candidates
+
+
+def _todo_response_to_fields(todo: TodoResponse) -> dict[str, Any]:
+    """Project a TodoResponse into the (text, due_date) dict the LLM
+    prompt builder consumes. Centralised here so the search-resolver
+    fast path and `_fetch_todo_content` produce identical shapes."""
+    return {
+        "text": todo.text,
+        "due_date": todo.due_date.isoformat() if todo.due_date else None,
+    }
 
 
 def _fetch_todo_content(
@@ -203,13 +263,25 @@ def _fetch_todo_content(
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001  # mirrors GetTodoTool's broad-except
         return None, str(exc)
+    # `todo_service.get_todo` returns the SQLAlchemy `Todo` ORM model,
+    # not a `TodoResponse` — but they share the `.text` / `.due_date`
+    # attribute surface, so we project inline rather than threading an
+    # adapter through. The search-resolver path uses the equivalent
+    # `_todo_response_to_fields` helper for its TodoResponse value.
     return {
         "text": todo.text,
-        # Datetime → ISO 8601 string with timezone offset; None when
-        # no deadline is set. The LLM is instructed to write ISO
-        # datetimes back in the same shape.
         "due_date": todo.due_date.isoformat() if todo.due_date else None,
     }, None
+
+
+def _today_anchor_line(today: date) -> str:
+    """Render the "today is..." line we inject into every task
+    description so the LLM has a concrete anchor for date phrases like
+    "May 1", "next Monday", "by Friday". Without this, the model falls
+    back on its training-data prior and can pick a year off by ±1
+    (e.g. "May 1" → 2025 instead of 2026)."""
+    weekday = today.strftime("%A")
+    return f"Today's date is {today.isoformat()} ({weekday})."
 
 
 def _build_task_description(
@@ -217,6 +289,7 @@ def _build_task_description(
     target_fields: dict[str, Any] | None,
     target_error: str | None,
     candidates: list[RephraseCandidate] | None = None,
+    today: date | None = None,
 ) -> str:
     """Compose the prompt the LLM acts on.
 
@@ -232,7 +305,14 @@ def _build_task_description(
     (see `build()`); the LLM does NOT need to return them — but its
     reasoning prose is what surfaces in the chat bubble alongside the
     chips, so the prompt asks for a friendly disambiguation prompt.
+
+    `today` is injected on the normal-target path so date phrasing
+    like "May 1" or "next Monday" anchors to the current calendar.
+    Defaults to `datetime.now(UTC).date()` for production callers;
+    tests pass a fixed date for determinism.
     """
+    if today is None:
+        today = datetime.now(UTC).date()
     if target_fields is None:
         if candidates:
             # Ambiguous-search path: show the chips + ask the LLM for a
@@ -309,6 +389,8 @@ def _build_task_description(
             """\
         {framing}
 
+        {today_line}
+
         Target todo:
         - Current `text`: {target_text}
         - {due_date_line}
@@ -335,12 +417,15 @@ def _build_task_description(
             with timezone offset (e.g. "2026-05-01T17:00:00+00:00").
             The user's date phrasing may be informal — interpret
             "May 1", "1st May", "by 5pm Friday", "next Monday", etc.
-            into a concrete ISO datetime based on today's calendar.
+            **anchored to today's date as stated above** (NOT to your
+            training-data prior — pick the next future occurrence
+            relative to the date in the "Today's date is …" line).
             When the user gives only a date (no time of day), default
             the time to 17:00 (end of working day) UTC. When they
             give only a time, anchor it to today's date. If the user
             says "next Monday" and today is a Monday, use the Monday
-            SEVEN days from now.
+            SEVEN days from now. For bare months/days (e.g. "May 1"),
+            pick the next occurrence on or after today.
 
           **CRITICAL — when the user EXPLICITLY supplies new
           information**, you MUST produce a suggestion that captures
@@ -380,6 +465,7 @@ def _build_task_description(
         )
         .format(
             framing=_REPHRASE_UNTRUSTED_DATA_FRAMING,
+            today_line=_today_anchor_line(today),
             target_text=target_text,
             due_date_line=due_date_line,
             user_message=user_message,
@@ -397,47 +483,47 @@ def build(ctx: SkillContext) -> Crew:
     into `proposal.targets` and the candidate chips into the proposal
     payload without re-doing the resolution.
     """
-    target_id = _resolve_explicit_target_id(ctx)
+    explicit_id = _resolve_explicit_target_id(ctx)
+    target_id: uuid.UUID | None = None
     candidates: list[RephraseCandidate] = []
     target_fields: dict[str, Any] | None = None
     target_error: str | None = None
-    if target_id is not None:
-        target_fields, target_error = _fetch_todo_content(ctx, target_id)
-        if target_fields is None:
-            # Tool reported an error (todo not found, soft-deleted, etc.)
-            # — fall back to the empty-target path so the user sees
-            # helpful prose instead of an opaque tool failure.
-            target_id = None
 
-    if target_id is None:
-        # User-driven enhancement: inherit target from the immediate
-        # prior assistant turn's proposal. Handles "rephrase the
-        # dashboard task" → "add a due date" — the second turn has no
-        # explicit selection but the conversation context says "same
-        # todo".
+    if explicit_id is not None:
+        # CR: when the user explicitly named a target (clicked-pad
+        # selection, pasted UUID), do NOT fall through to history /
+        # search on a fetch failure — they meant THIS todo. Falling
+        # through would search the user's full prompt (often the bare
+        # UUID) and surface unrelated chips, which is more confusing
+        # than the empty-target prose ("I'm not sure which one…").
+        target_fields, target_error = _fetch_todo_content(ctx, explicit_id)
+        if target_fields is not None:
+            target_id = explicit_id
+    else:
+        # No explicit / UUID-in-message target — try cross-turn
+        # inheritance. Handles "rephrase the dashboard task" → "add
+        # a due date" — turn 2 has no explicit selection but the
+        # conversation context says "same todo".
         history_id = _resolve_from_history(ctx)
         if history_id is not None:
             target_fields, target_error = _fetch_todo_content(ctx, history_id)
             if target_fields is not None:
                 target_id = history_id
-            # else: fall through to search; the inherited row may have
-            # been deleted between turns.
+            # If the inherited row was deleted between turns, fall
+            # through to search — the prior conversation is no longer
+            # actionable so we prefer giving the user fresh chips
+            # over bailing entirely.
 
-    if target_id is None:
-        # No explicit / UUID-extracted / history-inherited target —
-        # search the user's todos for a match. The resolver may
-        # auto-pick a clear winner (target_id set, candidates empty)
-        # or surface ambiguous candidates (target_id None, candidates
-        # populated).
-        target_id, candidates = _resolve_via_search(ctx)
-        if target_id is not None:
-            target_fields, target_error = _fetch_todo_content(ctx, target_id)
-            if target_fields is None:
-                # Search resolved to an id but the row was deleted
-                # between search and fetch — skip back to the
-                # empty-target path.
-                target_id = None
-                candidates = []
+        if target_id is None:
+            # Search the user's todos for a match. The resolver
+            # auto-picks a clear winner (target_id set, candidates
+            # empty) or surfaces ambiguous candidates (target_id None,
+            # candidates populated). The TodoResponse from the search
+            # result is reused directly — no second fetch, so no TOCTOU
+            # window between rank and read.
+            target_id, search_target_todo, candidates = _resolve_via_search(ctx)
+            if target_id is not None and search_target_todo is not None:
+                target_fields = _todo_response_to_fields(search_target_todo)
 
     # Bypass frozen=True to publish the resolved state back to the api
     # layer / crew_runner. The frozen guarantee still holds for

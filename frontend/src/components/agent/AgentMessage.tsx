@@ -278,12 +278,19 @@ export function AgentMessage({ message, isStreaming }: Props) {
             )}
           </div>
         </div>
-        {proposal !== null && proposal.kind === 'text_rewrite' && (
-          <RephraseProposal
-            payload={proposal.payload as unknown as RephraseProposalPayload}
-            targets={proposal.targets}
-          />
-        )}
+        {/* CR: gate the proposal renderer on `status === 'complete'` so a
+            cancelled / failed bubble doesn't show clickable Accept/Dismiss
+            on a half-finished suggestion. The proposal envelope arrives
+            BEFORE the chunk stream, so cancel/error mid-stream can leave
+            metadata.proposal set on a non-complete row. */}
+        {proposal !== null &&
+          proposal.kind === 'text_rewrite' &&
+          message.status === 'complete' && (
+            <RephraseProposal
+              payload={proposal.payload as unknown as RephraseProposalPayload}
+              targets={proposal.targets}
+            />
+          )}
       </div>
     </div>
   );
@@ -307,6 +314,16 @@ interface RephraseProposalPayload {
 }
 
 function readProposalMetadata(message: ChatMessage): ProposalMetadata | null {
+  // CR: tolerate `null` / `undefined` metadata — older rows persisted
+  // before the JSONB default landed, or rows where the column was
+  // explicitly nulled, would otherwise crash on `(... as ...).proposal`.
+  if (
+    message.metadata === null ||
+    message.metadata === undefined ||
+    typeof message.metadata !== 'object'
+  ) {
+    return null;
+  }
   const candidate = (message.metadata as { proposal?: unknown }).proposal;
   if (
     candidate === null ||

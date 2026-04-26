@@ -112,12 +112,17 @@ def finalise_assistant_message(
     try:
         if result.cancelled:
             with SessionLocal() as session:
+                # CR: thread `result.metadata` through so a cancel that
+                # arrives AFTER the proposal SSE emit still persists the
+                # envelope to the row — otherwise reload would drop the
+                # proposal block from a cancelled bubble.
                 chat_service.update_message(
                     session,
                     assistant_msg_id,
                     content=result.prose or "Cancelled.",
                     status="cancelled",
                     skill=resolved_skill,
+                    metadata=result.metadata,
                 )
             return
 

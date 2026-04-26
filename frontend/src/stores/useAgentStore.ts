@@ -423,7 +423,18 @@ export const useAgentStore = create<AgentState>()(
           // prose is still streamed via subsequent `chunk` events.
           set((s) => {
             const id = s.streamingMessageId;
-            if (id === null) return {};
+            if (id === null) {
+              // CR: a proposal arriving without a bound streaming id
+              // means `start` was dropped, ingested after a cancel
+              // cleared the binding, or arrived from a superseded
+              // stream. The envelope would otherwise be lost forever —
+              // log so the bug doesn't go silent in production.
+              console.warn(
+                '[useAgentStore] proposal event arrived with no streaming target; envelope dropped',
+                { kind: event.kind, targets: event.targets },
+              );
+              return {};
+            }
             return {
               messages: s.messages.map((m) =>
                 m.id === id

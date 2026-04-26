@@ -7,9 +7,13 @@ vi.mock('@react-three/drei', () => ({
 
 // Story 6.3: InfoPopup uses `useUpdateTodo` for the due-date picker.
 // The test environment has no React Query client, so mock the hook to
-// keep this file's render scope tight.
+// keep this file's render scope tight. Expose the spy so individual
+// tests can assert payload shape — without this, a regression that
+// sent `due_date` (snake) instead of `dueDate` (camel) would slip
+// through silently.
+const updateTodoMutate = vi.fn();
 vi.mock('../../api/todoApi', () => ({
-  useUpdateTodo: () => ({ mutate: vi.fn() }),
+  useUpdateTodo: () => ({ mutate: updateTodoMutate }),
 }));
 
 import { InfoPopup } from './InfoPopup';
@@ -343,6 +347,46 @@ describe('InfoPopup', () => {
       rerender(<InfoPopup todo={makeTodo()} focused={false} onCommitText={onCommitText} />);
       expect(container.querySelector('textarea.info-popup__editor-textarea')).toBeNull();
       expect(onCommitText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('due-date picker (Story 6.3)', () => {
+    it('Save dispatches `dueDate` (camel) — not `due_date` (snake) — so axios decamelize is the SOLE place the wire flip happens', () => {
+      // CR: this test exists specifically to catch a regression where
+      // the picker callback writes the snake_case key directly. The
+      // backend's TodoUpdate is `extra="forbid"` so a stray
+      // `due_date` would 422; we want a clean 200 PATCH path.
+      updateTodoMutate.mockReset();
+      const { container } = render(
+        <InfoPopup todo={makeTodo()} focused={true} />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__due-button')!);
+      // The picker portals into document.body; click Save.
+      fireEvent.click(screen.getByText('Save'));
+      expect(updateTodoMutate).toHaveBeenCalledTimes(1);
+      const callArgs = updateTodoMutate.mock.calls[0]![0] as Record<string, unknown>;
+      expect(callArgs).toHaveProperty('id', 'todo-1');
+      expect(callArgs).toHaveProperty('dueDate');
+      // Critically: must NOT also (or instead) carry the snake-case key.
+      expect(callArgs).not.toHaveProperty('due_date');
+      // The dueDate value should be a non-empty ISO datetime string.
+      expect(typeof callArgs.dueDate).toBe('string');
+      expect((callArgs.dueDate as string).length).toBeGreaterThan(0);
+    });
+
+    it('Clear dispatches `dueDate: null`', () => {
+      updateTodoMutate.mockReset();
+      const { container } = render(
+        <InfoPopup
+          todo={makeTodo({ dueDate: '2026-05-01T17:00:00+00:00' })}
+          focused={true}
+        />,
+      );
+      fireEvent.click(container.querySelector('.info-popup__due-button')!);
+      fireEvent.click(screen.getByText('Clear'));
+      expect(updateTodoMutate).toHaveBeenCalledTimes(1);
+      const callArgs = updateTodoMutate.mock.calls[0]![0] as Record<string, unknown>;
+      expect(callArgs).toEqual({ id: 'todo-1', dueDate: null });
     });
   });
 });

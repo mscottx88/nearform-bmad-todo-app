@@ -262,3 +262,17 @@
   box-shadow: 0 0 6px rgba(0, 255, 255, 0.65);
   color: #fff;
 }
+
+/* CR: warning chip for the unparseable-value path. Pinned above the
+ * action row, neon-pink to distinguish from cyan chrome. */
+.neon-dtp__warning {
+  margin: 8px 0 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--neon-pink);
+  border-radius: 3px;
+  color: var(--neon-pink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+  background: rgba(255, 16, 240, 0.08);
+}

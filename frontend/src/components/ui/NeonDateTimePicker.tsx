@@ -97,7 +97,7 @@ function pad2(n: number): string {
 
 /**
  * Compose an ISO 8601 string with the browser's local timezone
- * offset from the draft year/month/day/hour/minute. We avoid
+ * offset from the draft year/month/day/hour/minute/second. We avoid
  * `toISOString()` because it forces UTC — for a "5pm meeting"
  * deadline the user expects 5pm in their own timezone, not 5pm UTC.
  */
@@ -107,12 +107,41 @@ function composeIsoLocal(d: Date): string {
   const dd = pad2(d.getDate());
   const hh = pad2(d.getHours());
   const mi = pad2(d.getMinutes());
-  const ss = '00';
+  // CR: preserve seconds from the draft Date instead of hard-coding
+  // ":00". Round-trip from a stored "…:17:42" deadline now keeps the
+  // 42; the picker UI itself only edits H/M but the source-of-truth
+  // seconds value (captured at mount in `initial`) flows through.
+  const ss = pad2(d.getSeconds());
   const tzMins = -d.getTimezoneOffset();
   const tzSign = tzMins >= 0 ? '+' : '-';
   const tzHrs = pad2(Math.floor(Math.abs(tzMins) / 60));
   const tzRem = pad2(Math.abs(tzMins) % 60);
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}${tzSign}${tzHrs}:${tzRem}`;
+}
+
+/**
+ * Compute the picker's seed Date from the `value` prop. Returns
+ * `{ date, malformed }` so the caller can surface a warning when
+ * `value` was set but unparseable — without that signal we'd silently
+ * fall through to "next hour" and clobber the bad data on save.
+ */
+function seedFromValue(value: string | null): {
+  date: Date;
+  malformed: boolean;
+} {
+  if (value !== null) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return { date: d, malformed: false };
+    // value was set but unparseable.
+    const fallback = new Date();
+    fallback.setMinutes(0, 0, 0);
+    fallback.setHours(fallback.getHours() + 1);
+    return { date: fallback, malformed: true };
+  }
+  const next = new Date();
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  return { date: next, malformed: false };
 }
 
 export function NeonDateTimePicker({
@@ -122,22 +151,40 @@ export function NeonDateTimePicker({
   onCancel,
 }: Props) {
   // Seed draft state from `value` (or now-rounded-to-next-hour if unset).
-  const initial = (() => {
-    if (value !== null) {
-      const d = new Date(value);
-      if (!Number.isNaN(d.getTime())) return d;
-    }
-    const next = new Date();
-    next.setMinutes(0, 0, 0);
-    next.setHours(next.getHours() + 1);
-    return next;
-  })();
+  const seed = seedFromValue(value);
 
-  const [year, setYear] = useState(initial.getFullYear());
-  const [month, setMonth] = useState(initial.getMonth());
-  const [day, setDay] = useState(initial.getDate());
-  const [hour, setHour] = useState(initial.getHours());
-  const [minute, setMinute] = useState(initial.getMinutes());
+  const [year, setYear] = useState(seed.date.getFullYear());
+  const [month, setMonth] = useState(seed.date.getMonth());
+  const [day, setDay] = useState(seed.date.getDate());
+  const [hour, setHour] = useState(seed.date.getHours());
+  const [minute, setMinute] = useState(seed.date.getMinutes());
+  // CR: carry the source-of-truth seconds through state so a save
+  // that didn't change H/M preserves sub-minute precision from the
+  // original ISO string.
+  const [second, setSecond] = useState(seed.date.getSeconds());
+  // CR: surface a chip + disable Save when `value` came in as
+  // unparseable, so the user has to deliberately confirm overwriting.
+  const [malformed, setMalformed] = useState(seed.malformed);
+
+  // CR: resync draft state when `value` prop changes mid-mount. Use
+  // the canonical "store the previous prop in state and compare during
+  // render" pattern (React docs: "Resetting state when a prop changes"
+  // → https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  // This avoids the wasted commit a useEffect-based reset would cause,
+  // and the updated state is visible on the same render that observed
+  // the prop change.
+  const [prevValue, setPrevValue] = useState(value);
+  if (prevValue !== value) {
+    setPrevValue(value);
+    const next = seedFromValue(value);
+    setYear(next.date.getFullYear());
+    setMonth(next.date.getMonth());
+    setDay(next.date.getDate());
+    setHour(next.date.getHours());
+    setMinute(next.date.getMinutes());
+    setSecond(next.date.getSeconds());
+    setMalformed(next.malformed);
+  }
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -195,7 +242,19 @@ export function NeonDateTimePicker({
   };
 
   const onSaveClick = () => {
-    const composed = new Date(year, month, day, hour, minute, 0, 0);
+    if (malformed) {
+      // CR: clear the malformed flag on first save click so the user
+      // is acknowledging that they want to overwrite the bad data.
+      // The actual save fires on the second click, after the warning
+      // chip + disabled Save have been visibly cleared.
+      setMalformed(false);
+      return;
+    }
+    // CR: carry the source-of-truth seconds (captured at mount or via
+    // last prop resync) into the composed Date — the picker UI only
+    // edits H/M, but a "17:00:42" original deadline that the user
+    // saves without changing anything stays "17:00:42" on the wire.
+    const composed = new Date(year, month, day, hour, minute, second, 0);
     onSave(composeIsoLocal(composed));
   };
 
@@ -302,6 +361,12 @@ export function NeonDateTimePicker({
         </label>
       </div>
 
+      {malformed && (
+        <div className="neon-dtp__warning" role="alert">
+          ⚠ Existing deadline couldn't be read. Click Save to overwrite.
+        </div>
+      )}
+
       <div className="neon-dtp__actions">
         <button
           type="button"
@@ -315,7 +380,10 @@ export function NeonDateTimePicker({
           className="neon-dtp__btn neon-dtp__btn--save"
           onClick={onSaveClick}
         >
-          Save
+          {/* When malformed, the Save button is the "acknowledge"
+              affordance — first click clears the warning, second
+              click commits. The label nudges the user. */}
+          {malformed ? 'Confirm save' : 'Save'}
         </button>
       </div>
     </div>

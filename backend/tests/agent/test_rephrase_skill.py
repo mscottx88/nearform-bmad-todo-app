@@ -207,7 +207,7 @@ class TestSearchResolver:
                 [(wanted, "Dashboard refactor", 0.95), (other, "Login fix", 0.30)]
             ),
         ):
-            target_id, candidates = rephrase._resolve_via_search(ctx)
+            target_id, _target_todo, candidates = rephrase._resolve_via_search(ctx)
         assert target_id == wanted
         assert candidates == []
 
@@ -227,7 +227,7 @@ class TestSearchResolver:
                 ]
             ),
         ):
-            target_id, candidates = rephrase._resolve_via_search(ctx)
+            target_id, _target_todo, candidates = rephrase._resolve_via_search(ctx)
         assert target_id is None
         assert len(candidates) == 3
         assert {c.id for c in candidates} == {a, b, c}
@@ -239,7 +239,7 @@ class TestSearchResolver:
             "hybrid_search",
             return_value=self._make_response([]),
         ):
-            target_id, candidates = rephrase._resolve_via_search(ctx)
+            target_id, _target_todo, candidates = rephrase._resolve_via_search(ctx)
         assert target_id is None
         assert candidates == []
 
@@ -252,7 +252,7 @@ class TestSearchResolver:
             "hybrid_search",
             side_effect=RuntimeError("embedding unreachable"),
         ):
-            target_id, candidates = rephrase._resolve_via_search(ctx)
+            target_id, _target_todo, candidates = rephrase._resolve_via_search(ctx)
         assert target_id is None
         assert candidates == []
 
@@ -269,7 +269,7 @@ class TestSearchResolver:
                 [(a, "barely matched", 0.20), (b, "even less", 0.04)]
             ),
         ):
-            target_id, candidates = rephrase._resolve_via_search(ctx)
+            target_id, _target_todo, candidates = rephrase._resolve_via_search(ctx)
         assert target_id is None
         assert len(candidates) == 2
 
@@ -323,6 +323,24 @@ class TestTaskDescription:
         # missing_fields lists (CrewAI's RephraseEnvelope schema then
         # validates the structure on its end).
         assert "empty list" in prompt
+
+    # CR: the prompt MUST tell the LLM what today's date is so date
+    # phrasing like "May 1" or "next Monday" anchors to the calendar
+    # instead of the model's training-data prior.
+    def test_normal_path_includes_today_date_anchor(self) -> None:
+        from datetime import date as _date  # noqa: PLC0415
+
+        fixed_today = _date(2026, 4, 26)  # a Sunday
+        prompt = rephrase._build_task_description(
+            user_message="add a due date of May 1",
+            target_fields={"text": "x", "due_date": None},
+            target_error=None,
+            today=fixed_today,
+        )
+        assert "2026-04-26" in prompt
+        assert "Sunday" in prompt
+        # And the prompt explicitly tells the LLM to anchor on this date.
+        assert "Today's date is" in prompt
 
 
 # ─── Build crew with mocked tool fetch ──────────────────────────────
@@ -403,6 +421,32 @@ class TestBuildCrew:
         # — we're no longer rephrasing a specific row.
         assert ctx.resolved_target_id is None
         # Task description carries the fallback prose.
+        prompt = captured["task_kwargs"]["description"]
+        assert rephrase._EMPTY_TARGET_FALLBACK_PROSE in prompt
+
+    # CR: when the user explicitly named a target (todo_ids[0]) and
+    # the fetch fails, we must NOT fall through to history+search —
+    # that would surface unrelated chips for "rephrase this" instead
+    # of the specific todo they meant. Verify the explicit-id failure
+    # short-circuits to empty-target.
+    def test_explicit_id_failure_does_not_fall_through_to_search(self) -> None:
+        wanted = uuid.uuid4()
+        ctx = _make_ctx(user_message="rephrase the dashboard task", todo_ids=[wanted])
+        with (
+            patch.object(
+                rephrase,
+                "_fetch_todo_content",
+                return_value=(None, "Todo not found"),
+            ),
+            patch.object(rephrase, "_resolve_via_search") as search_spy,
+            patch.object(rephrase, "_resolve_from_history") as history_spy,
+        ):
+            _crew, captured = self._build_with_stubbed_crewai(ctx)
+        # Neither secondary resolver should run on the explicit-id
+        # failure path — the user named THAT todo, period.
+        search_spy.assert_not_called()
+        history_spy.assert_not_called()
+        assert ctx.resolved_target_id is None
         prompt = captured["task_kwargs"]["description"]
         assert rephrase._EMPTY_TARGET_FALLBACK_PROSE in prompt
 
