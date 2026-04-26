@@ -1,10 +1,16 @@
 /*
- * Story 6.7: 2D neon-outline Oracle Frog (Budgett's-frog inspired).
+ * Story 6.7: Oracle Frog as a clean neon-outline SVG.
  *
- * Strokes carry the form; fills are mostly transparent so the panel's
- * water-deep background shows through. The whole SVG sits inside a
- * layered drop-shadow filter that produces the project's signature
- * neon glow.
+ * Visual reference (user-supplied 2026-04-25, second sample):
+ * a "neon sign" Budgett's frog — pink/purple gradient outline on
+ * the body and back leg, cyan smile + interior fold curves, two
+ * pink concentric ring eyes with bright centre dots, splayed
+ * cyan toes on the front arm and back foot.
+ *
+ * Body outline gradient is wired in via a CSS custom property
+ * `--frog-body-grad` (referenced through `var(...)` from the SVG
+ * defs in OracleFrogSVG.tsx). The error state swaps for
+ * `--frog-err-grad`.
  */
 
 .oracle-frog-svg {
@@ -12,15 +18,16 @@
   height: 100%;
   display: block;
   filter:
-    drop-shadow(0 0 4px rgba(0, 238, 255, 0.55))
-    drop-shadow(0 0 14px rgba(0, 238, 255, 0.30));
+    drop-shadow(0 0 3px rgba(0, 238, 255, 0.55))
+    drop-shadow(0 0 10px rgba(255, 16, 240, 0.30))
+    drop-shadow(0 0 18px rgba(255, 16, 240, 0.18));
   transition: filter 240ms ease-out;
 }
 
 .oracle-frog-svg[data-state='error'] {
   filter:
     drop-shadow(0 0 4px rgba(255, 102, 0, 0.7))
-    drop-shadow(0 0 14px rgba(255, 102, 0, 0.4));
+    drop-shadow(0 0 14px rgba(255, 60, 0, 0.4));
 }
 
 /* ── Lily pad disc ──────────────────────────────────────────── */
@@ -38,7 +45,7 @@
 }
 
 .oracle-frog-svg__pad {
-  transform-origin: 100px 148px;
+  transform-origin: 100px 180px;
   animation: oracle-frog-pad-bob 4.2s ease-in-out infinite;
 }
 
@@ -54,16 +61,6 @@
   transition: transform 240ms ease-out;
 }
 
-/* Story 6.7 user direction (2026-04-25): rotate the frog 30° so it
-   reads as "looking away" rather than facing the viewer head-on.
-   Applied on a wrapper inside .oracle-frog-svg__frog so the
-   per-state animations on the parent (lean, hop, shake) still
-   compose cleanly on top of this base rotation. */
-.oracle-frog-svg__rotate {
-  transform-origin: 100px 95px;
-  transform: rotate(-30deg);
-}
-
 .oracle-frog-svg[data-state='idle'] .oracle-frog-svg__frog {
   animation: oracle-frog-breathe 4s ease-in-out infinite;
 }
@@ -77,10 +74,7 @@
   transform: translateY(-2px) skewY(-1.5deg);
 }
 
-.oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__frog {
-  transform: translateY(-1px);
-}
-
+.oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__frog,
 .oracle-frog-svg[data-state='speaking'] .oracle-frog-svg__frog {
   transform: translateY(-1px);
 }
@@ -108,107 +102,73 @@
   80%      { transform: translateX(2px) scale(0.98); }
 }
 
-/* ── Body — main blob outline ───────────────────────────────── */
+/* ── Body outline (pink-purple gradient) ────────────────────── */
 
 .oracle-frog-svg__body {
-  fill: rgba(0, 238, 255, 0.07);
-  stroke: var(--neon-cyan);
+  fill: rgba(8, 0, 30, 0.35);
+  stroke: var(--frog-body-grad);
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 2px rgba(255, 16, 240, 0.55));
+}
+
+.oracle-frog-svg[data-state='error'] .oracle-frog-svg__body {
+  stroke: var(--frog-err-grad);
+}
+
+/* ── Back leg (matches body gradient) ──────────────────────── */
+
+.oracle-frog-svg__back-leg {
+  fill: rgba(8, 0, 30, 0.30);
+  stroke: var(--frog-body-grad);
   stroke-width: 2.4;
   stroke-linejoin: round;
-  transition: stroke 240ms ease-out;
+  filter: drop-shadow(0 0 2px rgba(255, 16, 240, 0.50));
 }
 
-/* Belly highlight — softer secondary curve giving the body
-   subtle volume. */
-.oracle-frog-svg__belly {
+.oracle-frog-svg__back-toe {
   fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.2;
+  stroke: var(--frog-body-grad);
+  stroke-width: 1.8;
   stroke-linecap: round;
-  opacity: 0.5;
 }
 
-/* Jowl folds — soft cheek-line curves on each side. */
-.oracle-frog-svg__jowl {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  opacity: 0.65;
-}
-
-/* Error tint — every cyan-stroked element shifts to red-orange
-   while the panel is in 'error' state. */
 .oracle-frog-svg[data-state='error'] :is(
-  .oracle-frog-svg__body,
-  .oracle-frog-svg__belly,
-  .oracle-frog-svg__jowl,
-  .oracle-frog-svg__mouth,
-  .oracle-frog-svg__throat,
-  .oracle-frog-svg__pad-rim,
-  .oracle-frog-svg__foot ellipse,
-  .oracle-frog-svg__toes path
+  .oracle-frog-svg__back-leg,
+  .oracle-frog-svg__back-toe
 ) {
+  stroke: var(--frog-err-grad);
+}
+
+/* ── Smile — bright cyan dominant feature ──────────────────── */
+
+.oracle-frog-svg__smile {
+  fill: none;
+  stroke: var(--neon-cyan);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 3px rgba(0, 238, 255, 0.85));
+}
+
+.oracle-frog-svg[data-state='error'] .oracle-frog-svg__smile {
   stroke: #ff6600;
+  filter: drop-shadow(0 0 3px rgba(255, 102, 0, 0.85));
 }
 
-/* ── Mouth — wide downturned Budgett's smirk ────────────────── */
+/* ── Belly fold + jowl (softer cyan) ────────────────────────── */
 
-.oracle-frog-svg__mouth {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 2.0;
-  stroke-linecap: round;
-  opacity: 0.95;
-}
-
-/* Mouth corner flicks + lower-lip + tooth notch all carry the
-   neon palette but at slightly reduced widths so the main mouth
-   curve stays the dominant feature. */
-.oracle-frog-svg__mouth-corner {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  opacity: 0.85;
-}
-
-.oracle-frog-svg__lower-lip {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  opacity: 0.55;
-}
-
-.oracle-frog-svg__fang {
+.oracle-frog-svg__belly-fold,
+.oracle-frog-svg__jowl {
   fill: none;
   stroke: var(--neon-cyan);
   stroke-width: 1.4;
   stroke-linecap: round;
-  opacity: 0.75;
+  opacity: 0.7;
 }
 
-/* ── Neck / chin fold lines ─────────────────────────────────── */
-
-.oracle-frog-svg__neck-fold {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  opacity: 0.55;
-}
-
-.oracle-frog-svg__neck-fold--inner {
-  opacity: 0.35;
-}
-
-/* Error tint — extend to the new accent strokes. */
 .oracle-frog-svg[data-state='error'] :is(
-  .oracle-frog-svg__mouth-corner,
-  .oracle-frog-svg__lower-lip,
-  .oracle-frog-svg__fang,
-  .oracle-frog-svg__neck-fold
+  .oracle-frog-svg__belly-fold,
+  .oracle-frog-svg__jowl
 ) {
   stroke: #ff6600;
 }
@@ -217,18 +177,23 @@
 
 .oracle-frog-svg__nostril {
   fill: var(--neon-cyan);
-  opacity: 0.8;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 1px rgba(0, 238, 255, 0.8));
 }
 
-/* ── Throat sac — pulses with chunks during 'speaking' ──────── */
+.oracle-frog-svg[data-state='error'] .oracle-frog-svg__nostril {
+  fill: #ff6600;
+}
+
+/* ── Throat sac — chunk-pulse target ────────────────────────── */
 
 .oracle-frog-svg__throat {
-  fill: rgba(0, 238, 255, 0.10);
+  fill: none;
   stroke: var(--neon-cyan);
   stroke-width: 1.4;
   transform-box: fill-box;
   transform-origin: center;
-  transition: stroke 240ms ease-out;
+  opacity: 0.85;
 }
 
 .oracle-frog-svg[data-state='speaking'] .oracle-frog-svg__throat {
@@ -241,47 +206,55 @@
   100% { transform: scale(1, 1); }
 }
 
-/* ── Eyes ───────────────────────────────────────────────────── */
+/* ── Eyes — concentric pink rings + bright centre ───────────── */
 
-.oracle-frog-svg__eye-bulge {
-  fill: rgba(0, 238, 255, 0.05);
-  stroke: var(--neon-cyan);
+.oracle-frog-svg__eye-outer {
+  fill: rgba(255, 16, 240, 0.06);
+  stroke: var(--neon-pink);
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 2px rgba(255, 16, 240, 0.85));
+}
+
+.oracle-frog-svg__eye-inner {
+  fill: rgba(255, 16, 240, 0.10);
+  stroke: var(--neon-pink);
+  stroke-width: 2.0;
+  filter: drop-shadow(0 0 2px rgba(255, 16, 240, 0.85));
+}
+
+/* Near-eye glint — a tiny pale ring offset to the upper-right
+   (looks like a reflection highlight on the iris). */
+.oracle-frog-svg__eye-glint {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.85);
   stroke-width: 1.6;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.7));
 }
 
-.oracle-frog-svg__eye-ball {
-  fill: rgba(57, 255, 20, 0.20);
-  stroke: var(--neon-green);
-  stroke-width: 1.4;
-  transition: fill 240ms ease-out;
-}
-
+/* Far-eye centre — solid bright pupil dot. */
 .oracle-frog-svg__pupil {
-  fill: #001818;
+  fill: rgba(255, 255, 255, 0.95);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.7));
   transform-box: fill-box;
   transform-origin: center;
   transition: transform 240ms ease-out;
 }
 
-.oracle-frog-svg__glint {
-  fill: rgba(255, 255, 255, 0.85);
-}
-
-.oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__pupil {
+.oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__pupil,
+.oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__eye-glint {
   animation: oracle-frog-pupil-track 1.5s ease-in-out infinite;
 }
 
 @keyframes oracle-frog-pupil-track {
-  0%, 100% { transform: translateX(-2.5px); }
-  50%      { transform: translateX(2.5px); }
+  0%, 100% { transform: translateX(-2px); }
+  50%      { transform: translateX(2px); }
 }
 
-.oracle-frog-svg[data-state='listening'] .oracle-frog-svg__eye-ball {
-  fill: rgba(57, 255, 20, 0.32);
+.oracle-frog-svg[data-state='listening'] .oracle-frog-svg__eye-inner {
+  fill: rgba(255, 16, 240, 0.22);
 }
 
-/* Idle blink — both eyes scale-Y briefly every 5s, with a small
-   phase offset between them so they don't look mechanical. */
+/* Idle blink. */
 .oracle-frog-svg[data-state='idle'] .oracle-frog-svg__eye {
   transform-origin: center;
   transform-box: fill-box;
@@ -293,24 +266,29 @@
   98%           { transform: scaleY(0.1); }
 }
 
-.oracle-frog-svg__eye--right {
+.oracle-frog-svg__eye--far {
   animation-delay: -0.4s;
 }
 
-/* ── Feet + toes ────────────────────────────────────────────── */
-
-.oracle-frog-svg__foot ellipse {
-  fill: rgba(0, 238, 255, 0.06);
-  stroke: var(--neon-cyan);
-  stroke-width: 1.6;
+.oracle-frog-svg[data-state='error'] :is(
+  .oracle-frog-svg__eye-outer,
+  .oracle-frog-svg__eye-inner
+) {
+  stroke: #ff6600;
 }
 
-.oracle-frog-svg__toes path {
-  fill: none;
-  stroke: var(--neon-cyan);
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  opacity: 0.85;
+/* ── Front-left fin / arm ──────────────────────────────────── */
+
+.oracle-frog-svg__fin {
+  fill: rgba(8, 0, 30, 0.30);
+  stroke: var(--frog-body-grad);
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 2px rgba(255, 16, 240, 0.55));
+}
+
+.oracle-frog-svg[data-state='error'] .oracle-frog-svg__fin {
+  stroke: var(--frog-err-grad);
 }
 
 /* ── Reduce-motion ──────────────────────────────────────────── */
@@ -322,6 +300,7 @@
   .oracle-frog-svg[data-state='error'] .oracle-frog-svg__frog,
   .oracle-frog-svg[data-state='idle'] .oracle-frog-svg__eye,
   .oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__pupil,
+  .oracle-frog-svg[data-state='thinking'] .oracle-frog-svg__eye-glint,
   .oracle-frog-svg[data-state='speaking'] .oracle-frog-svg__throat {
     animation: none;
   }
