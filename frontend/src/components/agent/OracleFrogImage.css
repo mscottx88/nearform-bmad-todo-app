@@ -58,17 +58,6 @@
   object-fit: contain;
   pointer-events: none;
   user-select: none;
-  /* The reference bitmap has a WHITE background. To integrate
-     it cleanly with the panel's dark water-deep, we flip the
-     image's value (invert) then re-rotate the hue 180° so the
-     ORIGINAL colours are preserved while WHITE → BLACK. The
-     subsequent `mix-blend-mode: screen` then drops the now-black
-     background out completely (screen makes black transparent
-     against any destination). Net result: the neon frog reads
-     against the panel's dark background as if it had a
-     transparent PNG. */
-  filter: invert(1) hue-rotate(180deg);
-  mix-blend-mode: screen;
 }
 
 .oracle-frog__layer--base {
@@ -77,11 +66,12 @@
 
 .oracle-frog__layer--red {
   z-index: 2;
-  /* Filter chain: same invert+hue-rotate(180deg) base for the
-     white-bg knockout, then channel tint for the red split. */
-  filter:
-    invert(1) hue-rotate(180deg)
-    brightness(0.85) saturate(2) hue-rotate(330deg) contrast(1.1);
+  /* Tint the image to the red channel only via filter chain.
+     sepia + hue-rotate + saturate is a standard way to shift any
+     image toward a target hue without needing an offscreen
+     canvas. */
+  filter: brightness(0.85) saturate(2) hue-rotate(330deg) contrast(1.1);
+  mix-blend-mode: screen;
   /* Subtle constant offset — accentuates during the glitch
      keyframe below. */
   transform: translateX(0.5px);
@@ -90,9 +80,8 @@
 
 .oracle-frog__layer--cyan {
   z-index: 3;
-  filter:
-    invert(1) hue-rotate(180deg)
-    brightness(0.85) saturate(2) hue-rotate(150deg) contrast(1.1);
+  filter: brightness(0.85) saturate(2) hue-rotate(150deg) contrast(1.1);
+  mix-blend-mode: screen;
   transform: translateX(-0.5px);
   animation: oracle-frog-rgb-shift-cyan 6s steps(1, end) infinite;
 }
@@ -249,21 +238,15 @@
 }
 
 /* Error state — much stronger constant glitch: bigger RGB
-   offset, faster tear cadence, more saturated channel tints.
-   The invert+hue-rotate(180deg) prefix is preserved so the
-   white-bg knockout still works while the error glitch runs. */
+   offset, faster tear cadence, more saturated channel tints. */
 .oracle-frog[data-state='error'] .oracle-frog__layer--red {
   animation-duration: 1.6s;
-  filter:
-    invert(1) hue-rotate(180deg)
-    brightness(0.95) saturate(3) hue-rotate(330deg) contrast(1.3);
+  filter: brightness(0.95) saturate(3) hue-rotate(330deg) contrast(1.3);
 }
 
 .oracle-frog[data-state='error'] .oracle-frog__layer--cyan {
   animation-duration: 1.6s;
-  filter:
-    invert(1) hue-rotate(180deg)
-    brightness(0.95) saturate(3) hue-rotate(150deg) contrast(1.3);
+  filter: brightness(0.95) saturate(3) hue-rotate(150deg) contrast(1.3);
 }
 
 .oracle-frog[data-state='error'] .oracle-frog__tear {

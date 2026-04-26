@@ -57,15 +57,26 @@
 
 .agent-panel__section--oracle {
   flex: 0 0 auto;
-  /* 16:10 inside the 440-px panel ≈ 275px tall when full-width. */
-  aspect-ratio: 16 / 10;
+  /* Story 6.7 user direction (2026-04-25): square frog at 70%
+     of the panel width — drops the frog's footprint by 30% in
+     both dimensions vs full-width 1:1 so it doesn't dominate
+     the panel chrome. Centred horizontally inside the section
+     via auto-margin. */
+  width: 70%;
+  margin: 0 auto;
+  aspect-ratio: 1 / 1;
   padding: 8px;
 }
 
 .agent-panel__oracle {
   flex: 1;
   border: 1px solid var(--neon-cyan);
-  background: var(--water-surface);
+  /* The frog bitmap has a WHITE background. To integrate it
+     cleanly without a visible rectangular block, paint the
+     oracle area white too — the frog's bg blends seamlessly into
+     the surrounding chrome and only the cyan-neon border reads
+     as the picture frame. */
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
