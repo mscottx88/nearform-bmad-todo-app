@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-25 # story 6-2 complete → review (status reconciled in yaml)
+last_updated: 2026-04-25 # story 6-2 → done after 5-group code review (A/B/C/D/E) — 38 patches applied, 18 deferred items logged, 6 spec amendments via DN reconciliations. 512 frontend + 209 backend tests green.
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -112,7 +112,7 @@ development_status:
   # Epic 6: The Intelligent Pond Companion (2026-04-23 addendum — replaced the REMOVED Epic 6 scope)
   epic-6: in-progress
   6-1-agent-foundation: done  # schema regen (chat_sessions/chat_messages/display_metadata) + chat_service + SkillContext + BaseTool tools + crew_runner + intent_classifier + chat skill + SSE endpoint
-  6-2-chat-panel: review  # AgentPanel + useAgentStore + useAgentSse + F1/Escape + /help + sessions UX + free-form chat E2E. Adds 3-section layout (Oracle-Frog placeholder slot + chat + controls), speech-bubble shapes with tails, NeonScrollbar wrap, fetch+ReadableStream SSE consumer (POST endpoint), start-event message_id extension to crew_runner. Polish round 2026-04-25 added: keyboard hint banners (chat composer + InfoPopup edit mode), TodoLink with hover/click-to-pad + neon pointer-finger cursor, NeonTooltip portal + viewport clamping, custom-cursor system extended (point/text/no-access modes + I-beam over selectable text + global useGlobalCursorMode hook), always-visible KeyboardShortcutsHint footer, /help registered in slash-command menu, EmptyPondHint trimmed + space-glyph fix, CrewAI 1.6→1.14 upgrade with [anthropic] extra, _chunk_words space-preservation fix, list_recent_messages helper for AC-12 history window. 487 frontend + 199 backend tests green.
+  6-2-chat-panel: done  # AgentPanel + useAgentStore + useAgentSse + F1/Escape + /help + sessions UX + free-form chat E2E. Adds 3-section layout (Oracle-Frog placeholder slot + chat + controls), speech-bubble shapes with tails, NeonScrollbar wrap, fetch+ReadableStream SSE consumer (POST endpoint), start-event message_id extension to crew_runner. Polish round 2026-04-25 added: keyboard hint banners (chat composer + InfoPopup edit mode), TodoLink with hover/click-to-pad + neon pointer-finger cursor, NeonTooltip portal + viewport clamping, custom-cursor system extended (point/text/no-access modes + I-beam over selectable text + global useGlobalCursorMode hook), always-visible KeyboardShortcutsHint footer, /help registered in slash-command menu, EmptyPondHint trimmed + space-glyph fix, CrewAI 1.6→1.14 upgrade with [anthropic] extra, _chunk_words space-preservation fix, list_recent_messages helper for AC-12 history window. 487 frontend + 199 backend tests green.
   6-3-rephrase-skill: backlog
   6-4-plan-skill: backlog
   6-5-organize-skill: backlog

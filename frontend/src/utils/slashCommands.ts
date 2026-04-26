@@ -68,13 +68,16 @@ export interface SlashCommand {
 const registry: SlashCommand[] = [];
 
 /**
- * Register a command. Duplicate tokens throw — surface as a dev-time
- * error rather than silently deduping. Callers register exactly once
- * at app bootstrap (see frontend/src/main.tsx).
+ * Register a command. Duplicate tokens are silently deduped — Story
+ * 6.2 Group E CR P2: Vite HMR can re-evaluate `main.tsx` (the bootstrap
+ * site) on hot-reload boundaries, and the re-execution would otherwise
+ * throw on duplicate-registration. Callers still register exactly once
+ * at app bootstrap (see frontend/src/main.tsx); the dedupe is purely a
+ * dev-ergonomics guard.
  */
 export function registerCommand(cmd: SlashCommand): void {
   if (registry.some((c) => c.token === cmd.token)) {
-    throw new Error(`slashCommands: duplicate token ${cmd.token}`);
+    return;
   }
   registry.push(cmd);
 }

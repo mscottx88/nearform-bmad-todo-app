@@ -61,9 +61,17 @@ describe('slashCommands framework', () => {
       expect(getRegistry()).toEqual([a, b]);
     });
 
-    it('throws on duplicate token registration', () => {
-      registerCommand(makeFake('/foo'));
-      expect(() => registerCommand(makeFake('/foo'))).toThrow(/duplicate token/);
+    // Story 6.2 Group E CR P2: duplicate-token registration is now a
+    // silent no-op (was: throw). Vite HMR can re-evaluate the
+    // bootstrap module that calls `register*Command()` at the top
+    // level; the throw was a dev-ergonomics regression on hot-reload.
+    it('silently deduplicates duplicate-token registration', () => {
+      const a = makeFake('/foo');
+      const b = makeFake('/foo');
+      registerCommand(a);
+      expect(() => registerCommand(b)).not.toThrow();
+      // The first registration wins; the second is dropped.
+      expect(getRegistry()).toEqual([a]);
     });
 
     it('clearRegistry empties the registry', () => {

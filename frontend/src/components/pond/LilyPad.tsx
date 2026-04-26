@@ -517,6 +517,27 @@ export function LilyPad({
   // pointerEnter/Leave regardless of drag state. Read at drag-release
   // to decide whether the info popup hover should persist or clear.
   const pointerOverRef = useRef(false);
+
+  // Story 6.2 Group E CR P1: clean up cursor mode + hover-id on
+  // unmount if the pointer was still over this pad. `/clear`,
+  // completion-animation finish, or a list-refetch swap can drop
+  // the LilyPad component while the cursor is over it; without
+  // this, `pointerLeave` never fires and `cursorMode` stays
+  // `'point'` indefinitely (the underlying canvas reports
+  // `'managed'` to `useGlobalCursorMode`, so the stale mode never
+  // clears). Mirrors the same pattern in `TodoLink` (Group B P8).
+  useEffect(() => {
+    return () => {
+      if (!pointerOverRef.current) return;
+      const state = usePondStore.getState();
+      if (state.cursorMode === 'point') {
+        state.setCursorMode('firefly');
+      }
+      if (state.hoveredTodoId === todo.id) {
+        state.setHoveredTodoId(null);
+      }
+    };
+  }, [todo.id]);
   // True once any raycast during this drag cycle landed on the water
   // plane. Skips the release-time PATCH when no raycast ever succeeded
   // (e.g. camera angle that never intersects y=0), preventing a no-op

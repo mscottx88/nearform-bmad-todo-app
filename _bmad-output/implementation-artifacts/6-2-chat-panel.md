@@ -1,6 +1,6 @@
 # Story 6.2: Chat Panel
 
-Status: review
+Status: done
 
 > **Scope note:** First frontend story of Epic 6 (The Intelligent Pond Companion).
 > Builds the AgentPanel UI (right-side neon drawer), the SSE consumer, the
@@ -1381,6 +1381,34 @@ batch-apply walkthrough:
 - Mobile keyboard overlay / `95vw` width fight — out of scope (desktop-first app).
 - Hint-banner overlap on very small viewports — out of scope, no observed failure.
 - Refs-during-render (Blind hypothesis) — verified the affected refs are in event handlers / effects, not render paths.
+
+---
+
+### Review Findings — Group E (App wiring + scene/store deltas) — 2026-04-25
+
+**Layers:** Blind Hunter, Edge Case Hunter, Acceptance Auditor (full mode)
+**Diff:** `b873531..HEAD` filtered to wiring (~6 source files, ~250 lines)
+
+The Auditor confirmed the wiring matches spec: `<AgentPanel />` is mounted in `App.tsx`, `registerHelpCommand()` is invoked in `main.tsx`, `sprint-status.yaml` correctly flips to `review`, and the `KeyboardShortcutsHint` "shift + right-drag" entry is consistent with three-stdlib OrbitControls' built-in PAN/ROTATE modifier behaviour. The `PondCamera` "Shift listener removal" is comment-only (no listener was actually leaking). No spec violations.
+
+#### Patch (2)
+
+- [x] [Review][Patch] **LOW** — `LilyPad` doesn't reset `cursorMode` on unmount when the cursor was hovering it. If a pad is deleted (`/clear`, completion animation, network refetch swap) while the cursor is over it, `pointerLeave` never fires and `cursorMode` stays `'point'` forever. `useGlobalCursorMode` returns `'managed'` for the underlying canvas, so the stale mode never clears. Fix: add an unmount-cleanup `useEffect` that resets cursor mode if THIS pad owned it. Mirrors the same pattern already applied in `TodoLink` (Group B P8). [`frontend/src/components/pond/LilyPad.tsx`]
+- [x] [Review][Patch] **LOW** — `registerHelpCommand()` runs at module top-level in `main.tsx`. Vite HMR can re-evaluate the module on hot-reload boundaries (rare but real); the second call hits `registerCommand`'s duplicate-token guard and throws. Same exposure as `registerVisibilityCommands` / `registerSpreadOutCommand`, but `/help` adds another. Fix: make `registerCommand` idempotent (no-op on duplicate) OR `registerHelpCommand` self-guards. [`frontend/src/utils/helpCommand.ts:registerHelpCommand` + `slashCommands.ts:registerCommand`]
+
+#### Deferred (3) — speculative or pre-existing patterns
+
+- [x] [Review][Defer] `cursor: none !important` blanket on `*` + `[disabled]` + `[aria-disabled="true"]`. If the firefly canvas fails to mount (R3F ErrorBoundary, viewport guard reject path, JS disabled, slow first-paint), the user has no visible cursor. Speculative — no observed failure. Add a `:root.no-firefly` recovery class wired to canvas-mount-failed state when the issue surfaces. [`frontend/src/styles/global.css`]
+- [x] [Review][Defer] `cursorMode` union widened to 6 values (`firefly | grab | grabbing | point | text | no-access`) without an exhaustive switch helper. Existing `if (cursorMode === 'firefly')` chains silently fall into the default branch for the three new modes. CursorFirefly was verified to handle all six modes (Group C); other consumers are TBD. [`frontend/src/stores/usePondStore.ts:cursorMode union`]
+- [x] [Review][Defer] `AgentPanel` mounted unconditionally — no `lazy()` import, no feature flag. Adds the chat-store / SSE consumer / fetch-streaming path to the initial paint of every user. Acceptable for Story 6.2's launch scope; bundle-split when the agent grows. [`frontend/src/App.tsx`]
+
+#### Dismissed — false positives / out of scope
+
+- `PondCamera` Shift listener "removal" — no listener existed; comment-only diff. False alarm.
+- `Universal cursor: none` over native scrollbars — verified no native scrollbars are exposed (`scrollbar-width: none` everywhere; NeonScrollbar overlays own thumbs).
+- `AgentPanel` z-index 100 vs TodoInput 1000 — by design (TodoInput overlays the panel; both overlay the canvas).
+- StrictMode double-effect on AgentPanel open — idempotent network calls, harmless rAF doubled focus.
+- LilyPad grabbing → point/firefly revert paths — covered by the new unmount cleanup patch.
 
 ---
 

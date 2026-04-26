@@ -170,10 +170,16 @@ describe('visibilityCommands (story 3.3)', () => {
     });
   });
 
-  describe('registerVisibilityCommands is not idempotent (duplicate guard)', () => {
-    it('throws on a second registration call', () => {
+  // Story 6.2 Group E CR P2: `registerCommand` is now idempotent
+  // (was: throw on duplicate). Vite HMR re-evaluating main.tsx used
+  // to crash. Duplicate calls are silent no-ops; the FIRST
+  // registration wins.
+  describe('registerVisibilityCommands is idempotent', () => {
+    it('a second call is a silent no-op (no throw, no duplicate)', () => {
       registerVisibilityCommands();
-      expect(() => registerVisibilityCommands()).toThrow(/duplicate token/);
+      const sizeAfterFirst = getRegistry().length;
+      expect(() => registerVisibilityCommands()).not.toThrow();
+      expect(getRegistry()).toHaveLength(sizeAfterFirst);
     });
   });
 });
