@@ -13,8 +13,6 @@ import type { Todo } from '../../types';
 import { WaterSurface } from './WaterSurface';
 import { LilyPad } from './LilyPad';
 import { PondCamera } from './PondCamera';
-import { OracleFrogManager } from '../agent/OracleFrogManager';
-import { OracleAquariumView } from '../agent/OracleAquariumView';
 import { PondSearchOverlay } from './PondSearchOverlay';
 import { EmptyPondHint } from '../ui/EmptyPondHint';
 import { InfoPopup } from '../ui/InfoPopup';
@@ -290,12 +288,11 @@ export function PondScene() {
           dropDelayMs={hasSeenInitialLoadRef.current ? 0 : index * STAGGER_STEP_MS}
         />
       ))}
-      {/* Story 6.7: Oracle Frog rides on his own dedicated lily pad,
-          rendered AFTER the todo-pad map so transparency layering
-          favors the oracle pad if a stray todo overlaps it. The
-          oracle pad is frontend-only — never returned by GET
-          /api/todos and never participates in cascade-displacement. */}
-      <OracleFrogManager />
+      {/* Story 6.7: the Oracle Frog and his lily pad were originally
+          mounted here as a 3D scene element. Per user direction
+          (2026-04-25) the frog now exists ONLY in the chat panel
+          as a 2D SVG — the pond is for todos. No oracle entity
+          here. */}
       {displayedInfoTodo && (
         <InfoPopup
           key={displayedInfoTodo.id}
@@ -348,15 +345,6 @@ export function PondScene() {
           intensity={glowIntensity}
         />
       </EffectComposer>
-      {/* Story 6.7: secondary view rendering the Oracle Frog into
-          the AgentPanel's "aquarium window". Mounted directly inside
-          the shared Canvas (NOT via tunnel-rat / View.Port) so the
-          render order is deterministic — drei's <View> registers a
-          useFrame at index=2 (vs EffectComposer's renderPriority=1)
-          so the panel's frog viewport paints AFTER the main bloom
-          render in the same frame. The track DOM ref is published
-          by AgentPanelOracleView via useOracleViewStore. */}
-      <OracleAquariumView />
     </Canvas>
     <PondSearchOverlay hasVisiblePads={renderTodos.length > 0} />
     </>

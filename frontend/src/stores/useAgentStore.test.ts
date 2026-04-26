@@ -47,7 +47,6 @@ function resetStore() {
     streamingBuffer: '',
     // Story 6.7
     agentState: 'idle',
-    oraclePadPosition: null,
   });
 }
 
@@ -418,31 +417,16 @@ describe('useAgentStore — Story 6.7 agentState transitions', () => {
     expect(useAgentStore.getState().agentState).toBe('idle');
   });
 
-  it('setOraclePadPosition stores the home position', () => {
-    expect(useAgentStore.getState().oraclePadPosition).toBeNull();
-    useAgentStore.getState().setOraclePadPosition({ x: -3.5, z: 3.5 });
-    expect(useAgentStore.getState().oraclePadPosition).toEqual({ x: -3.5, z: 3.5 });
-  });
-
-  it('persist partialize includes oraclePadPosition (not agentState)', () => {
-    // Reach into the persist middleware's options to verify partialize
-    // shape. The store factory captured the partialize fn at create
-    // time; we rebuild a representative input and assert the output
-    // shape directly.
+  it('persist partialize excludes agentState (per-session)', () => {
     useAgentStore.setState({
       panelOpen: true,
       activeSessionId: 'sess-x',
-      oraclePadPosition: { x: -3.5, z: 3.5 },
       agentState: 'thinking',
     });
     const persisted = JSON.parse(localStorage.getItem('agent-store-v1') ?? '{}');
-    // The persist middleware writes after each set(); the last one
-    // above triggers a flush. Stored shape should include only
-    // panelOpen, activeSessionId, oraclePadPosition.
     expect(persisted.state).toBeDefined();
     expect(persisted.state.panelOpen).toBe(true);
     expect(persisted.state.activeSessionId).toBe('sess-x');
-    expect(persisted.state.oraclePadPosition).toEqual({ x: -3.5, z: 3.5 });
     // agentState is per-session; partialize must exclude it.
     expect(persisted.state.agentState).toBeUndefined();
   });

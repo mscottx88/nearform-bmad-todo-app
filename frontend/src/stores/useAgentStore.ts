@@ -62,14 +62,10 @@ export interface AgentState {
   /** Accumulated chunks for the streaming message (mirror of `messages[i].content`). */
   streamingBuffer: string;
 
-  /** Story 6.7: Oracle-frog procedural-animation state machine. */
+  /** Story 6.7: Oracle-frog procedural-animation state machine.
+   *  Drives the 2D SVG frog's per-state CSS classes + chunk-driven
+   *  throat-sac pulses. */
   agentState: OracleAgentState;
-  /**
-   * Story 6.7: Oracle pad's persisted home position. `null` until the
-   * first OracleFrogManager mount seeds it; survives reloads via the
-   * `persist` middleware's partialize.
-   */
-  oraclePadPosition: { x: number; z: number } | null;
 
   openPanel: () => void;
   closePanel: () => void;
@@ -87,13 +83,11 @@ export interface AgentState {
   cancelStreaming: () => Promise<void>;
 
   setAgentState: (state: OracleAgentState) => void;
-  setOraclePadPosition: (pos: { x: number; z: number }) => void;
 }
 
 interface PersistedShape {
   panelOpen: boolean;
   activeSessionId: string | null;
-  oraclePadPosition: { x: number; z: number } | null;
 }
 
 /** Stable client-side id used for the optimistic assistant placeholder
@@ -179,9 +173,8 @@ export const useAgentStore = create<AgentState>()(
       inputDraft: '',
       streamingMessageId: null,
       streamingBuffer: '',
-      // Story 6.7: oracle-frog state machine + persisted pad home.
+      // Story 6.7: oracle-frog state machine — drives the 2D SVG.
       agentState: 'idle',
-      oraclePadPosition: null,
 
       openPanel: () => set({ panelOpen: true }),
       closePanel: () => set({ panelOpen: false }),
@@ -576,16 +569,10 @@ export const useAgentStore = create<AgentState>()(
         }
       },
 
-      // Story 6.7: Oracle-frog state-machine setters. `setAgentState`
-      // is a pure setter; ingestSseEvent + AgentComposer are the only
-      // call sites today. `setOraclePadPosition` is the entry point
-      // OracleFrogManager's first-mount initialiser uses to seed the
-      // home position when there's no persisted value.
+      // Story 6.7: Oracle-frog state-machine setter. ingestSseEvent
+      // + AgentComposer are the only call sites today.
       setAgentState: (state) => {
         set({ agentState: state });
-      },
-      setOraclePadPosition: (pos) => {
-        set({ oraclePadPosition: pos });
       },
     }),
     {
@@ -593,10 +580,8 @@ export const useAgentStore = create<AgentState>()(
       partialize: (s): PersistedShape => ({
         panelOpen: s.panelOpen,
         activeSessionId: s.activeSessionId,
-        // Story 6.7: persist the oracle home so it survives reloads.
         // `agentState` is intentionally NOT persisted — it's a
         // per-session animation state that must reset on reload.
-        oraclePadPosition: s.oraclePadPosition,
       }),
     },
   ),
