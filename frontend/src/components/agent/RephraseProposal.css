@@ -128,7 +128,9 @@
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 12px;
-  cursor: pointer;
+  /* Custom firefly cursor stays in charge — don't reintroduce the OS
+     pointer cursor (matches the agent panel's `cursor: none` policy). */
+  cursor: none;
   text-align: left;
   /* Allow chips to wrap their text and break long todos so they
      don't push the proposal block past the panel's right edge. */
@@ -163,7 +165,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  cursor: pointer;
+  /* Custom firefly cursor stays in charge — don't reintroduce the OS
+     pointer cursor (matches the agent panel's `cursor: none` policy). */
+  cursor: none;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
@@ -175,7 +179,9 @@
 }
 
 .rephrase-proposal__btn:disabled {
-  cursor: not-allowed;
+  /* Stay on the custom cursor; visual disabled-state comes from the
+     opacity drop, not an OS-level "not-allowed" glyph. */
+  cursor: none;
   opacity: 0.4;
 }
 

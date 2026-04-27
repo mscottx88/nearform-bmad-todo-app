@@ -512,7 +512,9 @@
 
 .agent-btn:disabled {
   opacity: 0.45;
-  cursor: not-allowed;
+  /* Stay on the custom firefly cursor — visual disabled-state comes
+     from opacity, not an OS-level "not-allowed" glyph. */
+  cursor: none;
   box-shadow: none;
 }
 
