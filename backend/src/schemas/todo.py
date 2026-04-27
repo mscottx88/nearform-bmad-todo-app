@@ -19,7 +19,13 @@ def _not_whitespace_only(value: str) -> str:
 
 
 class TodoCreate(BaseModel):
-    text: str = Field(min_length=1, max_length=1000)
+    # No max length — the DB column is `TEXT` (unbounded) and users
+    # legitimately want long todos (e.g. LLM-rewritten role-play
+    # narratives, embedded checklists, mission scripts). The
+    # min_length=1 + whitespace-only validator still reject empty
+    # text. Embedding model token cap is handled by the embedding
+    # worker, not here.
+    text: str = Field(min_length=1)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     position_x: float | None = None
     position_y: float | None = None
@@ -38,7 +44,11 @@ class TodoUpdate(BaseModel):
     # `ValidationError(type='extra_forbidden')` on any unknown key.
     model_config = ConfigDict(extra="forbid")
 
-    text: str | None = Field(default=None, min_length=1, max_length=1000)
+    # No max length — see note on TodoCreate.text. The DB column is
+    # `TEXT`; rephrase-skill rewrites can exceed 1000 chars (mission
+    # narratives, structured checklists). min_length=1 + the
+    # whitespace-only validator below still reject empty/blank text.
+    text: str | None = Field(default=None, min_length=1)
     completed: bool | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     position_x: float | None = None
