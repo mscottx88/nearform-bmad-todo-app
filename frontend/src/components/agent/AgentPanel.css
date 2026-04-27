@@ -145,8 +145,15 @@
      of the panel width — drops the frog's footprint by 30% in
      both dimensions vs full-width 1:1 so it doesn't dominate
      the panel chrome. Centred horizontally inside the section
-     via auto-margin. */
+     via auto-margin.
+
+     Story 6.9 (user feedback 2026-04-27): cap the oracle's growth
+     when the user resizes the panel wider. 364px = 70% of the
+     520px default width — so the frog at default size is exactly
+     unchanged, but doesn't keep growing as the panel widens. On
+     panels narrower than 520, the 70% rule still wins. */
   width: 70%;
+  max-width: 364px;
   margin: 0 auto;
   aspect-ratio: 1 / 1;
   padding: 8px;
