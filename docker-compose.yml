@@ -17,5 +17,33 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    # `.env` is sourced for ANTHROPIC_API_KEY / GOOGLE_API_KEY when
+    # present locally; CI / deploys override at the orchestrator level.
+    # The container tolerates absent keys (FastAPI starts with a
+    # WARNING; agent endpoints surface a clear error at request time).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-todo_pond}
+      CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8080:80"
+
 volumes:
   pgdata:

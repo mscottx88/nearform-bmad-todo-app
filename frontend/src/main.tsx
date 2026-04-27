@@ -7,6 +7,7 @@ import { registerVisibilityCommands } from './utils/visibilityCommands'
 import { registerSpreadOutCommand } from './utils/spreadOutCommand'
 import { queryClient } from './api/queryClient'
 import { TODOS_KEY } from './api/todoApi'
+import { maybeInstallE2EHooks } from './test/e2eHooks'
 import type { Todo } from './types'
 
 // Story 3.3: register the eight slash-command visibility registrations
@@ -26,6 +27,10 @@ registerVisibilityCommands()
 // BEFORE the registry walk; the registry's `execute()` is a
 // defensive fallback path.
 registerHelpCommand()
+
+// Story 1.5: install Playwright test hooks if the URL opts in via
+// `?e2e=1`. No-op for normal users.
+maybeInstallE2EHooks()
 
 registerSpreadOutCommand((): readonly Todo[] => {
   const entries = queryClient.getQueriesData<Todo[]>({ queryKey: TODOS_KEY })

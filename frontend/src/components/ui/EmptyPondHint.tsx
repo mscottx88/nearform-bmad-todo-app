@@ -19,7 +19,7 @@ export function EmptyPondHint() {
       style={{ pointerEvents: 'none' }}
     >
       <div className="empty-hint-wrap">
-        <div className="empty-hint" aria-label={HINT_TEXT}>
+        <div className="empty-hint" role="img" aria-label={HINT_TEXT}>
           {HINT_TEXT.split('').map((char, i) => (
             <span
               key={i}

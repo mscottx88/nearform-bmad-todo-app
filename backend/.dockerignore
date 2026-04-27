@@ -1,0 +1,34 @@
+# Test code is for CI, not the runtime image.
+tests/
+
+# Virtualenvs / caches that bloat the build context.
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Egg-info from local pip installs.
+*.egg-info/
+
+# Local-only env files; prod gets env via docker-compose / orchestrator.
+.env
+
+# Editor / OS noise.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build output (none expected in backend/, but be defensive).
+build/
+dist/
+
+# Docker artefacts shouldn't be in the build context either.
+Dockerfile
+.dockerignore

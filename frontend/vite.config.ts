@@ -17,6 +17,12 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Story 1.5: Playwright lives in `e2e/` and uses `.spec.ts`, the
+    // same extension Vitest collects by default. Exclude the folder
+    // so `npx vitest run` skips Playwright tests instead of trying
+    // to load them as unit tests (Playwright's `test` import is
+    // incompatible with Vitest's runner).
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],

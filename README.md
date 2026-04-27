@@ -67,6 +67,23 @@ make dev                     # backend on :8000, frontend on :5173
 # Visit http://localhost:5173
 ```
 
+### Run via Docker only
+
+For a full containerized stack (db + backend + frontend + nginx) with
+no local Python or Node toolchain required:
+
+```bash
+docker compose up --build
+# Visit http://localhost:8080
+```
+
+Three services come up: Postgres on `:5432`, FastAPI on `:8000`, and an
+nginx-served SPA on `:8080`. Nginx proxies `/api/*` to the backend
+service, so a single port (8080) is all you need open. The backend
+applies Alembic migrations on container start before launching uvicorn.
+`ANTHROPIC_API_KEY` is optional — agent endpoints surface a clear error
+at request time when it's missing, but the stack itself boots cleanly.
+
 ---
 
 ## Make targets
@@ -136,6 +153,35 @@ npx vitest run
 cd frontend
 npx vitest run --coverage
 ```
+
+### End-to-end (Playwright + axe-core)
+
+Five golden-path Playwright tests plus an automated WCAG 2A/2AA gate
+via `@axe-core/playwright`. The suite assumes a backend reachable at
+`:8000` and a frontend at either the Vite dev server or the
+docker-compose stack.
+
+```bash
+cd frontend
+
+# One-time browser install
+npx playwright install --with-deps chromium
+
+# Against `make dev` (backend :8000, vite :5173)
+npx playwright test
+
+# Against the docker-compose stack on :8080
+docker compose up -d --build
+PLAYWRIGHT_BASE_URL=http://localhost:8080 \
+  BACKEND_URL=http://localhost:8000 \
+  npx playwright test
+```
+
+The a11y test fails the run on any **critical** or **serious** WCAG
+violation; **moderate** and **minor** violations are reported in the
+log but don't gate the build. Tweak the allowlist in
+[`frontend/e2e/a11y-allowlist.ts`](frontend/e2e/a11y-allowlist.ts) only
+with a comment documenting why each rule is suppressed.
 
 > The backend test fixture **refuses to run** unless the database
 > name contains `"test"` — see [`conftest.py`](backend/tests/conftest.py)

@@ -15,9 +15,10 @@ const useUpdateTodoMock = vi.fn(() => ({
   mutate,
 }));
 
-const useTodosMock = vi.fn(() => ({
-  data: [] as { id: string; text: string }[],
-}));
+type MockTodo = { id: string; text: string; dueDate?: string | null };
+const useTodosMock = vi.fn(
+  () => ({ data: [] as MockTodo[] }) as { data: MockTodo[] | undefined; isLoading?: boolean },
+);
 
 vi.mock('../../api/todoApi', () => ({
   useUpdateTodo: () => useUpdateTodoMock(),
