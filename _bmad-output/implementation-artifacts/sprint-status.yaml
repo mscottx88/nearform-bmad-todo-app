@@ -43,7 +43,7 @@
 #   as [OPEN] with a signal to watch for
 
 generated: 2026-04-14
-last_updated: 2026-04-26 # Three new stories added for the "chat panel = sole input surface" initiative: 6-9 (resizable panel, ready-for-dev, independent), 6-10 (slash-command + plain-text migration into composer, backlog, hard-dep 6-8), 6-11 (delete TodoInput + EmptyPondHint, backlog, hard-dep 6-10). Sequence: 6-8 → 6-10 → 6-11; 6-9 floats. System prompt also fixed (cd7bf83 + 6b3fb3f) — was telling users "I'm only able to read todos" which contradicts the proposal-envelope architecture; updated to describe the rephrase routing path and bumped the 200-word cap to 400 (story 6.1 Task 5's original cap was set when there was only one skill). Earlier in day: 6-8-create-todo-skill backlog → ready-for-dev via bmad-create-story workflow. 6-3-rephrase-skill → done (CR landed in 43dad3e). 6-7-oracle-frog → done.
+last_updated: 2026-04-26 # Story 6-12-chat-suggested-actions ready-for-dev — structured side-channel on chat-skill output that closes the "user has to paste long phrase back to trigger rephrase" UX gap. Cross-skill context fixes also landed in 67e33c2 (today-anchor in chat skill, cross-skill todo-link inheritance, chat transcript in rephrase prompt). UI fixes 57c1c98 (custom cursor on chat chips) + 5535fb6 (NeonTooltip stays anchored when scrolling inside InfoPopup or moving the 3D camera). Three stories added earlier: 6-9 (resizable panel, ready-for-dev, independent), 6-10 (slash-command + plain-text migration into composer, backlog, hard-dep 6-8), 6-11 (delete TodoInput + EmptyPondHint, backlog, hard-dep 6-10). Sequence: 6-8 → 6-10 → 6-11; 6-9 + 6-12 float. System prompt fixed cd7bf83 + 6b3fb3f. 6-8-create-todo-skill ready-for-dev. 6-3-rephrase-skill → done (CR in 43dad3e). 6-7-oracle-frog → done.
 project: nearform-bmad-todo-app
 project_key: NOKEY
 tracking_system: file-system
@@ -122,6 +122,7 @@ development_status:
   6-9-chat-panel-resizable: ready-for-dev  # NEW 2026-04-26 — drag handle on left edge of agent panel, clamp [25%, 50%] of viewport width, persist via existing useAgentStore localStorage partialize. Independent of 6-8/6-10/6-11; can ship anytime.
   6-10-chat-composer-absorbs-todo-input: backlog  # NEW 2026-04-26 — slash-command autocomplete in AgentComposer + plain-text routing through intent classifier (relies on 6-8's create_todo skill for plain-text creation). HARD DEPENDENCY on 6-8 done. Leaves TodoInput functional during migration as safety net.
   6-11-delete-todo-input: backlog  # NEW 2026-04-26 — cleanup story: delete TodoInput + EmptyPondHint, update KeyboardShortcutsHint, retarget pond Enter-key to open agent panel. HARD DEPENDENCY on 6-10 done.
+  6-12-chat-suggested-actions: ready-for-dev  # NEW 2026-04-26 — chat-skill output gains a structured `suggested_action` side-channel; frontend renders one-click confirm chip; backend pre-empts the intent classifier when the next user turn matches a confirmation phrase ("yes", "do it", etc.). Closes the "user has to paste a long instruction back" UX gap from a real-user dialogue. Independent; recommended after 6-8 so the create_todo allowlist entry is meaningful.
   epic-6-retrospective: pending
 
   # Epic 7: The Living Ecosystem
