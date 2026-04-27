@@ -148,4 +148,37 @@ describe('AgentMessage', () => {
     );
     expect(queryByTestId('rephrase-proposal-stub')).toBeNull();
   });
+
+  // 2026-04-26: chat bubbles tag themselves with data-cursor="firefly"
+  // so plain prose text doesn't trigger the I-beam glyph from the
+  // global cursor-mode hook's selectable-text fallthrough. Interactive
+  // children (TodoLink buttons, RephraseProposal accept/dismiss) still
+  // infer 'point' because the ancestor walk hits them before this
+  // attribute.
+  it('marks the chat bubble with data-cursor="firefly" so prose stays on the firefly cursor', () => {
+    const { container } = render(
+      <AgentMessage message={makeMessage('assistant')} isStreaming={false} />,
+    );
+    const bubble = container.querySelector('.agent-message__bubble');
+    expect(bubble).not.toBeNull();
+    expect(bubble?.getAttribute('data-cursor')).toBe('firefly');
+  });
+
+  // Markdown tables in assistant prose render inside a NeonScrollbar
+  // wrapper so a wide table scrolls horizontally with the project's
+  // neon thumb instead of the OS default scrollbar. Functional check:
+  // both the table element AND a NeonScrollbar track render.
+  it('renders markdown tables wrapped in a NeonScrollbar', () => {
+    const md = '| col1 | col2 |\n|------|------|\n| a    | b    |';
+    const { container } = render(
+      <AgentMessage
+        message={makeMessage('assistant', { content: md })}
+        isStreaming={false}
+      />,
+    );
+    expect(container.querySelector('.agent-message__table')).not.toBeNull();
+    // NeonScrollbar always renders its track DOM (visibility is
+    // overflow-driven via CSS); presence proves the wrapper mounted.
+    expect(container.querySelector('.neon-scrollbar')).not.toBeNull();
+  });
 });

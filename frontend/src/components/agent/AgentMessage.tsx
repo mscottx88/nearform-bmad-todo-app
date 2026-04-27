@@ -38,12 +38,38 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../types/agent';
+import { usePondStore } from '../../stores/usePondStore';
+import { NeonScrollbar } from '../ui/NeonScrollbar';
 import {
   parseAgentMessage,
   type AgentMessageSegment,
 } from '../../utils/parseAgentMessage';
 import { RephraseProposal } from './RephraseProposal';
 import { TodoLink } from './TodoLink';
+
+// Cursor handoff for the NeonScrollbar instances we mount inside
+// chat content (currently the per-table horizontal scroller).
+// Hover over the thumb → frog grab-hand; drag → grabbing fist;
+// release → back to firefly via the global cursor-mode hook
+// (`useGlobalCursorMode` re-infers from the released-on element).
+// Defined at module scope because the wiring is identical for every
+// table — no per-bubble state needed.
+const onTableThumbHover = (hovered: boolean): void => {
+  const store = usePondStore.getState();
+  if (hovered) {
+    if (store.cursorMode === 'firefly') store.setCursorMode('grab');
+    return;
+  }
+  if (store.cursorMode === 'grab') store.setCursorMode('firefly');
+};
+const onTableThumbDrag = (dragging: boolean): void => {
+  const store = usePondStore.getState();
+  if (dragging) {
+    store.setCursorMode('grabbing');
+    return;
+  }
+  store.setCursorMode('firefly');
+};
 
 interface Props {
   message: ChatMessage;
@@ -104,32 +130,31 @@ function renderSegment(
         />
       );
     case 'table':
+      // Wrap in NeonScrollbar so a wide table scrolls horizontally
+      // with the project's neon thumb instead of the OS default
+      // scrollbar — consistent with every other scroll surface in
+      // the panel. `innerStyle.overflowY: 'hidden'` because tables
+      // never need vertical scroll inside the bubble (the bubble
+      // grows to fit its rows). Cursor callbacks hand off to
+      // 'grab' / 'grabbing' on thumb interaction, then back to
+      // 'firefly' via the global hook on release.
       return (
-        <table key={idx} className="agent-message__table">
-          <thead>
-            <tr>
-              {segment.headers.map((cell, ci) => (
-                <th
-                  key={ci}
-                  // Per-column alignment from the separator row's `:`
-                  // markers. `null` keeps the CSS default (left).
-                  style={
-                    segment.alignments[ci]
-                      ? { textAlign: segment.alignments[ci] ?? undefined }
-                      : undefined
-                  }
-                >
-                  {cell.map((s, si) => renderSegment(s, si))}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {segment.rows.map((row, ri) => (
-              <tr key={ri}>
-                {row.map((cell, ci) => (
-                  <td
+        <NeonScrollbar
+          key={idx}
+          color="cyan"
+          className="agent-message__table-scroll"
+          innerStyle={{ overflowY: 'hidden' }}
+          onThumbHover={onTableThumbHover}
+          onThumbDrag={onTableThumbDrag}
+        >
+          <table className="agent-message__table">
+            <thead>
+              <tr>
+                {segment.headers.map((cell, ci) => (
+                  <th
                     key={ci}
+                    // Per-column alignment from the separator row's
+                    // `:` markers. `null` keeps the CSS default (left).
                     style={
                       segment.alignments[ci]
                         ? { textAlign: segment.alignments[ci] ?? undefined }
@@ -137,12 +162,30 @@ function renderSegment(
                     }
                   >
                     {cell.map((s, si) => renderSegment(s, si))}
-                  </td>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {segment.rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td
+                      key={ci}
+                      style={
+                        segment.alignments[ci]
+                          ? { textAlign: segment.alignments[ci] ?? undefined }
+                          : undefined
+                      }
+                    >
+                      {cell.map((s, si) => renderSegment(s, si))}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </NeonScrollbar>
       );
   }
 }
@@ -312,7 +355,18 @@ export function AgentMessage({ message, isStreaming }: Props) {
         column nested) and the bubble retains its full width.
       */}
       <div className="agent-message__stack">
-        <div className="agent-message__bubble" ref={bubbleRef}>
+        <div
+          className="agent-message__bubble"
+          ref={bubbleRef}
+          // Override the global cursor-mode hook's selectable-text
+          // fallthrough: chat prose has `user-select: text` (so the
+          // user can copy a quote), but we want the firefly cursor
+          // over plain prose, NOT the I-beam. Interactive children
+          // (TodoLink buttons, RephraseProposal accept/dismiss,
+          // etc.) still infer `point` because the walk-up hits them
+          // BEFORE this attribute.
+          data-cursor="firefly"
+        >
           <BubbleOutline role={message.role as 'user' | 'assistant'} width={size.w} height={size.h} />
           <div className="agent-message__content">
             {showThinking ? (

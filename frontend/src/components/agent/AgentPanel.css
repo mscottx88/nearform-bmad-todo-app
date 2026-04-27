@@ -280,19 +280,18 @@
    chrome stays consistent with the rest of the bubble (assistant,
    user, failed, cancelled). border-collapse keeps the cell borders
    single-stroke; subtle internal padding gives the cells breathing
-   room. The wrapping `display: block` + `overflow-x: auto` lets a
-   wide table scroll horizontally inside a narrow chat panel
-   instead of forcing the bubble to grow past its column. */
-.agent-message__table {
-  display: block;
-  width: 100%;
+   room. Horizontal scroll for wider-than-bubble tables is handled
+   by the wrapping `<NeonScrollbar>` (see AgentMessage.tsx) so the
+   neon thumb shows instead of the OS default scrollbar. */
+.agent-message__table-scroll {
   margin: 8px 0;
+}
+
+.agent-message__table {
+  width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
   font-size: 12px;
-  /* Horizontal scroll for tables wider than the bubble — mostly for
-     dense GFM tables in narrow panels. */
-  overflow-x: auto;
 }
 
 .agent-message__table th,
