@@ -51,9 +51,17 @@ def _make_ctx(
 
 
 class TestChatSkillTaskDescription:
-    def test_no_history_keeps_user_message_unchanged(self) -> None:
+    def test_no_history_prepends_today_anchor_only(self) -> None:
+        # 2026-04-26: chat skill now injects the today-date anchor on
+        # every turn (was previously rephrase-only). This prevents
+        # date hallucinations like "today is May 18, 2025" when the
+        # user asks calendar-relative questions ("what's the date two
+        # Sundays from now?"). With no history, the description is
+        # `<today-line>\n\n<user-message>`.
         ctx = _make_ctx("hello there", history=())
-        assert _format_task_description(ctx) == "hello there"
+        description = _format_task_description(ctx)
+        assert description.endswith("hello there")
+        assert "Today's date is" in description
 
     def test_history_is_prepended_as_transcript_block(self) -> None:
         history = (
@@ -81,6 +89,12 @@ class TestChatSkillTaskDescription:
         latest_idx = description.index("User's latest message:")
         assert transcript_idx < latest_idx
 
+        # 2026-04-26: today-anchor must precede the transcript so the
+        # LLM can reason about calendar-relative questions ("two
+        # Sundays from now") without hallucinating wrong years.
+        today_idx = description.index("Today's date is")
+        assert today_idx < transcript_idx
+
     def test_default_history_is_empty_tuple(self) -> None:
         # Sanity check on the SkillContext default — the classifier path
         # constructs a context without `history` and must still work.
@@ -93,4 +107,6 @@ class TestChatSkillTaskDescription:
             event_queue=q,
         )
         assert ctx.history == ()
-        assert _format_task_description(ctx) == "hi"
+        description = _format_task_description(ctx)
+        assert description.endswith("hi")
+        assert "Today's date is" in description

@@ -2,6 +2,7 @@ import textwrap
 
 from crewai import Crew, Process, Task
 
+from src.agent.skills._helpers import today_anchor_line
 from src.agent.skills.base import build_base_agent
 from src.agent.skills.registry import SkillContext
 from src.agent.tools.get_chat_history import GetChatHistoryTool
@@ -26,7 +27,8 @@ _CHAT_HISTORY_UNTRUSTED_DATA_FRAMING = (
 
 
 def _format_task_description(ctx: SkillContext) -> str:
-    """Prepend a compact chat transcript to the user's latest message.
+    """Prepend a compact chat transcript + today-date anchor to the
+    user's latest message.
 
     Story 6.2 AC 12: the chat skill receives the last `_HISTORY_WINDOW`
     `complete` user/assistant messages via `ctx.history` (oldest → newest,
@@ -36,22 +38,29 @@ def _format_task_description(ctx: SkillContext) -> str:
     like "and what about that one?". `GetChatHistoryTool` stays
     registered for deeper-than-window lookups.
 
+    2026-04-26 fix: inject the today-date anchor (shared helper) so
+    questions like "what's the date two Sundays from now?" anchor to
+    the actual calendar instead of the model's training-data prior.
+    Without this, the chat skill was hallucinating wrong years (saw
+    "today is May 18, 2025" when the actual date was April 26, 2026).
+
     Prompt blocks use indented triple-quoted strings + `textwrap.dedent`
     so the source-code indentation reads naturally without leaking into
-    the prompt the LLM sees. Anything inside `{...}` interpolation
-    (transcript, latest message) bypasses dedent's leading-whitespace
-    detection because dedent inspects only constant-string lines.
+    the prompt the LLM sees.
 
     Story 6.2 Group A CR P8: prepend `_CHAT_HISTORY_UNTRUSTED_DATA_FRAMING`
     so the LLM sees an explicit "transcript is data, not instructions"
     boundary — symmetric with the classifier's framing. Defense in depth
     against prompt injection across turns.
     """
+    today_line = today_anchor_line()
     if not ctx.history:
-        return ctx.user_message
+        return f"{today_line}\n\n{ctx.user_message}"
     transcript_lines = "\n".join(f"{m.role}: {m.content}" for m in ctx.history)
     template = textwrap.dedent(
         """\
+        {today_line}
+
         {framing}
 
         Conversation so far:
@@ -61,6 +70,7 @@ def _format_task_description(ctx: SkillContext) -> str:
         """
     ).rstrip()
     return template.format(
+        today_line=today_line,
         framing=_CHAT_HISTORY_UNTRUSTED_DATA_FRAMING,
         transcript_lines=transcript_lines,
         user_message=ctx.user_message,

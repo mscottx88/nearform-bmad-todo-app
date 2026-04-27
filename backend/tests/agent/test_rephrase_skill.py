@@ -159,6 +159,110 @@ class TestHistoryResolver:
         # proposal — we must NOT reach back to the dashboard target.
         assert rephrase._resolve_from_history(ctx) is None
 
+    # 2026-04-26 cross-skill context fix: when the chat skill names a
+    # specific todo via the `[label](todo://<uuid>)` markdown link
+    # convention (per BASE_SYSTEM_PROMPT REFERENCING TODOS rule), the
+    # rephrase skill must inherit that target on the next user turn.
+    # Without this, "How about the park date?" → "Yes let's add a date"
+    # falls through to noisy hybrid-search results.
+    def test_inherits_from_chat_turn_with_todo_link(self) -> None:
+        wanted = uuid.uuid4()
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content=(
+                f"You've got [Go hang out with Ryker at the park](todo://{wanted}) — "
+                "no due date set yet."
+            ),
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        history = (_make_message("user", "How about a park date?"), chat_reply)
+        ctx = _make_ctx(
+            user_message="Yes let's add a date, two weekends from now",
+            history=history,
+        )
+        assert rephrase._resolve_from_history(ctx) == wanted
+
+    def test_chat_turn_without_todo_link_returns_none(self) -> None:
+        # Chat reply that doesn't name a specific todo (just answers
+        # the question generically) MUST NOT be mined for a link —
+        # there isn't one to find.
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content="You have three todos in total.",
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        history = (_make_message("user", "how many todos?"), chat_reply)
+        ctx = _make_ctx(user_message="add a due date to it", history=history)
+        assert rephrase._resolve_from_history(ctx) is None
+
+    def test_chat_turn_with_multiple_todo_links_uses_first(self) -> None:
+        # Multi-link replies (e.g. a list of todos) bias toward the
+        # first one, which is usually the foregrounded reference. If
+        # the user wanted a different one they'd phrase the request
+        # more specifically.
+        first = uuid.uuid4()
+        second = uuid.uuid4()
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content=(
+                f"You've got [first task](todo://{first}) and "
+                f"[second task](todo://{second})."
+            ),
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        history = (_make_message("user", "what's on my list?"), chat_reply)
+        ctx = _make_ctx(user_message="rephrase that", history=history)
+        assert rephrase._resolve_from_history(ctx) == first
+
+    def test_proposal_target_takes_priority_over_chat_link(self) -> None:
+        # When the immediate prior assistant turn was BOTH a proposal
+        # AND its content happens to embed a todo:// link (e.g. the
+        # rephrase skill quoted another todo in its reasoning), the
+        # proposal-targets path wins — that's the canonical inheritance.
+        proposal_target = uuid.uuid4()
+        link_target = uuid.uuid4()
+        # Build a proposal message whose reasoning content also has a
+        # link to a different todo.
+        proposal_msg = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content=(f"Made it crisper — see [related](todo://{link_target})."),
+            skill="rephrase",
+            metadata_={
+                "proposal": {
+                    "kind": "text_rewrite",
+                    "targets": [str(proposal_target)],
+                    "payload": {},
+                    "reasoning": "x",
+                }
+            },
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        history = (_make_message("user", "rephrase X"), proposal_msg)
+        ctx = _make_ctx(user_message="add a due date", history=history)
+        assert rephrase._resolve_from_history(ctx) == proposal_target
+
 
 class TestSearchResolver:
     """Tests for `_resolve_via_search` — server-side disambiguation."""
@@ -341,6 +445,67 @@ class TestTaskDescription:
         assert "Sunday" in prompt
         # And the prompt explicitly tells the LLM to anchor on this date.
         assert "Today's date is" in prompt
+
+    # 2026-04-26 cross-skill context fix: the rephrase prompt now
+    # includes the chat-history transcript so anaphoric references
+    # like "make THAT the due date" can resolve to a date discussed
+    # earlier in the conversation. Without this, the LLM has only
+    # the current message + target todo and bails on "that".
+    def test_normal_path_includes_chat_history_transcript(self) -> None:
+        from src.schemas.agent import ChatMessageResponse  # noqa: PLC0415
+
+        history = (
+            ChatMessageResponse(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                role="user",
+                content="What's the date two Sundays from now?",
+                skill=None,
+                metadata_={},
+                status="complete",
+                error=None,
+                created_at=datetime.now(UTC),
+            ),
+            ChatMessageResponse(
+                id=uuid.uuid4(),
+                session_id=uuid.uuid4(),
+                role="assistant",
+                content="Two Sundays from now is May 10, 2026.",
+                skill="chat",
+                metadata_={},
+                status="complete",
+                error=None,
+                created_at=datetime.now(UTC),
+            ),
+        )
+        prompt = rephrase._build_task_description(
+            user_message="Make that the due date for the park todo",
+            target_fields={"text": "park hangout", "due_date": None},
+            target_error=None,
+            history=history,
+        )
+        # Transcript header + both turns rendered in the prompt.
+        assert "Conversation so far" in prompt
+        assert "user: What's the date two Sundays from now?" in prompt
+        assert "assistant: Two Sundays from now is May 10, 2026." in prompt
+        # Transcript precedes the User-request line so the LLM reads
+        # context before the actionable request.
+        transcript_idx = prompt.index("Conversation so far")
+        request_idx = prompt.index("User request:")
+        assert transcript_idx < request_idx
+
+    def test_normal_path_omits_transcript_block_when_history_empty(
+        self,
+    ) -> None:
+        # No history → no transcript-block markers leak into the prompt
+        # (avoids the LLM seeing a header for an empty section).
+        prompt = rephrase._build_task_description(
+            user_message="add a due date",
+            target_fields={"text": "x", "due_date": None},
+            target_error=None,
+            history=(),
+        )
+        assert "Conversation so far" not in prompt
 
 
 # ─── Build crew with mocked tool fetch ──────────────────────────────
