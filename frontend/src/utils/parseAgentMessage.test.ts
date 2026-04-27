@@ -334,4 +334,54 @@ That's the plan.`;
       expect(result.some((s) => s.kind === 'table')).toBe(false);
     });
   });
+
+  describe('agent action chips', () => {
+    it('parses an `agent://rephrase?msg=...` link as an agent-action segment', () => {
+      const md =
+        'Try [Rephrase the PFE task](agent://rephrase?msg=rephrase+the+PFE+task+to+add+a+due+date) when ready.';
+      const result = parseAgentMessage(md);
+      const action = result.find((s) => s.kind === 'agent-action');
+      expect(action).toMatchObject({
+        kind: 'agent-action',
+        label: 'Rephrase the PFE task',
+        skill: 'rephrase',
+        message: 'rephrase the PFE task to add a due date',
+      });
+    });
+
+    it('decodes `%20`-encoded spaces in the msg payload', () => {
+      const md = '[Try this](agent://rephrase?msg=hello%20world)';
+      const result = parseAgentMessage(md);
+      const action = result.find((s) => s.kind === 'agent-action');
+      expect(action).toMatchObject({ message: 'hello world' });
+    });
+
+    it('falls through as plain text when the skill is outside the allowlist', () => {
+      // `delete_all_todos` isn't in AGENT_ACTION_SKILLS — must NOT
+      // produce an agent-action segment (defence in depth, mirrors
+      // the Pydantic Literal allowlist on the backend).
+      const md = '[Wipe pond](agent://delete_all_todos?msg=delete+everything)';
+      const result = parseAgentMessage(md);
+      expect(result.some((s) => s.kind === 'agent-action')).toBe(false);
+    });
+
+    it('falls through as plain text on malformed URL encoding', () => {
+      const md = '[Bad](agent://rephrase?msg=foo%ZZbar)';
+      const result = parseAgentMessage(md);
+      expect(result.some((s) => s.kind === 'agent-action')).toBe(false);
+    });
+
+    it('interleaves todo and agent links in document order', () => {
+      const md =
+        `See [the task](todo://${UUID_A}) — then [Rephrase it](agent://rephrase?msg=rephrase+it).`;
+      const result = parseAgentMessage(md);
+      const linkSegments = result.filter(
+        (s) => s.kind === 'todo-link' || s.kind === 'agent-action',
+      );
+      expect(linkSegments.map((s) => s.kind)).toEqual([
+        'todo-link',
+        'agent-action',
+      ]);
+    });
+  });
 });

@@ -38,6 +38,7 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../types/agent';
+import { useAgentStore } from '../../stores/useAgentStore';
 import { usePondStore } from '../../stores/usePondStore';
 import { NeonScrollbar } from '../ui/NeonScrollbar';
 import {
@@ -128,6 +129,28 @@ function renderSegment(
           label={segment.label}
           todoId={segment.todoId}
         />
+      );
+    case 'agent-action':
+      // Inline clickable chip — the chat skill's prose can suggest
+      // a follow-up action via `[label](agent://<skill>?msg=…)`,
+      // which renders here. Click → dispatches a fresh chat turn
+      // with the suggested skill override + prefilled message.
+      // Imperative store read inside the handler keeps the
+      // component subscription-light (we don't need to re-render
+      // when sendMessage's identity changes).
+      return (
+        <button
+          key={idx}
+          type="button"
+          className="agent-message__action-chip"
+          onClick={() => {
+            void useAgentStore.getState().sendMessage(segment.message, {
+              skill: segment.skill,
+            });
+          }}
+        >
+          {segment.label}
+        </button>
       );
     case 'table':
       // Wrap in NeonScrollbar so a wide table scrolls horizontally

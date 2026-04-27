@@ -29,6 +29,14 @@
 
 export type CellAlignment = 'left' | 'center' | 'right';
 
+/** Skills the chat skill is allowed to suggest via the
+ *  `agent://<skill>?msg=…` link convention. Narrowing here mirrors
+ *  the Pydantic `Literal` allowlist on `SuggestedAction.skill`
+ *  (story 6.12) — keeps the LLM from dragging the user into a skill
+ *  that isn't actually wired up. */
+export const AGENT_ACTION_SKILLS = ['rephrase', 'create_todo'] as const;
+export type AgentActionSkill = (typeof AGENT_ACTION_SKILLS)[number];
+
 export type AgentMessageSegment =
   | { kind: 'text'; text: string }
   | { kind: 'bold'; text: string }
@@ -37,6 +45,16 @@ export type AgentMessageSegment =
   | { kind: 'heading'; level: 1 | 2 | 3; text: string }
   | { kind: 'hr' }
   | { kind: 'todo-link'; label: string; todoId: string }
+  | {
+      kind: 'agent-action';
+      label: string;
+      skill: AgentActionSkill;
+      /** The prefilled message that becomes the next user turn's
+       *  `content` if the user clicks the chip. URL-decoded from the
+       *  link's `msg=` parameter at parse time so the renderer
+       *  doesn't need to decode again. */
+      message: string;
+    }
   | {
       kind: 'table';
       // Per-column alignment, one entry per header cell. `null` falls
@@ -52,6 +70,18 @@ export type AgentMessageSegment =
 
 const TODO_LINK_RE =
   /\[([^\]]+)\]\(todo:\/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/gi;
+
+// `[label](agent://<skill>?msg=<urlencoded message>)` — sibling of
+// the todo-link convention for inline action suggestions. The chat
+// skill emits these whenever it offers a follow-up the user can
+// just click instead of typing. The skill name is restricted via
+// `AGENT_ACTION_SKILLS`; anything else falls through as plain text.
+//
+// `msg=` payloads can include URL-encoded spaces (`+` or `%20`) and
+// multi-sentence content; the regex consumes everything up to the
+// closing `)` of the link form. Decoding happens at parse time.
+const AGENT_ACTION_RE =
+  /\[([^\]]+)\]\(agent:\/\/([a-z_]+)\?msg=([^)]*)\)/gi;
 
 // Block-level patterns. Both anchor on start-of-line and tolerate
 // trailing whitespace so `## Title  ` and `---  ` still match.
@@ -198,24 +228,97 @@ function isWordBoundaryBefore(text: string, i: number): boolean {
  */
 function parseProse(content: string): AgentMessageSegment[] {
   const segments: AgentMessageSegment[] = [];
-  let cursor = 0;
 
-  // First pass: extract todo-link references, leaving the prose
-  // between them as raw text. Keeping link extraction simple (no
-  // escaping) lets the inline-emphasis tokenizer operate on plain
-  // prose without worrying about overlapping delimiters inside
-  // link labels.
-  for (const match of content.matchAll(TODO_LINK_RE)) {
-    const start = match.index ?? 0;
-    if (start > cursor) {
-      segments.push(...tokenizeInlineMarkdown(content.slice(cursor, start)));
-    }
-    segments.push({
-      kind: 'todo-link',
-      label: match[1],
-      todoId: match[2].toLowerCase(),
+  // Collect all link-matches from BOTH conventions (todo:// and
+  // agent://) with their start index, then walk them in document
+  // order. A single pass would only honour one convention's
+  // priority, but the LLM can interleave them ("[Park todo](todo://)
+  // — [Rephrase](agent://rephrase?msg=…)"). Sorted-and-walked is
+  // O(n log n) but n is small (one chat reply has ≤ a handful of
+  // links each). Anything not part of a link falls through to the
+  // inline-emphasis tokenizer as raw prose.
+  type LinkHit =
+    | {
+        kind: 'todo';
+        index: number;
+        length: number;
+        label: string;
+        uuid: string;
+      }
+    | {
+        kind: 'agent';
+        index: number;
+        length: number;
+        label: string;
+        skill: AgentActionSkill;
+        msg: string;
+      };
+  const hits: LinkHit[] = [];
+
+  for (const m of content.matchAll(TODO_LINK_RE)) {
+    hits.push({
+      kind: 'todo',
+      index: m.index ?? 0,
+      length: m[0].length,
+      label: m[1],
+      uuid: m[2].toLowerCase(),
     });
-    cursor = start + match[0].length;
+  }
+  for (const m of content.matchAll(AGENT_ACTION_RE)) {
+    const skill = m[2];
+    if (!(AGENT_ACTION_SKILLS as readonly string[]).includes(skill)) {
+      // Skill outside the allowlist — ignore the match so the link
+      // form falls through as plain text. Mirrors the Pydantic
+      // `Literal` allowlist on the backend (story 6.12).
+      continue;
+    }
+    let decodedMsg: string;
+    try {
+      // `+` is the historic URL-encoding for spaces in query
+      // strings; `decodeURIComponent` handles `%20` but not `+`,
+      // so normalise first.
+      decodedMsg = decodeURIComponent(m[3].replace(/\+/g, ' '));
+    } catch {
+      // Malformed `%`-encoding — skip the match so it falls
+      // through as plain text rather than crashing the parse.
+      continue;
+    }
+    hits.push({
+      kind: 'agent',
+      index: m.index ?? 0,
+      length: m[0].length,
+      label: m[1],
+      skill: skill as AgentActionSkill,
+      msg: decodedMsg,
+    });
+  }
+  hits.sort((a, b) => a.index - b.index);
+
+  let cursor = 0;
+  for (const hit of hits) {
+    // Overlap guard: if a later match starts inside an earlier one
+    // (LLM produced a malformed nested form), skip the later.
+    if (hit.index < cursor) continue;
+    if (hit.index > cursor) {
+      segments.push(
+        ...tokenizeInlineMarkdown(content.slice(cursor, hit.index)),
+      );
+    }
+    if (hit.kind === 'todo') {
+      segments.push({
+        kind: 'todo-link',
+        label: hit.label,
+        todoId: hit.uuid,
+      });
+    } else {
+      segments.push({
+        kind: 'agent-action',
+        label: hit.label,
+        skill: hit.skill,
+        message: hit.msg,
+      });
+    }
+    cursor = hit.index + hit.length;
   }
 
   if (cursor < content.length) {

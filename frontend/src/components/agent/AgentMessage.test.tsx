@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import type { ChatMessage } from '../../types/agent';
 
 // Mock the RephraseProposal renderer so this test file doesn't need
@@ -10,6 +10,15 @@ vi.mock('./RephraseProposal', () => ({
   RephraseProposal: ({ targets }: { targets: string[] }) => (
     <div data-testid="rephrase-proposal-stub" data-targets={targets.join(',')} />
   ),
+}));
+
+// Mock the agent store so the action-chip click test can assert
+// the dispatched arguments without booting the real store + SSE.
+const sendMessageMock = vi.fn();
+vi.mock('../../stores/useAgentStore', () => ({
+  useAgentStore: {
+    getState: () => ({ sendMessage: sendMessageMock }),
+  },
 }));
 
 // Importing AgentMessage AFTER the mock so the mocked module resolves.
@@ -247,6 +256,50 @@ describe('AgentMessage', () => {
       expect(
         container.querySelector('.agent-message__skill-handoff'),
       ).toBeNull();
+    });
+  });
+
+  // Action chips (`[label](agent://<skill>?msg=…)`): inline
+  // clickable pills the chat skill emits to dispatch a follow-up
+  // skill turn without making the user retype a long instruction.
+  describe('action chips', () => {
+    it('renders an inline chip button for an `agent://` link', () => {
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', {
+            content:
+              'Try [Rephrase the PFE task](agent://rephrase?msg=rephrase+the+PFE+task+to+add+a+due+date) when ready.',
+          })}
+          isStreaming={false}
+        />,
+      );
+      const chip = container.querySelector(
+        '.agent-message__action-chip',
+      ) as HTMLButtonElement | null;
+      expect(chip).not.toBeNull();
+      expect(chip?.textContent).toContain('Rephrase the PFE task');
+    });
+
+    it('clicking the chip dispatches sendMessage with the decoded prefilled message and skill override', () => {
+      sendMessageMock.mockReset();
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', {
+            content:
+              '[Rephrase task](agent://rephrase?msg=rephrase+the+task+to+add+a+due+date)',
+          })}
+          isStreaming={false}
+        />,
+      );
+      const chip = container.querySelector(
+        '.agent-message__action-chip',
+      ) as HTMLButtonElement;
+      fireEvent.click(chip);
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        'rephrase the task to add a due date',
+        { skill: 'rephrase' },
+      );
     });
   });
 });
