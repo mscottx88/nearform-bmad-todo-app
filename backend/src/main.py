@@ -74,6 +74,27 @@ def validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
+    # Log the rejected fields so 422s are diagnosable from the
+    # server-side stream alone — the URL+status line uvicorn prints
+    # by default tells you a request failed but not WHY. We log the
+    # field path + error type per Pydantic error entry, NOT the
+    # input value (avoids dumping potentially-sensitive todo text
+    # into ops logs). To inspect actual values, use the response
+    # body in the browser DevTools Network tab.
+    error_summary = [
+        {
+            "loc": ".".join(str(part) for part in err.get("loc", ())),
+            "type": err.get("type"),
+            "msg": err.get("msg"),
+        }
+        for err in exc.errors()
+    ]
+    logger.warning(
+        "422 validation_error %s %s — rejected: %s",
+        request.method,
+        request.url.path,
+        error_summary,
+    )
     return JSONResponse(
         status_code=422,
         content={
