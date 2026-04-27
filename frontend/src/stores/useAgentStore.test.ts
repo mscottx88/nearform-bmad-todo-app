@@ -40,6 +40,9 @@ function resetStore() {
   useAgentStore.setState({
     panelOpen: false,
     activeSessionId: null,
+    // Story 6.9 — reset to the in-code default so per-test panelWidth
+    // overrides don't leak between tests.
+    panelWidth: 440,
     sessions: [],
     messages: [],
     inputDraft: '',
@@ -498,5 +501,52 @@ describe('useAgentStore — Story 6.7 agentState transitions', () => {
     expect(persisted.state.activeSessionId).toBe('sess-x');
     // agentState is per-session; partialize must exclude it.
     expect(persisted.state.agentState).toBeUndefined();
+  });
+});
+
+// ─── Story 6.9: panel width + persistence ─────────────────────────────
+
+describe('useAgentStore — Story 6.9 panelWidth', () => {
+  beforeEach(() => {
+    resetStore();
+    localStorage.clear();
+  });
+
+  it('initial panelWidth is 440 (default)', () => {
+    expect(useAgentStore.getState().panelWidth).toBe(440);
+  });
+
+  it('setPanelWidth updates state', () => {
+    useAgentStore.getState().setPanelWidth(600);
+    expect(useAgentStore.getState().panelWidth).toBe(600);
+  });
+
+  it('setPanelWidth triggers persist with panelWidth in payload', () => {
+    useAgentStore.getState().setPanelWidth(525);
+    const persisted = JSON.parse(
+      localStorage.getItem('agent-store-v1') ?? '{}',
+    );
+    expect(persisted.state).toBeDefined();
+    expect(persisted.state.panelWidth).toBe(525);
+  });
+
+  it('rehydrate from older localStorage shape (no panelWidth) falls back to default 440', async () => {
+    // Simulate a pre-6.9 persisted entry with only the original
+    // partialized fields. zustand-persist's default merge spreads
+    // currentState first then persistedState, so missing keys keep
+    // their in-code default (440).
+    localStorage.setItem(
+      'agent-store-v1',
+      JSON.stringify({
+        state: { panelOpen: true, activeSessionId: 'sess-legacy' },
+        version: 0,
+      }),
+    );
+    // Force a fresh hydrate from the stub.
+    await useAgentStore.persist.rehydrate();
+    const state = useAgentStore.getState();
+    expect(state.panelOpen).toBe(true);
+    expect(state.activeSessionId).toBe('sess-legacy');
+    expect(state.panelWidth).toBe(440);
   });
 });

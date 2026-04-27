@@ -187,6 +187,55 @@ function drawTextCursor(
 }
 
 
+function drawResizeArrowsH(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+): void {
+  // Story 6.9: neon double-arrow shown over the agent panel's resize
+  // edge. A thin horizontal cyan rod with arrowhead tips at each end —
+  // reads as "drag horizontally" the way the OS col-resize cursor
+  // does, but in the project's neon vocabulary.
+  //
+  // Hotspot convention: dead centre of the rod (matches col-resize).
+  const COLOR = '#00eeff'; /* --neon-cyan */
+  const HALF_LEN = 11; // each arm extends 11px from centre → ~22px wide
+  const HEAD_W = 5; // half-width of the arrowhead (vertical)
+  const HEAD_D = 5; // depth of the arrowhead (horizontal inset from tip)
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = COLOR;
+  ctx.fillStyle = COLOR;
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = COLOR;
+  // Horizontal rod between the two arrowhead inner points.
+  ctx.beginPath();
+  ctx.moveTo(-HALF_LEN + HEAD_D, 0);
+  ctx.lineTo(HALF_LEN - HEAD_D, 0);
+  ctx.stroke();
+  // Left arrowhead — filled triangle with the tip at -HALF_LEN.
+  ctx.beginPath();
+  ctx.moveTo(-HALF_LEN, 0);
+  ctx.lineTo(-HALF_LEN + HEAD_D, -HEAD_W);
+  ctx.lineTo(-HALF_LEN + HEAD_D, HEAD_W);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Right arrowhead — filled triangle with the tip at +HALF_LEN.
+  ctx.beginPath();
+  ctx.moveTo(HALF_LEN, 0);
+  ctx.lineTo(HALF_LEN - HEAD_D, -HEAD_W);
+  ctx.lineTo(HALF_LEN - HEAD_D, HEAD_W);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+
 function drawNoAccessCursor(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -481,7 +530,9 @@ export function CursorFirefly() {
       //    same hue as the head glyph reads as a single coherent
       //    cursor object instead of a hue-mismatched trail.
       let trailColor: string;
-      if (mode === 'text') {
+      if (mode === 'text' || mode === 'resize-h') {
+        // Story 6.9: resize-h is cyan-themed too — same trail hue
+        // keeps the cursor object reading as one coherent shape.
         trailColor = '#00eeff';
       } else if (mode === 'no-access') {
         trailColor = '#ff5050';
@@ -521,6 +572,8 @@ export function CursorFirefly() {
         drawTextCursor(ctx, nodes[0]!.x, nodes[0]!.y);
       } else if (mode === 'no-access') {
         drawNoAccessCursor(ctx, nodes[0]!.x, nodes[0]!.y);
+      } else if (mode === 'resize-h') {
+        drawResizeArrowsH(ctx, nodes[0]!.x, nodes[0]!.y);
       } else {
         drawFirefly(ctx, nodes[0]!.x, nodes[0]!.y, frameRef.current, fireflyColor, heading);
       }

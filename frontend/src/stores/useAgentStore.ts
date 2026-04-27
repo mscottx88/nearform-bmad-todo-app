@@ -58,9 +58,19 @@ export interface SendMessageOptions {
   skill?: string;
 }
 
+/**
+ * Story 6.9: persisted pixel width of the agent panel. Default 440
+ * preserves the pre-6.9 hardcoded width for users who haven't dragged
+ * yet. Live clamping to `[25%, 50%]` of viewport happens in the
+ * AgentPanel component (drag handler + window-resize listener).
+ */
+export const AGENT_PANEL_DEFAULT_WIDTH = 440;
+
 export interface AgentState {
   panelOpen: boolean;
   activeSessionId: string | null;
+  /** Story 6.9: persisted panel width in pixels. */
+  panelWidth: number;
   sessions: ChatSessionSummary[];
   messages: ChatMessage[];
   inputDraft: string;
@@ -83,6 +93,11 @@ export interface AgentState {
   closePanel: () => void;
   togglePanel: () => void;
   setDraft: (draft: string) => void;
+  /** Story 6.9: commit a new persisted panel width. Caller is
+   *  responsible for clamping to the current viewport's `[25%, 50%]`
+   *  window before calling — the store does no validation so a
+   *  clamp pass elsewhere can run synchronously without round-tripping. */
+  setPanelWidth: (value: number) => void;
 
   refreshSessions: () => Promise<void>;
   newSession: () => Promise<void>;
@@ -103,6 +118,10 @@ export interface AgentState {
 interface PersistedShape {
   panelOpen: boolean;
   activeSessionId: string | null;
+  /** Story 6.9: pixel width. Older localStorage entries from before
+   *  6.9 shipped will be missing this key; zustand-persist's default
+   *  merge preserves the in-code default (440) on hydration. */
+  panelWidth: number;
 }
 
 /** Stable client-side id used for the optimistic assistant placeholder
@@ -183,6 +202,7 @@ export const useAgentStore = create<AgentState>()(
     (set, get) => ({
       panelOpen: false,
       activeSessionId: null,
+      panelWidth: AGENT_PANEL_DEFAULT_WIDTH,
       sessions: [],
       messages: [],
       inputDraft: '',
@@ -195,6 +215,7 @@ export const useAgentStore = create<AgentState>()(
       closePanel: () => set({ panelOpen: false }),
       togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
       setDraft: (draft) => set({ inputDraft: draft }),
+      setPanelWidth: (value) => set({ panelWidth: value }),
 
       refreshSessions: async () => {
         const sessions = await agentApi.listSessions();
@@ -638,6 +659,11 @@ export const useAgentStore = create<AgentState>()(
       partialize: (s): PersistedShape => ({
         panelOpen: s.panelOpen,
         activeSessionId: s.activeSessionId,
+        // Story 6.9: persisted so a user's preferred panel width
+        // survives reloads. Existing pre-6.9 localStorage entries
+        // missing this key fall back to AGENT_PANEL_DEFAULT_WIDTH
+        // via zustand-persist's default merge.
+        panelWidth: s.panelWidth,
         // `agentState` is intentionally NOT persisted — it's a
         // per-session animation state that must reset on reload.
       }),

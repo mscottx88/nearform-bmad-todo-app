@@ -188,7 +188,16 @@ interface PondState {
 
   // Story 4.6 (user feedback): cursor glyph — 'firefly' default;
   // 'grab' when hovering a draggable pad; 'grabbing' during a drag.
-  cursorMode: 'firefly' | 'grab' | 'grabbing' | 'point' | 'text' | 'no-access';
+  // Story 6.9: 'resize-h' shows a neon double-arrow over the chat
+  // panel's resize edge.
+  cursorMode:
+    | 'firefly'
+    | 'grab'
+    | 'grabbing'
+    | 'point'
+    | 'text'
+    | 'no-access'
+    | 'resize-h';
 
   // Story 3.4: id of the pad the cursor is currently over, or null.
   // Published by LilyPad's onPointerEnter/Leave and read by PondScene
@@ -365,7 +374,14 @@ interface PondState {
    * is unchanged.
    */
   setCursorMode: (
-    mode: 'firefly' | 'grab' | 'grabbing' | 'point' | 'text' | 'no-access',
+    mode:
+      | 'firefly'
+      | 'grab'
+      | 'grabbing'
+      | 'point'
+      | 'text'
+      | 'no-access'
+      | 'resize-h',
   ) => void;
 }
 

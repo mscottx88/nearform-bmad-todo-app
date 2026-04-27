@@ -18,7 +18,15 @@
  * if one is set, otherwise create a new session lazily on first send.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { useAgentStore } from '../../stores/useAgentStore';
 import { usePondStore } from '../../stores/usePondStore';
 import { NeonScrollbar } from '../ui/NeonScrollbar';
@@ -46,6 +54,185 @@ export function AgentPanel() {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+
+  // ── Story 6.9: drag-to-resize panel ───────────────────────────────
+  const panelWidth = useAgentStore((s) => s.panelWidth);
+  const setPanelWidth = useAgentStore((s) => s.setPanelWidth);
+  // Mid-drag (or mid-keypress) width that hasn't been committed to the
+  // persisted store yet. Visual feedback flows through this draft via
+  // the CSS variable; the commit happens on pointerup / keyup. Avoids
+  // localStorage thrash during a 60Hz pointermove stream.
+  const [draftWidth, setDraftWidth] = useState<number | null>(null);
+  // Tracks the live viewport width so aria-valuemin/max stay current
+  // and the clamp helper reads a fresh value on each interaction.
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === 'undefined' ? 1024 : window.innerWidth,
+  );
+  const dragStartRef = useRef<{ pointerX: number; baseWidth: number } | null>(
+    null,
+  );
+
+  const minWidth = Math.round(viewportWidth * 0.25);
+  const maxWidth = Math.round(viewportWidth * 0.5);
+  const clampWidth = useCallback(
+    (w: number, vw = viewportWidth) => {
+      const lo = Math.round(vw * 0.25);
+      const hi = Math.round(vw * 0.5);
+      return Math.min(hi, Math.max(lo, w));
+    },
+    [viewportWidth],
+  );
+  const effectiveWidth = clampWidth(draftWidth ?? panelWidth);
+
+  // AC 4: re-clamp the persisted width whenever the viewport resizes.
+  // Run once on mount too — if the user reloaded with a viewport that's
+  // narrower than when they last dragged, the persisted value may
+  // already violate the 50%-max rule.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      const vw = window.innerWidth;
+      setViewportWidth(vw);
+      const persisted = useAgentStore.getState().panelWidth;
+      const clamped = clampWidth(persisted, vw);
+      if (clamped !== persisted) {
+        useAgentStore.getState().setPanelWidth(clamped);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+    // clampWidth is stable across renders (depends on viewportWidth
+    // which we update inside) — the effect only needs to bind once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleResizePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Only respond to primary-button drags. Right-clicks / middle-
+      // clicks shouldn't initiate resize.
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragStartRef.current = {
+        pointerX: e.clientX,
+        baseWidth: useAgentStore.getState().panelWidth,
+      };
+      setDraftWidth(useAgentStore.getState().panelWidth);
+      // Story 6.9: keep the resize-h cursor visible during the drag.
+      // PointerEnter has typically already set this on hover, but if
+      // the press happened during a fast in-flight enter, ensure it.
+      const pondStore = usePondStore.getState();
+      if (pondStore.cursorMode !== 'resize-h') {
+        pondStore.setCursorMode('resize-h');
+      }
+    },
+    [],
+  );
+
+  const handleResizePointerEnter = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      // Story 6.9: only swap from 'firefly'. If a higher-priority
+      // cursor mode (`grabbing` mid-drag from elsewhere, `text` over
+      // a focused composer, etc.) is active, leave it alone.
+      const pondStore = usePondStore.getState();
+      if (pondStore.cursorMode === 'firefly') {
+        pondStore.setCursorMode('resize-h');
+      }
+      // Suppress unused-arg warning in strict TS configs.
+      void e;
+    },
+    [],
+  );
+
+  const handleResizePointerLeave = useCallback(() => {
+    // Story 6.9: don't drop the resize-h cursor while a drag is in
+    // progress — the pointer has often left the 6px hit zone by the
+    // time the user has dragged the panel several hundred pixels.
+    if (dragStartRef.current !== null) return;
+    const pondStore = usePondStore.getState();
+    if (pondStore.cursorMode === 'resize-h') {
+      pondStore.setCursorMode('firefly');
+    }
+  }, []);
+
+  const handleResizePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      const start = dragStartRef.current;
+      if (start === null) return;
+      // Panel sits at the right of the viewport. Pointer moving left
+      // (smaller clientX) widens the panel; right narrows it. Hence
+      // `baseWidth - (pointerX - startX)`.
+      const dx = e.clientX - start.pointerX;
+      setDraftWidth(clampWidth(start.baseWidth - dx));
+    },
+    [clampWidth],
+  );
+
+  const commitDraft = useCallback(() => {
+    if (draftWidth !== null) {
+      // Calling the zustand setter from inside a `setDraftWidth`
+      // functional updater triggers a same-tick re-render of any
+      // component subscribed to `panelWidth` (us) — React 19 warns
+      // about that as a cross-component state update during a render.
+      // Reading `draftWidth` from state and committing both updates
+      // separately keeps each setter outside the other's transaction.
+      setPanelWidth(clampWidth(draftWidth));
+    }
+    setDraftWidth(null);
+  }, [clampWidth, draftWidth, setPanelWidth]);
+
+  const handleResizePointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (dragStartRef.current === null) return;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      dragStartRef.current = null;
+      commitDraft();
+      // Story 6.9: if the pointer is no longer over the handle when
+      // the drag ends (common — the panel has moved), drop back to
+      // firefly. PointerLeave was suppressed during drag (above), so
+      // this is the catch-up restore.
+      const handleEl = e.currentTarget;
+      const rect = handleEl.getBoundingClientRect();
+      const stillOver =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (!stillOver) {
+        const pondStore = usePondStore.getState();
+        if (pondStore.cursorMode === 'resize-h') {
+          pondStore.setCursorMode('firefly');
+        }
+      }
+    },
+    [commitDraft],
+  );
+
+  const handleResizeKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      // Left-arrow widens (pulls handle left), right-arrow narrows.
+      const delta = e.key === 'ArrowLeft' ? 20 : -20;
+      const base =
+        draftWidth !== null
+          ? draftWidth
+          : useAgentStore.getState().panelWidth;
+      setDraftWidth(clampWidth(base + delta));
+    },
+    [clampWidth, draftWidth],
+  );
+
+  const handleResizeKeyUp = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      commitDraft();
+    },
+    [commitDraft],
+  );
 
   // Refresh sessions + load active messages on open. The store's
   // `panelOpen` flips synchronously; we react to that here so the
@@ -127,7 +314,39 @@ export function AgentPanel() {
   if (!panelOpen) return null;
 
   return (
-    <aside className="agent-panel" role="complementary" aria-label="Agent chat">
+    <aside
+      className="agent-panel"
+      role="complementary"
+      aria-label="Agent chat"
+      style={{ '--agent-panel-width': `${effectiveWidth}px` } as CSSProperties}
+    >
+      {/*
+       * Story 6.9: 6px-wide invisible hit zone overlapping the panel's
+       * 1px left border. role="separator" + aria-orientation="vertical"
+       * follows the WAI-ARIA window-splitter pattern. Pointer events
+       * drive drag-resize; ArrowLeft / ArrowRight on the focused handle
+       * resize by ±20px. Visual cyan glow lives in CSS via :hover /
+       * :focus-visible — at rest, the existing 1px border is all the
+       * user sees.
+       */}
+      <div
+        className="agent-panel__resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize chat panel"
+        aria-valuenow={effectiveWidth}
+        aria-valuemin={minWidth}
+        aria-valuemax={maxWidth}
+        tabIndex={0}
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerUp}
+        onPointerCancel={handleResizePointerUp}
+        onPointerEnter={handleResizePointerEnter}
+        onPointerLeave={handleResizePointerLeave}
+        onKeyDown={handleResizeKeyDown}
+        onKeyUp={handleResizeKeyUp}
+      />
       <section className="agent-panel__section agent-panel__section--oracle">
         <AgentPanelOracleView />
       </section>
