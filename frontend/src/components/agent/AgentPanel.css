@@ -147,13 +147,15 @@
      the panel chrome. Centred horizontally inside the section
      via auto-margin.
 
-     Story 6.9 (user feedback 2026-04-27): cap the oracle's growth
-     when the user resizes the panel wider. 364px = 70% of the
-     520px default width — so the frog at default size is exactly
-     unchanged, but doesn't keep growing as the panel widens. On
-     panels narrower than 520, the 70% rule still wins. */
-  width: 70%;
-  max-width: 364px;
+     Story 6.9 (user feedback 2026-04-27):
+       - Cap the oracle's growth when the user resizes the panel
+         wider. 364px = 70% of the 520px default width.
+       - Cap the height at 20vh so on shorter viewports the frog
+         doesn't dominate the panel either. Combined into a single
+         `width: min()` so the aspect-ratio rule still derives a
+         square height that respects both caps.
+     The 70% rule still wins on panels narrower than 520. */
+  width: min(70%, 364px, 20vh);
   margin: 0 auto;
   aspect-ratio: 1 / 1;
   padding: 8px;
