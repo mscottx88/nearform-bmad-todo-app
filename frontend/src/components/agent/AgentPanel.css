@@ -162,6 +162,21 @@
   min-width: 0;
 }
 
+/* Skill-handoff meta line (e.g. "↳ rephrase skill") — sits flush
+   above the bubble. Italic mono in dimmed neon-cyan to read as
+   chrome, not content. The leading arrow + lower-case skill name
+   matches the project's footer/keyboard-hint vocabulary. */
+.agent-message__skill-handoff {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--neon-cyan);
+  opacity: 0.55;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  margin: 0 4px 2px;
+  user-select: none;
+}
+
 .agent-message__bubble {
   position: relative;
   display: inline-block;

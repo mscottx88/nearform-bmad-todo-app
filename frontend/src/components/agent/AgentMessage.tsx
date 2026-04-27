@@ -355,6 +355,26 @@ export function AgentMessage({ message, isStreaming }: Props) {
         column nested) and the bubble retains its full width.
       */}
       <div className="agent-message__stack">
+        {/*
+          Skill-handoff meta line: surfaces when a turn routed to a
+          specialized skill (rephrase, create_todo, …) instead of
+          the default `chat` skill. Sits above the bubble so the
+          user sees the routing the moment the message lands —
+          works for live handoffs (the `start` SSE event sets
+          `message.skill` before the first chunk) and for
+          rehydrated history (the row carries `skill` from the DB).
+          The plain chat skill is the default — its turns suppress
+          the line so the chrome only fires when something
+          interesting happened.
+        */}
+        {message.role === 'assistant' &&
+          message.skill !== null &&
+          message.skill !== 'chat' && (
+            <div className="agent-message__skill-handoff">
+              {/* `_` → space so `create_todo` reads "create todo". */}
+              ↳ {message.skill.replace(/_/g, ' ')} skill
+            </div>
+          )}
         <div
           className="agent-message__bubble"
           ref={bubbleRef}

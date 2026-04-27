@@ -181,4 +181,72 @@ describe('AgentMessage', () => {
     // overflow-driven via CSS); presence proves the wrapper mounted.
     expect(container.querySelector('.neon-scrollbar')).not.toBeNull();
   });
+
+  // Skill-handoff meta line (e.g. "↳ rephrase skill") surfaces
+  // above the bubble when a turn routed to a non-default skill.
+  // The chat skill is the default; its turns suppress the line.
+  describe('skill-handoff meta line', () => {
+    it('renders for an assistant turn from the rephrase skill', () => {
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', { skill: 'rephrase' })}
+          isStreaming={false}
+        />,
+      );
+      const handoff = container.querySelector('.agent-message__skill-handoff');
+      expect(handoff).not.toBeNull();
+      expect(handoff?.textContent).toContain('rephrase');
+    });
+
+    it('replaces underscores with spaces (create_todo → "create todo")', () => {
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', { skill: 'create_todo' })}
+          isStreaming={false}
+        />,
+      );
+      const handoff = container.querySelector('.agent-message__skill-handoff');
+      expect(handoff?.textContent).toContain('create todo');
+      // Underscore must NOT appear in the display.
+      expect(handoff?.textContent).not.toContain('_');
+    });
+
+    it('does NOT render for the default chat skill', () => {
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', { skill: 'chat' })}
+          isStreaming={false}
+        />,
+      );
+      expect(
+        container.querySelector('.agent-message__skill-handoff'),
+      ).toBeNull();
+    });
+
+    it('does NOT render when skill is null (e.g. legacy / pre-skill rows)', () => {
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('assistant', { skill: null })}
+          isStreaming={false}
+        />,
+      );
+      expect(
+        container.querySelector('.agent-message__skill-handoff'),
+      ).toBeNull();
+    });
+
+    it('does NOT render for user turns even if skill is set', () => {
+      // User turns don't have a routed skill in practice, but
+      // defence in depth — the handoff line is for the assistant.
+      const { container } = render(
+        <AgentMessage
+          message={makeMessage('user', { skill: 'rephrase' })}
+          isStreaming={false}
+        />,
+      );
+      expect(
+        container.querySelector('.agent-message__skill-handoff'),
+      ).toBeNull();
+    });
+  });
 });
