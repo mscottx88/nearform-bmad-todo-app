@@ -150,6 +150,23 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
 
     if (!grew && !streamed) return;
 
+    // 2026-04-26 fix (user report: "New Messages indicator
+    // appearing when it should not"): if the chat content fits
+    // inside the visible scroll area (no overflow), there's no
+    // "below the fold" for the pill to point at. Suppress it
+    // unconditionally — independent of any snapshot stale-state
+    // shenanigans. Threshold-aware so a one-pixel overflow at the
+    // edge of the bubble's box isn't mistaken for "scrollable".
+    const noOverflow =
+      el.scrollHeight <= el.clientHeight + PIN_THRESHOLD_PX;
+    if (noOverflow) {
+      el.scrollTop = el.scrollHeight;
+      isPinnedRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowNewMessagesPill(false);
+      return;
+    }
+
     // First non-empty tick after mount: always snap to bottom.
     const isInitialSnap = !initialSnapDoneRef.current && messages.length > 0;
     if (isInitialSnap) {
@@ -170,8 +187,20 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
       const oldDistance = snap.scrollHeight - snap.clientHeight - snap.scrollTop;
       wasPinned = oldDistance <= PIN_THRESHOLD_PX;
     }
+    // 2026-04-26 defence in depth: if the LIVE state currently
+    // shows the user at the bottom, hide the pill regardless of
+    // snapshot. Catches cases where `lastObservedRef` is stale
+    // (e.g. a session-switch that didn't fire a scroll event, or
+    // a programmatic scroll write that didn't yield a scroll
+    // event because the position was already maximised). The
+    // snapshot's "wasn't pinned" can be a false negative; live
+    // "is currently pinned" is a more authoritative positive
+    // signal in that direction.
+    const liveDistance =
+      el.scrollHeight - el.clientHeight - el.scrollTop;
+    const liveAtBottom = liveDistance <= PIN_THRESHOLD_PX;
 
-    if (wasPinned) {
+    if (wasPinned || liveAtBottom) {
       el.scrollTop = el.scrollHeight;
       isPinnedRef.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -187,12 +216,20 @@ export function AgentMessageList({ messages, streamingMessageId, scrollRef }: Pr
   // in the composer pushes the chat content upward as the chat region
   // shrinks — the user was at the bottom but suddenly sees old content
   // because scrollTop didn't follow.
+  //
+  // 2026-04-26: also reconcile the pill on resize. If the new layout
+  // means content no longer overflows (e.g. panel got wider, fewer
+  // lines wrap), there's nothing below the fold and the pill — if
+  // showing — must hide.
   useEffect(() => {
     const el = scrollRef.current;
     if (el === null) return;
     const ro = new ResizeObserver(() => {
       if (isPinnedRef.current) {
         el.scrollTop = el.scrollHeight;
+      }
+      if (el.scrollHeight <= el.clientHeight + PIN_THRESHOLD_PX) {
+        setShowNewMessagesPill(false);
       }
     });
     ro.observe(el);
