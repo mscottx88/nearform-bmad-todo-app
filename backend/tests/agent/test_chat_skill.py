@@ -12,11 +12,13 @@ import queue
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from src.agent.skills import chat as chat_skill
 from src.agent.skills.chat import _format_task_description
 from src.agent.skills.registry import SkillContext
 from src.schemas.agent import ChatMessageResponse
+from src.schemas.todo import TodoResponse
 
 
 def _make_message(
@@ -110,3 +112,60 @@ class TestChatSkillTaskDescription:
         description = _format_task_description(ctx)
         assert description.endswith("hi")
         assert "Today's date is" in description
+
+    # 2026-04-26 cross-skill context fix: chat skill pre-loads the
+    # user's active todos (id + text) into its task description so
+    # the LLM always has UUIDs at hand for `[label](todo://<uuid>)`
+    # link emission. Without this the LLM would paraphrase ("the X
+    # task") and the rephrase resolver couldn't inherit the target
+    # on follow-up turns.
+    def test_active_todos_preloaded_with_ids(self) -> None:
+        todo_id = uuid.uuid4()
+        fake = TodoResponse(
+            id=todo_id,
+            text="Park hangout with Ryker",
+            completed=False,
+            color="#39ff14",
+            position_x=0.0,
+            position_y=0.0,
+            rotation_y=0.0,
+            drift_seed=0.0,
+            due_date=None,
+            embedding_status="complete",
+            archived=False,
+            archived_at=None,
+            display_metadata={},
+            deleted=False,
+            deleted_at=None,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        ctx = _make_ctx("what's on my list?", history=())
+        with patch.object(chat_skill.todo_service, "list_todos", return_value=[fake]):
+            description = _format_task_description(ctx)
+        assert "Your active todos" in description
+        assert str(todo_id) in description
+        assert "Park hangout with Ryker" in description
+
+    def test_active_todos_preload_empty_when_pond_is_empty(self) -> None:
+        ctx = _make_ctx("hello", history=())
+        with patch.object(chat_skill.todo_service, "list_todos", return_value=[]):
+            description = _format_task_description(ctx)
+        # No "Your active todos" header when there are no rows to
+        # surface — keeps the prompt clean.
+        assert "Your active todos" not in description
+
+    def test_active_todos_preload_swallows_db_failures(self) -> None:
+        # If the preload fetch raises (DB blip, transient error),
+        # the rest of the chat path stays functional. The block is
+        # simply omitted; the LLM falls back to ListTodosTool.
+        ctx = _make_ctx("hello", history=())
+        with patch.object(
+            chat_skill.todo_service,
+            "list_todos",
+            side_effect=RuntimeError("transient db error"),
+        ):
+            description = _format_task_description(ctx)
+        assert "Your active todos" not in description
+        # User message still ends the description as expected.
+        assert description.endswith("hello")

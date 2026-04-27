@@ -197,6 +197,44 @@ def _resolve_from_history(ctx: SkillContext) -> uuid.UUID | None:
 _SINGLE_RESULT_AUTO_RESOLVE_MIN_SCORE = 0.55
 
 
+# Cap the prior-chat content we append to the enriched search query
+# so a long chat reply doesn't drown out the user's actual message
+# in the FTS ranking. ~500 chars ≈ 100 words, plenty for keyword
+# matching without overwhelming the primary signal.
+_PRIOR_CONTENT_SEARCH_BUDGET = 500
+
+
+def _prior_chat_content_for_search(ctx: SkillContext) -> str:
+    """Return the immediate prior assistant turn's content — minus
+    any `[label](todo://<uuid>)` link forms (the UUID would be a
+    poor FTS token) — truncated to `_PRIOR_CONTENT_SEARCH_BUDGET`
+    chars. Returns "" when no prior assistant turn exists or its
+    content is empty.
+
+    Used by `_resolve_via_search` to enrich the search query when
+    the bare user message returns weak FTS results.
+    """
+    if not ctx.history:
+        return ""
+    for message in reversed(ctx.history):
+        if message.role != "assistant":
+            continue
+        content = (message.content or "").strip()
+        if not content:
+            return ""
+        # Strip todo:// link wrapping but keep the labels — labels
+        # carry the human-readable phrase the LLM picked, which IS
+        # useful FTS content. `[Park hangout](todo://...)` → `Park
+        # hangout`.
+        stripped = re.sub(
+            r"\[([^\]]+)\]\(todo://[^)]+\)",
+            r"\1",
+            content,
+        )
+        return stripped[:_PRIOR_CONTENT_SEARCH_BUDGET]
+    return ""
+
+
 def _resolve_via_search(
     ctx: SkillContext,
 ) -> tuple[uuid.UUID | None, TodoResponse | None, list[RephraseCandidate]]:
@@ -227,21 +265,50 @@ def _resolve_via_search(
     # phrase rather than the command word. Only the FIRST match is
     # consumed; verbs that appear mid-sentence are left alone.
     query = _REPHRASE_VERB_RE.sub("", raw, count=1).strip() or raw
-    try:
-        with ctx.session_factory() as session:
-            response = search_service.hybrid_search(session, query)
-    except ValueError:
-        # Unsearchable query (empty tsquery: emoji-only, stop-words-only,
-        # punctuation-only). Distinguish from genuine outages so ops
-        # don't get paged on a "user said 'huh?'" no-op.
+
+    def _try_search(q: str) -> list[Any] | None:
+        """Run one hybrid_search attempt; return results list or
+        None on failure (caller decides whether to retry / fall
+        back). Inner helper so the primary + enriched-fallback
+        passes share error handling."""
+        try:
+            with ctx.session_factory() as session:
+                resp = search_service.hybrid_search(session, q)
+        except ValueError:
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rephrase search resolver failed: %s", exc)
+            return None
+        return resp.results
+
+    primary_results = _try_search(query)
+    if primary_results is None:
         return None, None, []
-    except Exception as exc:  # noqa: BLE001
-        # Mirrors search_service's own broad-except handling — any
-        # search failure is non-fatal here; we just lose the
-        # candidate-suggestion affordance.
-        logger.debug("rephrase search resolver failed: %s", exc)
-        return None, None, []
-    results = response.results
+    # CR (cross-skill context coherence): when the bare user message
+    # is too generic for FTS to find the discussed todo (e.g. "the
+    # army base task" said in passing on a long Fort-Thunder thread),
+    # retry with an ENRICHED query that appends the immediate-prior
+    # assistant chat content. The prior turn's prose contains the
+    # specific keywords ("Commander Rex", "Fort Thunder", etc.) that
+    # match the actual todo text via FTS, even when the user's
+    # current message is paraphrased. Only fires when the primary
+    # search returned weak results — strong primary matches stay
+    # untouched so this doesn't regress the happy path.
+    if not primary_results or primary_results[0].score < _AUTO_RESOLVE_MIN_SCORE:
+        enrichment = _prior_chat_content_for_search(ctx)
+        if enrichment:
+            enriched_query = f"{query} {enrichment}"
+            enriched_results = _try_search(enriched_query)
+            # Take the enriched pass if it found ANY result the
+            # primary pass missed, OR if its top score beats the
+            # primary's. Otherwise the primary wins (same noise
+            # the user types, they expect to see surface).
+            if enriched_results and (
+                not primary_results
+                or enriched_results[0].score > primary_results[0].score
+            ):
+                primary_results = enriched_results
+    results = primary_results
     if not results:
         return None, None, []
     top = results[0]

@@ -71,13 +71,21 @@ def _get_session_lock(session_key: str) -> threading.Lock:
 # it as a user-facing skill leaks an internal routing primitive.
 _INTERNAL_SKILLS: frozenset[str] = frozenset({"intent_classifier"})
 
-# Story 6.2 AC 12: how many recent messages we pre-load and pass to the
-# chat skill via `SkillContext.history`. The chat handler trims this
-# down to `complete` user/assistant rows (excluding the in-flight
-# assistant placeholder) before building the SkillContext. Twenty turns
-# is enough for short follow-ups like "and what about that one?";
-# anything deeper goes through `GetChatHistoryTool`.
-_HISTORY_WINDOW = 20
+# Story 6.2 AC 12: how many recent messages we pre-load and pass to
+# the chat skill via `SkillContext.history`. The chat handler trims
+# this down to `complete` user/assistant rows (excluding the
+# in-flight assistant placeholder) before building the SkillContext.
+#
+# 2026-04-26: bumped 20 → 50 after observing cross-skill context
+# loss in real user flows. The chat skill could discuss a todo
+# accurately on turn N (todo created earlier in the session), but
+# turn N+1's rephrase-skill handoff lost the todo identity because
+# the original turn that mentioned the todo's id had scrolled past
+# the 20-turn window. Anything deeper than 50 still goes through
+# `GetChatHistoryTool`. Token cost: ~50 turns × ~150 chars avg =
+# ~7.5KB extra context per chat — negligible vs. the model's
+# context window.
+_HISTORY_WINDOW = 50
 
 
 def finalise_assistant_message(

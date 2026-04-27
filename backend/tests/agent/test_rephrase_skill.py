@@ -377,6 +377,113 @@ class TestSearchResolver:
         assert target_id is None
         assert len(candidates) == 2
 
+    # 2026-04-26 cross-skill context fix: when the user's bare message
+    # is too generic for FTS to find the discussed todo (real-user
+    # case: "rephrase the army base task to add mechanized units" on
+    # a long Fort-Thunder thread), the resolver retries with an
+    # ENRICHED query that appends the immediate-prior chat-skill
+    # content. The prior turn's prose carries specific keywords that
+    # match the actual todo text.
+    def test_enriches_search_query_with_prior_chat_content_when_primary_weak(
+        self,
+    ) -> None:
+        wanted = uuid.uuid4()
+        # Prior chat-skill turn discussing the todo by name (no
+        # `todo://` link — the symptom we're patching around).
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content=(
+                "Based on the army base task — Fort Thunder, Commander Rex, "
+                "Sergeant Bolt, Private Stone — there are no mechanized units."
+            ),
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        ctx = _make_ctx(
+            user_message=("rephrase the army base task to add mechanized units"),
+            todo_ids=[],
+            history=(_make_message("user", "are there mechanized units?"), chat_reply),
+        )
+        # First search call (bare user message) returns nothing
+        # useful; second call (enriched with chat content) hits the
+        # Fort Thunder todo via FTS.
+        weak_resp = self._make_response([])
+        strong_resp = self._make_response(
+            [(wanted, "Fort Thunder mission with Commander Rex", 0.78)]
+        )
+        with patch.object(
+            rephrase.search_service,
+            "hybrid_search",
+            side_effect=[weak_resp, strong_resp],
+        ):
+            target_id, target_todo, candidates = rephrase._resolve_via_search(ctx)
+        assert target_id == wanted
+        assert target_todo is not None
+        assert candidates == []
+
+    def test_does_not_enrich_when_primary_search_was_strong(self) -> None:
+        # Strong primary match (score >= 0.35 floor) wins outright;
+        # the enriched second pass shouldn't fire because the user's
+        # own keywords already nailed the target.
+        wanted = uuid.uuid4()
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content="Talking about [Park hangout](todo://" + str(uuid.uuid4()) + ")",
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        ctx = _make_ctx(
+            user_message="rephrase the dashboard task",
+            todo_ids=[],
+            history=(_make_message("user", "list my todos"), chat_reply),
+        )
+        strong_resp = self._make_response([(wanted, "Dashboard refactor", 0.92)])
+        with patch.object(
+            rephrase.search_service,
+            "hybrid_search",
+            return_value=strong_resp,
+        ) as spy:
+            target_id, _todo, _candidates = rephrase._resolve_via_search(ctx)
+        assert target_id == wanted
+        # Only ONE search call — the enriched-fallback path is
+        # gated on weak-or-empty primary results.
+        assert spy.call_count == 1
+
+    def test_prior_chat_content_strips_todo_link_wrappers(self) -> None:
+        # The prior chat content might contain `[label](todo://uuid)`
+        # forms — the UUID is a poor FTS token. Helper strips link
+        # wrappers but keeps the labels (which carry the human-
+        # readable phrase the LLM picked).
+        chat_reply = ChatMessageResponse(
+            id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            role="assistant",
+            content="See [Park hangout](todo://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee).",
+            skill="chat",
+            metadata_={},
+            status="complete",
+            error=None,
+            created_at=datetime.now(UTC),
+        )
+        ctx = _make_ctx(
+            user_message="rephrase",
+            history=(chat_reply,),
+        )
+        enrichment = rephrase._prior_chat_content_for_search(ctx)
+        assert "Park hangout" in enrichment
+        assert "todo://" not in enrichment
+        assert "aaaaaaaa" not in enrichment
+
 
 # ─── Task description / fallback shape ──────────────────────────────
 
