@@ -6,7 +6,9 @@
 interface E2EHooks {
   openPopup(todoId: string, x?: number, z?: number): void;
   closePopup(): void;
-  readonly version: '1';
+  getRenderedTodoIds(): string[];
+  getSearchResultIds(): string[];
+  readonly version: '2';
 }
 
 declare global {

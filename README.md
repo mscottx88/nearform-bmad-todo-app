@@ -79,12 +79,20 @@ docker compose up --build
 # Visit http://localhost:8080
 ```
 
-Three services come up: Postgres on `:5432`, FastAPI on `:8000`, and an
-nginx-served SPA on `:8080`. Nginx proxies `/api/*` to the backend
-service, so a single port (8080) is all you need open. The backend
-applies Alembic migrations on container start before launching uvicorn.
-`ANTHROPIC_API_KEY` is optional — agent endpoints surface a clear error
-at request time when it's missing, but the stack itself boots cleanly.
+Three services come up: Postgres on `:5432` (loopback), FastAPI on
+`:8000` (loopback), and an nginx-served SPA on `:8080`. Nginx proxies
+`/api/*` to the backend container, so external clients only need
+`:8080` to reach the SPA — `:8000` and `:5432` are bound to
+`127.0.0.1` for host-side tooling (Playwright, curl) and aren't on
+the network. The backend applies Alembic migrations on container
+start before launching uvicorn. `ANTHROPIC_API_KEY` is optional —
+agent endpoints surface a clear error at request time when it's
+missing, but the stack itself boots cleanly.
+
+> The compose stack builds the frontend image with `VITE_E2E_HOOKS=1`
+> so Playwright's `?e2e=1` test seam is available against the
+> production-shaped bundle. A real production deploy of this image
+> would override that build arg to `0` (or omit it).
 
 ---
 
@@ -184,6 +192,14 @@ violation; **moderate** and **minor** violations are reported in the
 log but don't gate the build. Tweak the allowlist in
 [`frontend/e2e/a11y-allowlist.ts`](frontend/e2e/a11y-allowlist.ts) only
 with a comment documenting why each rule is suppressed.
+
+> ⚠️ **Heads-up:** `clearAllTodos` in `e2e/helpers.ts` runs in every
+> spec's `beforeEach` and **soft-deletes every active todo** at
+> `BACKEND_URL`. There's no separate test database today, so running
+> the suite against `make dev` will wipe your dev pond. The helper
+> emits a console warning when `BACKEND_URL` doesn't look like a
+> test-flavoured URL; set `E2E_ALLOW_DEV_DB=1` to acknowledge or
+> `E2E_SUPPRESS_DEV_DB_WARNING=1` to silence.
 
 > The backend test fixture **refuses to run** unless the database
 > name contains `"test"` — see [`conftest.py`](backend/tests/conftest.py)

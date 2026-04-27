@@ -199,6 +199,10 @@ export function TodoInput({ isOpen, onClose, initialValue = '' }: TodoInputProps
           ref={inputRef}
           className={`todo-input ${dissolving ? 'todo-input--dissolving' : ''}`}
           type="text"
+          // Story 1.5 review patch: stable hook for Playwright. The
+          // placeholder copy is user-facing and may change; the
+          // testid won't.
+          data-testid="todo-input"
           placeholder="what's on your mind..."
           value={value}
           onChange={handleChange}

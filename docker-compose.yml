@@ -5,8 +5,13 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # `.env` is sourced when present locally; a fresh CI runner has
+    # none (`.env` is gitignored) so `required: false` keeps the stack
+    # bootable. The hard-coded fallbacks on `environment` below are
+    # the source of truth in that case.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-todo_pond}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -33,12 +38,25 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-todo_pond}
       CORS_ORIGINS: http://localhost:8080
+    # Bind the host mapping to loopback so the backend isn't reachable
+    # from the LAN. The compose network still exposes :8000 to the
+    # frontend container (nginx proxies /api/* there), and host-side
+    # tooling — Playwright helpers, curl smoke checks, ad-hoc dev —
+    # still works via 127.0.0.1:8000. Public-facing posture: only the
+    # frontend's :8080 should be reachable from outside the host.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   frontend:
     build:
       context: ./frontend
+      # `VITE_E2E_HOOKS=1` opts the SPA into the `?e2e=1` test seam
+      # at build time so Playwright can drive the production-shaped
+      # stack. A "real prod" deployment of this image would override
+      # this arg to `0` (or omit the override on a hypothetical
+      # `docker-compose.prod.yml`).
+      args:
+        VITE_E2E_HOOKS: "1"
     depends_on:
       backend:
         condition: service_started

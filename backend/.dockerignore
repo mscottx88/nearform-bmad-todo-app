@@ -17,7 +17,12 @@ htmlcov/
 *.egg-info/
 
 # Local-only env files; prod gets env via docker-compose / orchestrator.
+# Cover every common dotenv variant — `.env.local`, `.env.development`,
+# `.env.production` etc. all carry secrets that must never enter the
+# build context, even via a mistyped exclude pattern.
 .env
+.env.*
+*.env
 
 # Editor / OS noise.
 .vscode/

@@ -72,17 +72,38 @@ jobs:
         run: docker compose up -d --build
 
       - name: Wait for stack readiness
+        # Three probes per iteration:
+        #   1. SPA root via nginx (`:8080/`) — proves nginx is up
+        #      AND the static bundle landed.
+        #   2. Backend direct via host port (`:8000/api/todos`) —
+        #      proves uvicorn is responding and migrations applied.
+        #   3. **Proxy path** (`:8080/api/todos`) — proves nginx
+        #      successfully resolves the `backend` upstream and the
+        #      SPA's runtime API path actually works. This catches
+        #      the case where the backend is up but nginx's DNS
+        #      hasn't seen it yet (or vice versa).
+        # We also gate-check `docker compose ps` for any container
+        # that has exited or entered an unhealthy state, so a crash-
+        # looping backend doesn't false-green the readiness gate.
         run: |
           for i in $(seq 1 30); do
+            if docker compose ps --status exited --quiet | grep -q .; then
+              echo "a container has exited — aborting wait"
+              docker compose ps
+              docker compose logs --tail=200
+              exit 1
+            fi
             if curl --silent --fail http://localhost:8080/ > /dev/null \
-               && curl --silent --fail http://localhost:8000/api/todos > /dev/null; then
-              echo "stack ready"
+               && curl --silent --fail http://localhost:8000/api/todos > /dev/null \
+               && curl --silent --fail http://localhost:8080/api/todos > /dev/null; then
+              echo "stack ready (SPA + backend + nginx proxy all responding)"
               exit 0
             fi
             echo "waiting for stack ($i)…"
             sleep 2
           done
           echo "stack did not become ready in 60s"
+          docker compose ps
           docker compose logs --tail=200
           exit 1
 

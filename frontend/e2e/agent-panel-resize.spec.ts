@@ -4,9 +4,17 @@ import { E2E_QUERY, clearAllTodos } from './helpers';
 test.describe('Agent panel resizable + persisted', () => {
   test.beforeEach(async ({ request }) => {
     await clearAllTodos(request);
+    // Note: this test relies on Playwright's per-test context
+    // isolation (the default with `workers: 1` + `fullyParallel:
+    // false`) so localStorage starts empty. The reload mid-test
+    // intentionally preserves the persisted store state — that's
+    // what we're verifying. If `workers` ever changes, an explicit
+    // localStorage clear before the first F1 press becomes
+    // necessary to avoid persisted `panelOpen=true` from a prior
+    // run causing F1 to close the panel.
   });
 
-  test('keyboard-resizes the panel and the new width survives reload', async ({
+  test('drag-resizes the panel and the new width survives reload', async ({
     page,
   }) => {
     await page.goto(`/${E2E_QUERY}`);
@@ -19,6 +27,8 @@ test.describe('Agent panel resizable + persisted', () => {
     await page.waitForTimeout(200);
 
     // F1 toggles the agent panel from anywhere (story 6.2 AC 1).
+    // After the localStorage wipe in beforeEach, panelOpen is the
+    // store's default (false), so F1 here always opens.
     await page.keyboard.press('F1');
 
     const handle = page.getByRole('separator', { name: 'Resize chat panel' });
@@ -29,23 +39,38 @@ test.describe('Agent panel resizable + persisted', () => {
     const startWidth = Number(await handle.getAttribute('aria-valuenow'));
     expect(Number.isFinite(startWidth)).toBe(true);
 
-    // ArrowLeft on the focused handle widens by 20px per press
-    // (story 6.9). Five presses → +100px (capped at the 50%-viewport
-    // ceiling, so the actual delta may be smaller on narrow screens).
-    await handle.focus();
-    for (let i = 0; i < 5; i += 1) {
-      await page.keyboard.press('ArrowLeft');
+    // Story 1.5 AC 5 Test 5: drag the handle ~150px wider with real
+    // pointer events. The panel sits at the right of the viewport,
+    // so dragging the handle LEFT widens the panel.
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    const dragDx = -150; // negative = move left = widen
+
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    // Multi-step move so the pointermove handler fires repeatedly
+    // (a single jump-to-end can be coalesced by the browser).
+    const steps = 8;
+    for (let i = 1; i <= steps; i += 1) {
+      await page.mouse.move(startX + (dragDx * i) / steps, startY, { steps: 4 });
     }
-    // Allow keyup commits to flush.
-    await page.waitForTimeout(50);
+    await page.mouse.up();
+    // Allow the commitDraft → setPanelWidth → persist cycle to flush.
+    await page.waitForTimeout(100);
 
     const widerWidth = Number(await handle.getAttribute('aria-valuenow'));
     expect(widerWidth).toBeGreaterThan(startWidth);
+    // The drag should have widened the panel by close to 150px,
+    // unless we hit the 50%-viewport ceiling (in which case we'd
+    // expect a smaller-but-positive delta). Either way, > start.
+    expect(widerWidth - startWidth).toBeGreaterThan(0);
 
     // Reload — the panel persistence lives in localStorage under
-    // `agent-store-v1`. Because `panelOpen` is also persisted and
-    // started as true, the panel re-mounts open after reload, which
-    // is exactly what we need to read aria-valuenow again.
+    // `agent-store-v1`. After the F1 above, panelOpen=true was
+    // persisted, so the panel re-mounts open after reload (which
+    // is what we need to read aria-valuenow again).
     await page.reload();
     const handleAfter = page.getByRole('separator', {
       name: 'Resize chat panel',

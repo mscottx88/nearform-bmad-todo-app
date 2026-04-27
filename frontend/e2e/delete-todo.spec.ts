@@ -29,13 +29,13 @@ test.describe('Delete todo via in-scene popup', () => {
     await expect(deleteButton).toBeVisible();
 
     // The frontend deletes via DELETE /api/todos/:id (which the
-    // backend handles as a soft delete). We assert the request fired
-    // — the API method label here may be either DELETE or PATCH
-    // depending on how the popup wires it; capture both to stay
-    // resilient to that detail.
+    // backend handles as a soft-delete; see backend/src/api/todos.py).
+    // Asserting on DELETE specifically catches a regression where a
+    // refactor accidentally swaps the popup to call PATCH (which is
+    // the *update* endpoint and would not actually soft-delete).
     const deleteRequest = page.waitForRequest(
       (req) =>
-        (req.method() === 'DELETE' || req.method() === 'PATCH') &&
+        req.method() === 'DELETE' &&
         req.url().includes(`/api/todos/${seeded.id}`),
       { timeout: 10_000 },
     );

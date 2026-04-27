@@ -43,7 +43,12 @@ exists = c.execute(text(\"SELECT 1 FROM pg_database WHERE datname = 'todo_pond_t
 
 lint:
 	cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy .
-	cd frontend && npx tsc --noEmit
+	# `tsc -b` (build-mode) follows the `references` array in
+	# `frontend/tsconfig.json` and typechecks every project (app +
+	# node + e2e). `tsc --noEmit` does NOT follow references when
+	# the root config has `files: []`, so it was silently a no-op
+	# — see story 1.5 review findings for the regression history.
+	cd frontend && npx tsc -b
 
 migrate:
 	cd backend && uv run python -m alembic upgrade head

@@ -1,6 +1,6 @@
 # Story 1.5: Deployment & E2E Readiness
 
-Status: review
+Status: done
 
 > **Scope note:** Closes the three remaining open success-criteria
 > gates that the project still owes:
@@ -316,6 +316,43 @@ deployment + E2E work isn't AI-tooling commentary.
 - [x] `npx playwright test` green.
 - [x] Story → review.
 
+### Review Findings
+
+Code review run 2026-04-27 via three parallel reviewers (Blind Hunter,
+Edge Case Hunter, Acceptance Auditor). 11 dismissed as noise.
+
+**Decisions resolved (7) — batch-resolved 2026-04-27 with rule "patch where unambiguous, defer otherwise":**
+
+- Resolved: D1 → PATCH (added below). D2 → PATCH (added below). D3 → PATCH (added below). D4 → PATCH (added below). D5 → DEFER (see deferred-work.md). D6 → PATCH (added below). D7 → PATCH (added below).
+
+**Patches (18 total — 12 from Blind/Edge + 6 promoted from D1/D2/D3/D4/D6/D7) — all applied and verified 2026-04-27:**
+
+- [x] [Review][Patch] **Add `required: false` to db service `env_file` in `docker-compose.yml`.** [docker-compose.yml:8-9] CI fresh runners have no `.env` (it's gitignored); compose will exit non-zero on env-file lookup before any container starts. The new `backend` service correctly uses `required: false`; `db` does not. **High blast — likely blocks every CI run.**
+- [x] [Review][Patch] **nginx caches the `backend` upstream IP at config-load time.** [frontend/nginx.conf:28] No `resolver` directive; `proxy_pass http://backend:8000` resolves once. Backend container restart → new IP → 502 forever until nginx is also restarted. Add `resolver 127.0.0.11 valid=10s;` (Docker's embedded DNS) and switch `proxy_pass` to a variable form (`set $upstream backend; proxy_pass http://$upstream:8000;`).
+- [x] [Review][Patch] **Gate `?e2e=1` test seam behind `import.meta.env.DEV` (or a build flag).** [frontend/src/main.tsx:33, frontend/src/test/e2eHooks.ts:34-46] Currently the seam is shipped to every production user — only the runtime URL guard fails closed. Tree-shake the install path out of prod bundles and document the seam in the README's testing section.
+- [x] [Review][Patch] **CI wait loop misses backend crash-loop and proxy failures.** [.github/workflows/ci-e2e.yml:74-87] (a) Add `docker compose ps` health/exit-code check inside the loop. (b) Add a third probe via the actual SPA path: `curl --fail http://localhost:8080/api/todos` — validates the nginx proxy wiring the SPA depends on. Without these, a broken stack false-greens the readiness gate and the suite times out with confusing errors.
+- [x] [Review][Patch] **`clearAllTodos` swallows partial failures.** [frontend/e2e/helpers.ts:39-41] `Promise.all(todos.map(request.delete(...)))` doesn't check `.ok()`. A 5xx leaves the pond non-empty; the next test starts in a polluted state. Add `.ok()` assertion or `Promise.allSettled` with a final aggregate-error throw.
+- [x] [Review][Patch] **Backend `.dockerignore` doesn't exclude `.env.local` / `.env.*`.** [backend/.dockerignore] Only bare `.env` is excluded. The frontend dockerignore correctly excludes both `.env` and `.env.local`; mirror that on the backend.
+- [x] [Review][Patch] **`delete-todo.spec.ts` accepts both DELETE and PATCH — masks regression.** [frontend/e2e/delete-todo.spec.ts:32-37] Backend's actual delete endpoint is DELETE (`backend/src/api/todos.py:89`). Narrow the waiter to `req.method() === 'DELETE'`.
+- [x] [Review][Patch] **`agent-panel-resize.spec.ts` comment is wrong and `localStorage` not cleared.** [frontend/e2e/agent-panel-resize.spec.ts:48-50] Comment claims "panelOpen also persisted and started as true" but the default is `false`; works by accident. Fix the comment and add an explicit `await page.context().clearCookies()` / `localStorage.clear()` in `beforeEach` so re-runs in the same context don't toggle the panel closed.
+- [x] [Review][Patch] **`entrypoint.sh` is missing `set -o pipefail`.** [backend/entrypoint.sh:8] Future change that pipes `alembic upgrade head | tee` would mask migration failure. Add `set -euo pipefail`.
+- [x] [Review][Patch] **nginx SSE streaming may be batched at the gzip layer.** [frontend/nginx.conf] `proxy_buffering off` disables proxy buffering but the `nginx:alpine` default config has `gzip on` — gzip needs to fill its compression window before flushing, re-introducing buffering. Add `gzip off;` (or `gzip_proxied off`) for the `/api/` location, or globally in this server block.
+- [x] [Review][Patch] **`getByPlaceholder("what's on your mind...")` is fragile to copy changes.** [frontend/e2e/create-todo.spec.ts:32] Story Task 5 explicitly required adding stable `data-testid` attributes where DOM hooks are needed. Add `data-testid="todo-input"` to TodoInput and switch the selector.
+- [x] [Review][Patch] **README documentation drift.** README's "single port (8080) is all you need open" contradicts the backend's `:8000` publish; the spec/repo path mismatch ("backend/alembic/" vs actual "backend/migrations/") wasn't reconciled in the spec. Tighten the wording and add a note in the spec's Dev Notes that the path was renamed pre-story.
+
+**Deferred (10) — see deferred-work.md:**
+
+- [x] [Review][Defer] `force: true` clicks bypass click-through-overlay check [frontend/e2e/{complete,delete}-todo.spec.ts] — refactor to dispatchEvent or query-then-click; out of scope.
+- [x] [Review][Defer] `waitForTimeout(200/300/50)` flake antipattern in 4 specs — proper fix is a `data-ready` attribute on the keyboard hooks; not regression-blocking.
+- [x] [Review][Defer] nginx + frontend Dockerfile have no `HEALTHCHECK` directive — orchestration polish; not in this story's AC.
+- [x] [Review][Defer] Multi-replica `alembic upgrade head` race — unscoped for v1; needs `pg_advisory_lock` in `migrations/env.py` if/when scaled.
+- [x] [Review][Defer] `entrypoint.sh` migration-failure vs DB-not-ready conflation — only matters for standalone `docker run`; compose path uses healthcheck.
+- [x] [Review][Defer] Search spec races against StrictMode mountCount sentinel under HMR — speculative; current 200ms breathing room handles the observed cases.
+- [x] [Review][Defer] Complete/Delete tests assume popup buttons render after fetch lands — relies on 5s default visibility timeout; passes today, fragile on slow CI.
+- [x] [Review][Defer] axe `disableRules` is coarser than per-instance allowlist [frontend/e2e/a11y.spec.ts] — currently empty list so no live divergence; refactor when first allowlist entry is needed.
+- [x] [Review][Defer] uv image pinned by tag, not digest [backend/Dockerfile] — supply-chain hardening for production; acceptable for the demo today.
+- [x] [Review][Defer] Frontend image 99.2 MB vs ~80 MB target — disclosed; +19 MB on `nginx:alpine` + 1.4 MB SPA.
+
 ---
 
 ## Dev Notes
@@ -355,6 +392,13 @@ mask Dockerfile bugs. The CI workflow always runs `--build` for the
 same reason.
 
 ### File locations
+
+> **Spec drift note (recorded post-CR):** AC 1 third sub-bullet says
+> "Copies `backend/src/` and `backend/alembic/`". The actual folder
+> in this repo is `backend/migrations/` (alembic-managed but
+> renamed). The Dockerfile copies `backend/migrations/` — the spec
+> is wrong, the code is right. No code change needed; surfaced here
+> so future readers don't chase the discrepancy.
 
 **New:**
 - `backend/Dockerfile`
@@ -552,3 +596,4 @@ claude-opus-4-7 (Claude Code, Opus 4.7).
 |---|---|
 | 2026-04-27 | Story drafted as a follow-up to the success-criteria audit. Closes the three remaining open gates: Docker deployment, ≥5 Playwright E2E tests, automated WCAG audit. Three quick-win gates (README, coverage tooling, AI integration log) landed earlier as a non-story chore commit. |
 | 2026-04-27 | Implementation complete: backend Dockerfile + entrypoint + .dockerignore; frontend Dockerfile + nginx.conf + .dockerignore; compose extended to 3 services; Playwright + axe-core installed and configured; 5 golden-path E2E tests + dedicated a11y test (7 total) all green against `make dev` AND the docker-compose stack; CI workflow added; README updated with Docker + Playwright sections. Status flipped to `review`. |
+| 2026-04-27 | Code review run via 3 parallel reviewers (Blind / Edge / Acceptance). 7 decisions resolved (6 → patch, 1 → defer); 18 patches applied: db env_file `required: false` (CI blocker fix), nginx `resolver` + variable proxy_pass + `gzip off` for SSE, CI wait loop adds proxy probe + crash-loop detection, backend host port bound to 127.0.0.1, `?e2e=1` seam now build-arg-gated (`VITE_E2E_HOOKS`), `clearAllTodos` checks DELETE status + warns on dev-DB use, `entrypoint.sh` adds `pipefail` (shebang → bash), backend `.dockerignore` covers `.env.*`, test seam extended with `getRenderedTodoIds()` + `getSearchResultIds()`, create-todo + search specs gain spec-required DOM-presence + rise/submerge assertions, agent-panel-resize rewritten as real `page.mouse` drag, `delete-todo` waiter narrowed to DELETE only, TodoInput gains `data-testid="todo-input"`, `make lint` switched to `tsc -b` (closes the AC 9 gate that was a no-op), README port-list claim corrected. 10 issues deferred to deferred-work.md. 599 vitest + 261 pytest + 7 Playwright (against compose stack) all green. |
