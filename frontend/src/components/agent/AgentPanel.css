@@ -14,10 +14,11 @@
   height: 100vh;
   /* Story 6.9: width is driven by the React-side `--agent-panel-width`
      CSS variable so the persisted store value flows through to layout
-     without inline `style.width` redundancy. The 440px fallback keeps
-     pre-6.9 behaviour if the variable ever fails to set (e.g. during
-     SSR or a bare-mount unit test). */
-  width: var(--agent-panel-width, 440px);
+     without inline `style.width` redundancy. The 520px fallback
+     mirrors `AGENT_PANEL_DEFAULT_WIDTH` and only applies when the
+     variable fails to set (e.g. during SSR or a bare-mount unit
+     test). */
+  width: var(--agent-panel-width, 520px);
   max-width: 100vw;
   /* Story 6.7: 2D-pivot — the oracle frog now renders inline as a
      <svg> inside the panel (no shared <Canvas> rendering through
@@ -92,6 +93,42 @@
   box-shadow:
     0 0 6px rgba(0, 238, 255, 0.6),
     0 0 14px rgba(0, 238, 255, 0.35);
+}
+
+/* Story 6.9 (user feedback 2026-04-27): always-visible grip-dot
+   affordance so the resize edge is discoverable without hovering it
+   first. Three vertical neon-cyan dots, centred on the handle, dim
+   at rest and full-strength on hover/focus/active. The dots are
+   composited via a single ::before with two extra `box-shadow`
+   stacks at fixed vertical offsets — keeps the markup clean (no
+   extra DOM nodes). `pointer-events: none` so the dots don't steal
+   the parent handle's pointerdown/leave events. */
+.agent-panel__resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--neon-cyan);
+  /* Two extra dots stacked vertically: one above, one below. */
+  box-shadow:
+    0 -8px 0 var(--neon-cyan),
+    0 8px 0 var(--neon-cyan),
+    0 0 4px rgba(0, 238, 255, 0.45),
+    0 -8px 4px rgba(0, 238, 255, 0.45),
+    0 8px 4px rgba(0, 238, 255, 0.45);
+  transform: translate(-50%, -50%);
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.agent-panel__resize-handle:hover::before,
+.agent-panel__resize-handle:focus-visible::before,
+.agent-panel__resize-handle:active::before {
+  opacity: 1;
 }
 
 /* ── Three sections, top → bottom ──────────────────────────────────────── */

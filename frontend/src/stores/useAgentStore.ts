@@ -59,12 +59,14 @@ export interface SendMessageOptions {
 }
 
 /**
- * Story 6.9: persisted pixel width of the agent panel. Default 440
- * preserves the pre-6.9 hardcoded width for users who haven't dragged
- * yet. Live clamping to `[25%, 50%]` of viewport happens in the
- * AgentPanel component (drag handler + window-resize listener).
+ * Story 6.9: persisted pixel width of the agent panel. The pre-6.9
+ * hardcoded width was 440px; user direction post-implementation
+ * bumped the default to 520 so the panel is readier-to-read out of
+ * the box (especially with the rephrase/proposal renderers that need
+ * horizontal room). Live clamping to `[25%, 50%]` of viewport happens
+ * in the AgentPanel component (drag handler + window-resize listener).
  */
-export const AGENT_PANEL_DEFAULT_WIDTH = 440;
+export const AGENT_PANEL_DEFAULT_WIDTH = 520;
 
 export interface AgentState {
   panelOpen: boolean;

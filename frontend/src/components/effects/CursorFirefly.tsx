@@ -454,7 +454,7 @@ export function CursorFirefly() {
     // DPR transform on the same context. Calling `ctx.scale(dpr, dpr)`
     // a second time at mount used to compound the scale to dpr².
 
-    const onMove = (e: MouseEvent): void => {
+    const onMove = (e: { clientX: number; clientY: number }): void => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
       if (!mouseSeenRef.current) {
         for (const node of nodesRef.current) {
@@ -477,6 +477,14 @@ export function CursorFirefly() {
     };
 
     window.addEventListener('mousemove', onMove);
+    // Story 6.9: also listen to pointermove. When an element calls
+    // `setPointerCapture` (the agent-panel resize handle does this for
+    // robust drag tracking), some browsers stop emitting compatibility
+    // mousemove events on `window`, which froze the firefly cursor in
+    // place during the drag. PointerEvent and MouseEvent share the
+    // same `clientX/Y` shape so the same handler works for both, and
+    // both feeding the same ref is idempotent for redundant events.
+    window.addEventListener('pointermove', onMove);
     document.addEventListener('mouseleave', onLeave);
 
     const draw = (): void => {
@@ -586,6 +594,7 @@ export function CursorFirefly() {
     return (): void => {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('pointermove', onMove);
       window.removeEventListener('resize', resize);
       document.removeEventListener('mouseleave', onLeave);
     };

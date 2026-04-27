@@ -42,7 +42,7 @@ function resetStore() {
     activeSessionId: null,
     // Story 6.9 — reset to the in-code default so per-test panelWidth
     // overrides don't leak between tests.
-    panelWidth: 440,
+    panelWidth: 520,
     sessions: [],
     messages: [],
     inputDraft: '',
@@ -512,8 +512,8 @@ describe('useAgentStore — Story 6.9 panelWidth', () => {
     localStorage.clear();
   });
 
-  it('initial panelWidth is 440 (default)', () => {
-    expect(useAgentStore.getState().panelWidth).toBe(440);
+  it('initial panelWidth is 520 (default)', () => {
+    expect(useAgentStore.getState().panelWidth).toBe(520);
   });
 
   it('setPanelWidth updates state', () => {
@@ -530,11 +530,12 @@ describe('useAgentStore — Story 6.9 panelWidth', () => {
     expect(persisted.state.panelWidth).toBe(525);
   });
 
-  it('rehydrate from older localStorage shape (no panelWidth) falls back to default 440', async () => {
+  it('rehydrate from older localStorage shape (no panelWidth) falls back to the in-code default', async () => {
     // Simulate a pre-6.9 persisted entry with only the original
     // partialized fields. zustand-persist's default merge spreads
     // currentState first then persistedState, so missing keys keep
-    // their in-code default (440).
+    // their in-code default (currently 520 — see
+    // AGENT_PANEL_DEFAULT_WIDTH in useAgentStore.ts).
     localStorage.setItem(
       'agent-store-v1',
       JSON.stringify({
@@ -547,6 +548,6 @@ describe('useAgentStore — Story 6.9 panelWidth', () => {
     const state = useAgentStore.getState();
     expect(state.panelOpen).toBe(true);
     expect(state.activeSessionId).toBe('sess-legacy');
-    expect(state.panelWidth).toBe(440);
+    expect(state.panelWidth).toBe(520);
   });
 });

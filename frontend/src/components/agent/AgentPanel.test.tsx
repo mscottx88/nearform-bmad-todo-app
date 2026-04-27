@@ -54,8 +54,8 @@ function resetStore() {
     panelOpen: false,
     activeSessionId: null,
     // Story 6.9: keep tests deterministic even when an earlier test
-    // ran setPanelWidth.
-    panelWidth: 440,
+    // ran setPanelWidth. Mirrors AGENT_PANEL_DEFAULT_WIDTH.
+    panelWidth: 520,
     sessions: [],
     messages: [],
     inputDraft: '',
@@ -183,10 +183,13 @@ describe('AgentPanel', () => {
 
   // ── Story 6.9: drag-to-resize ────────────────────────────────────
 
-  it('renders the panel at 440px when no persisted width is set', () => {
-    useAgentStore.setState({ panelOpen: true, panelWidth: 440 });
+  it('renders the panel at the in-code default width when no persisted value is set', () => {
+    // Default 520 only fits within [25%, 50%] when the viewport is
+    // wide enough; vw=1200 → min=300, max=600 → 520 sits inside.
+    setViewportWidth(1200);
+    useAgentStore.setState({ panelOpen: true, panelWidth: 520 });
     render(<AgentPanel />);
-    expect(readPanelWidthVar()).toBe('440px');
+    expect(readPanelWidthVar()).toBe('520px');
   });
 
   it('renders the panel at the persisted panelWidth', () => {
@@ -199,6 +202,8 @@ describe('AgentPanel', () => {
   });
 
   it('exposes a resize handle with the WAI-ARIA separator pattern', () => {
+    // vw=1200 → min=300, max=600 → default 520 fits without clamping.
+    setViewportWidth(1200);
     useAgentStore.setState({ panelOpen: true });
     render(<AgentPanel />);
     const handle = document.querySelector(
@@ -209,10 +214,9 @@ describe('AgentPanel', () => {
     expect(handle?.getAttribute('aria-orientation')).toBe('vertical');
     expect(handle?.getAttribute('aria-label')).toBe('Resize chat panel');
     expect(handle?.getAttribute('tabindex')).toBe('0');
-    expect(handle?.getAttribute('aria-valuenow')).toBe('440');
-    // 1024 viewport → min=256, max=512.
-    expect(handle?.getAttribute('aria-valuemin')).toBe('256');
-    expect(handle?.getAttribute('aria-valuemax')).toBe('512');
+    expect(handle?.getAttribute('aria-valuenow')).toBe('520');
+    expect(handle?.getAttribute('aria-valuemin')).toBe('300');
+    expect(handle?.getAttribute('aria-valuemax')).toBe('600');
   });
 
   it('dragging the handle 100px left grows the panel by 100px', () => {
@@ -306,10 +310,10 @@ describe('AgentPanel', () => {
     expect(useAgentStore.getState().panelWidth).toBe(420);
   });
 
-  it('rehydrating from a pre-6.9 localStorage shape leaves panelWidth at 440', async () => {
+  it('rehydrating from a pre-6.9 localStorage shape leaves panelWidth at the in-code default', async () => {
     // Regression guard for the partialize migration: an existing
     // localStorage entry that lacks `panelWidth` must NOT crash on
-    // hydration; the in-code default holds.
+    // hydration; the in-code default (520) holds.
     localStorage.setItem(
       'agent-store-v1',
       JSON.stringify({
@@ -318,6 +322,6 @@ describe('AgentPanel', () => {
       }),
     );
     await useAgentStore.persist.rehydrate();
-    expect(useAgentStore.getState().panelWidth).toBe(440);
+    expect(useAgentStore.getState().panelWidth).toBe(520);
   });
 });

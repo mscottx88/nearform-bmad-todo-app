@@ -143,7 +143,16 @@ export function useGlobalCursorMode(): void {
       // `data-cursor-managed` attribute (or rely on `<canvas>`); the
       // hook returns 'managed' for those and skips the override
       // entirely.
-      if (store.cursorMode === 'grabbing') return;
+      //
+      // Story 6.9: 'resize-h' is also imperatively-owned — the
+      // AgentPanel resize handle's pointerEnter/Leave/Down/Up handlers
+      // own the lifecycle (and need to keep the cursor on resize-h
+      // mid-drag even when the pointer has moved off the handle).
+      // Without this skip, the hook would clobber resize-h back to
+      // firefly on the next mousemove.
+      if (store.cursorMode === 'grabbing' || store.cursorMode === 'resize-h') {
+        return;
+      }
       const next = inferModeForElement(pendingEl);
       // 'managed' is a sentinel: the cursor is over a self-managing
       // element (R3F canvas, opt-in `data-cursor-managed`). Skip
