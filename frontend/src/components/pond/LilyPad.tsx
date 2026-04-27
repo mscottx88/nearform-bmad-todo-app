@@ -446,16 +446,17 @@ export function LilyPad({
   // camera → wider label area → more wrapped lines visible inside
   // the pad.
   const labelRef = useRef<HTMLDivElement>(null);
-  // Hysteresis cache for the per-frame label sizing. Without this,
-  // any sub-pixel noise in the depth read (camera idle drift, store
-  // re-renders that nudge `posX`/`posZ` mid-physics, etc.) can flip
-  // the bucketed widthPx by exactly one bucket from frame to frame
-  // — and a 1-bucket flip at a word-fit threshold flaps text wrap.
-  // Refs hold the LAST APPLIED values; the per-frame update only
-  // re-assigns when the new computed value differs by enough to
-  // qualify as a genuine zoom step (`HYSTERESIS_*` thresholds).
-  const lastLabelWidthRef = useRef<number | null>(null);
-  const lastLabelFontRef = useRef<number | null>(null);
+  // CR (text-wrap stability v3): the label has a FIXED CSS layout
+  // (`width: 120px`, `fontSize: 11px` — see the Html inline style
+  // below). Per-frame we ONLY update `transform: scale(s)` so text
+  // appears bigger/smaller with zoom WITHOUT the browser ever
+  // re-flowing it. Wrap is determined entirely by the design-time
+  // width/font, which never change at runtime → same todo wraps
+  // the same way at every zoom level and every camera position.
+  // Per-frame width/font writes (the v1/v2 approach) are gone.
+  // This ref only caches the last-applied scale to skip redundant
+  // DOM writes during steady-state.
+  const lastLabelScaleRef = useRef<number | null>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
   // Story 2.8: ref to the GlowSource shader material. useFrame writes
@@ -1234,86 +1235,48 @@ export function LilyPad({
     {
       const label = labelRef.current;
       if (label) {
+        // CR (text-wrap stability v3): wrap geometry MUST be
+        // independent of camera position. v1 (rest-position depth)
+        // and v2 (8px buckets + hysteresis) reduced flutter
+        // frequency, but a deliberate camera drag still re-flowed
+        // text every time the bucketed width crossed a word-fit
+        // threshold. The only way to truly stabilise wrap is to
+        // keep LAYOUT fixed and scale the whole element via CSS
+        // `transform`. The browser does ONE text layout (at the
+        // design-time `width: 120px` / `fontSize: 11px` from the
+        // inline style below); zoom changes produce GPU-scaled
+        // output without ever re-flowing.
+        //
+        // The mapping below preserves the previous on-screen size
+        // curve:
+        //   - REFERENCE_DIAMETER = 147 → scale = 1.0 (font ≈ 11px)
+        //   - padDiameterPx = 250 → scale ≈ 1.7 (font ≈ 19px)
+        //   - padDiameterPx = 600 → scale ≈ 4.08 (font ≈ 45px)
+        //   - MIN_SCALE 0.36 → effective font ≈ 4px (zoomed way out)
+        //   - MAX_SCALE 5.09 → effective font ≈ 56px (zoomed in)
         const persp = state.camera as THREE.PerspectiveCamera;
-        // CR (text-wrap stability): depth is read from the pad's
-        // REST position `(posX, 0, posZ)`, NOT
-        // `group.getWorldPosition()`. The live world position
-        // includes bob (~0.1 unit Y oscillation) and per-frame
-        // drift; at typical camera distance those translate to a
-        // 1-2px fluctuation in `widthPx` after rounding, which is
-        // enough to flip word-wrap across the boundary case
-        // ("two weekends" / "two\nweekends") every frame while the
-        // pad is idle. Excluding bob means wrap geometry depends
-        // only on camera zoom + pad rest position — both change
-        // only on explicit user input.
         _padRestPosTmp.set(posX, 0, posZ);
         const depth = persp.position.distanceTo(_padRestPosTmp);
         const fovRad = (persp.fov * Math.PI) / 180;
         const pxPerUnit =
           state.size.height / (2 * depth * Math.tan(fovRad / 2));
         const padDiameterPx = PAD_RADIUS * 2 * pxPerUnit;
-        // CR (text-wrap stability, second guard): snap widthPx to
-        // 8px buckets. Even with rest-position depth, continuous
-        // camera zoom would otherwise step `widthPx` by 1px per
-        // frame — and any 1px boundary that crosses a word-fit
-        // threshold would still re-flow text at that exact zoom
-        // level. Quantising to 8px increments means wrap only
-        // changes at 8px-wide hysteresis bands, which is well below
-        // a typical word width and rarely crossed during a single
-        // zoom gesture.
-        //
-        // Floor 56px = ~ rounded multiple of 8 below the original
-        // 50 floor; preserves the "single short word fits zoomed
-        // out" behaviour without breaking the 8-multiple grid.
-        const rawWidthPx = padDiameterPx * 0.9;
-        const candidateWidthPx = Math.max(
-          56,
-          Math.round(rawWidthPx / 8) * 8,
+        const REFERENCE_DIAMETER = 147;
+        const MIN_SCALE = 4 / 11;
+        const MAX_SCALE = 56 / 11;
+        const rawScale = padDiameterPx / REFERENCE_DIAMETER;
+        const clampedScale = Math.max(
+          MIN_SCALE,
+          Math.min(MAX_SCALE, rawScale),
         );
-        // Linear font scale with floor 4 + cap 56:
-        //   ~30-50px diameter (max zoom-out) → 4-5px (very tiny)
-        //   ~120px (default)                 → ~9px
-        //   ~250px (medium-in)               → ~19px
-        //   ~600px (close)                   → ~45px
-        //   ≳ 750px (very close)             → 56px (cap)
-        const candidateFontPx = Math.max(
-          4,
-          Math.min(56, Math.round(padDiameterPx * 0.075)),
-        );
-        // CR (third stability guard): hysteresis on the applied
-        // values. Even with rest-pos depth and 8px width buckets,
-        // residual noise (camera idle drift, store re-renders that
-        // nudge `posX`/`posZ`, viewport-resize-induced size deltas)
-        // can still land the candidate exactly one bucket away from
-        // the previously-applied value, flapping wrap once per
-        // frame. Hold the previous value unless the new candidate
-        // differs by enough to be a deliberate zoom step:
-        //   - 16px (= 2 width buckets) for width
-        //   - 2px for font size
-        // The user still sees smooth scaling during real zoom (many
-        // buckets cross the threshold quickly during a zoom
-        // gesture), but idle-pad text stays put.
-        const HYSTERESIS_WIDTH_PX = 16;
-        const HYSTERESIS_FONT_PX = 2;
-        const lastW = lastLabelWidthRef.current;
-        const lastF = lastLabelFontRef.current;
-        const widthPx =
-          lastW === null ||
-          Math.abs(candidateWidthPx - lastW) >= HYSTERESIS_WIDTH_PX
-            ? candidateWidthPx
-            : lastW;
-        const fontPx =
-          lastF === null ||
-          Math.abs(candidateFontPx - lastF) >= HYSTERESIS_FONT_PX
-            ? candidateFontPx
-            : lastF;
-        if (widthPx !== lastW) {
-          label.style.width = `${widthPx}px`;
-          lastLabelWidthRef.current = widthPx;
-        }
-        if (fontPx !== lastF) {
-          label.style.fontSize = `${fontPx}px`;
-          lastLabelFontRef.current = fontPx;
+        // Quantise to 0.05 buckets so sub-pixel depth noise doesn't
+        // produce visible transform jitter (text shimmer at idle).
+        // Real zoom gestures cross many buckets per frame so smooth
+        // scaling during interaction is preserved.
+        const bucketedScale = Math.round(clampedScale * 20) / 20;
+        if (bucketedScale !== lastLabelScaleRef.current) {
+          label.style.transform = `scale(${bucketedScale})`;
+          lastLabelScaleRef.current = bucketedScale;
         }
       }
     }
@@ -2730,9 +2693,15 @@ export function LilyPad({
               // Story 6.2 Group C polish: switch to the project's
               // mono UI font (matches the chat-panel chrome and
               // keyboard-hint footer); allow text to wrap rather than
-              // truncate with ellipsis. `maxWidth` is sized per-frame
-              // by the useFrame block below so closer-camera shows
-              // more text and zoomed-out shows less.
+              // truncate with ellipsis.
+              //
+              // CR (text-wrap stability v3): width and fontSize are
+              // FIXED in this inline style and never overwritten
+              // from useFrame. Camera zoom adjusts ONLY the CSS
+              // `transform: scale(s)` on this element — the browser
+              // does one text layout at the design-time size, and
+              // GPU-scales the rendered output. Same todo always
+              // wraps the same way.
               fontFamily: 'var(--font-mono)',
               color: '#ffffff',
               fontSize: '11px',
@@ -2748,11 +2717,12 @@ export function LilyPad({
               overflowWrap: 'break-word',
               textAlign: 'center',
               opacity: textOpacity,
+              // Scale grows from the centre so the label stays
+              // visually anchored on the pad as zoom changes.
+              transformOrigin: 'center center',
               transition: 'opacity 200ms ease-in',
-              // Use explicit `width` (not maxWidth) so drei's
-              // <Html center> wrapper can't content-fit shrink the
-              // div to its narrowest line. Overridden imperatively
-              // by useFrame each tick to scale with camera zoom.
+              // Fixed design-time width — see the CR note above.
+              // useFrame ONLY writes `transform: scale(...)`.
               width: '120px',
               overflow: 'hidden',
               userSelect: 'none',
