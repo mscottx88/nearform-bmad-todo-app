@@ -30,10 +30,15 @@ import { MatchStatsPopup } from './MatchStatsPopup';
 // `intersectPlane` returns truthy.
 const WATER_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const worldDragPoint = new THREE.Vector3();
+// Reused per-frame Vector3 for the label's stable-depth read. Filled
+// from `(posX, 0, posZ)` — the pad's REST position — so the depth
+// excludes per-frame bob/drift and the resulting `widthPx` doesn't
+// flutter across word-boundary thresholds while the pad is idle.
+// (Replaces `_padWorldPosTmp` from the previous live-position read.)
+const _padRestPosTmp = new THREE.Vector3();
 // Story 6.2 Group C polish: reused for the per-pad world-position
 // read inside useFrame (label-sizing math). One shared Vector3 per
 // module-load avoids per-tick allocation across all mounted pads.
-const _padWorldPosTmp = new THREE.Vector3();
 // Window-level pointermove does not carry a pre-computed ray the way
 // R3F's ThreeEvent does, so we keep our own Raycaster + NDC Vector2
 // to derive the water-plane hit from raw clientX/Y + camera + canvas.
@@ -1220,17 +1225,38 @@ export function LilyPad({
       const label = labelRef.current;
       if (label) {
         const persp = state.camera as THREE.PerspectiveCamera;
-        group.getWorldPosition(_padWorldPosTmp);
-        const depth = persp.position.distanceTo(_padWorldPosTmp);
+        // CR (text-wrap stability): depth is read from the pad's
+        // REST position `(posX, 0, posZ)`, NOT
+        // `group.getWorldPosition()`. The live world position
+        // includes bob (~0.1 unit Y oscillation) and per-frame
+        // drift; at typical camera distance those translate to a
+        // 1-2px fluctuation in `widthPx` after rounding, which is
+        // enough to flip word-wrap across the boundary case
+        // ("two weekends" / "two\nweekends") every frame while the
+        // pad is idle. Excluding bob means wrap geometry depends
+        // only on camera zoom + pad rest position — both change
+        // only on explicit user input.
+        _padRestPosTmp.set(posX, 0, posZ);
+        const depth = persp.position.distanceTo(_padRestPosTmp);
         const fovRad = (persp.fov * Math.PI) / 180;
         const pxPerUnit =
           state.size.height / (2 * depth * Math.tan(fovRad / 2));
         const padDiameterPx = PAD_RADIUS * 2 * pxPerUnit;
-        // Width also tracks the pad: floor 50px keeps single short
-        // words on one line when zoomed all the way out, but lets
-        // the box shrink past the 80px we used initially so the
-        // label stays mostly inside the pad rim at small sizes.
-        const widthPx = Math.max(50, Math.round(padDiameterPx * 0.9));
+        // CR (text-wrap stability, second guard): snap widthPx to
+        // 8px buckets. Even with rest-position depth, continuous
+        // camera zoom would otherwise step `widthPx` by 1px per
+        // frame — and any 1px boundary that crosses a word-fit
+        // threshold would still re-flow text at that exact zoom
+        // level. Quantising to 8px increments means wrap only
+        // changes at 8px-wide hysteresis bands, which is well below
+        // a typical word width and rarely crossed during a single
+        // zoom gesture.
+        //
+        // Floor 56px = ~ rounded multiple of 8 below the original
+        // 50 floor; preserves the "single short word fits zoomed
+        // out" behaviour without breaking the 8-multiple grid.
+        const rawWidthPx = padDiameterPx * 0.9;
+        const widthPx = Math.max(56, Math.round(rawWidthPx / 8) * 8);
         label.style.width = `${widthPx}px`;
         // Linear font scale with floor 4 + cap 56:
         //   ~30-50px diameter (max zoom-out) → 4-5px (very tiny)
