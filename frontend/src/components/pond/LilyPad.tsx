@@ -446,6 +446,16 @@ export function LilyPad({
   // camera → wider label area → more wrapped lines visible inside
   // the pad.
   const labelRef = useRef<HTMLDivElement>(null);
+  // Hysteresis cache for the per-frame label sizing. Without this,
+  // any sub-pixel noise in the depth read (camera idle drift, store
+  // re-renders that nudge `posX`/`posZ` mid-physics, etc.) can flip
+  // the bucketed widthPx by exactly one bucket from frame to frame
+  // — and a 1-bucket flip at a word-fit threshold flaps text wrap.
+  // Refs hold the LAST APPLIED values; the per-frame update only
+  // re-assigns when the new computed value differs by enough to
+  // qualify as a genuine zoom step (`HYSTERESIS_*` thresholds).
+  const lastLabelWidthRef = useRef<number | null>(null);
+  const lastLabelFontRef = useRef<number | null>(null);
   const rimRef = useRef<THREE.Mesh>(null);
   const padMeshRef = useRef<THREE.Mesh>(null);
   // Story 2.8: ref to the GlowSource shader material. useFrame writes
@@ -1256,19 +1266,55 @@ export function LilyPad({
         // 50 floor; preserves the "single short word fits zoomed
         // out" behaviour without breaking the 8-multiple grid.
         const rawWidthPx = padDiameterPx * 0.9;
-        const widthPx = Math.max(56, Math.round(rawWidthPx / 8) * 8);
-        label.style.width = `${widthPx}px`;
+        const candidateWidthPx = Math.max(
+          56,
+          Math.round(rawWidthPx / 8) * 8,
+        );
         // Linear font scale with floor 4 + cap 56:
         //   ~30-50px diameter (max zoom-out) → 4-5px (very tiny)
         //   ~120px (default)                 → ~9px
         //   ~250px (medium-in)               → ~19px
         //   ~600px (close)                   → ~45px
         //   ≳ 750px (very close)             → 56px (cap)
-        const fontPx = Math.max(
+        const candidateFontPx = Math.max(
           4,
           Math.min(56, Math.round(padDiameterPx * 0.075)),
         );
-        label.style.fontSize = `${fontPx}px`;
+        // CR (third stability guard): hysteresis on the applied
+        // values. Even with rest-pos depth and 8px width buckets,
+        // residual noise (camera idle drift, store re-renders that
+        // nudge `posX`/`posZ`, viewport-resize-induced size deltas)
+        // can still land the candidate exactly one bucket away from
+        // the previously-applied value, flapping wrap once per
+        // frame. Hold the previous value unless the new candidate
+        // differs by enough to be a deliberate zoom step:
+        //   - 16px (= 2 width buckets) for width
+        //   - 2px for font size
+        // The user still sees smooth scaling during real zoom (many
+        // buckets cross the threshold quickly during a zoom
+        // gesture), but idle-pad text stays put.
+        const HYSTERESIS_WIDTH_PX = 16;
+        const HYSTERESIS_FONT_PX = 2;
+        const lastW = lastLabelWidthRef.current;
+        const lastF = lastLabelFontRef.current;
+        const widthPx =
+          lastW === null ||
+          Math.abs(candidateWidthPx - lastW) >= HYSTERESIS_WIDTH_PX
+            ? candidateWidthPx
+            : lastW;
+        const fontPx =
+          lastF === null ||
+          Math.abs(candidateFontPx - lastF) >= HYSTERESIS_FONT_PX
+            ? candidateFontPx
+            : lastF;
+        if (widthPx !== lastW) {
+          label.style.width = `${widthPx}px`;
+          lastLabelWidthRef.current = widthPx;
+        }
+        if (fontPx !== lastF) {
+          label.style.fontSize = `${fontPx}px`;
+          lastLabelFontRef.current = fontPx;
+        }
       }
     }
 
