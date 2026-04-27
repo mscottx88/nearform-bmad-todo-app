@@ -81,6 +81,47 @@ interface ComputedPosition {
   resolvedPlacement: NeonTooltipPlacement;
 }
 
+/**
+ * Return the trigger's bounding rect INTERSECTED with each clipping
+ * ancestor (scroll containers, `overflow: hidden` ancestors, etc.).
+ *
+ * `getBoundingClientRect` returns the element's full geometry,
+ * including parts that are scrolled out of view inside a parent
+ * with `overflow: auto`. When the InfoPopup's editable text wraps
+ * inside a `NeonScrollbar` (max-height ~180px) and the user scrolls
+ * down, the trigger's `top` ends up above the scrollable container's
+ * visible window — and the tooltip "place above" math then puts the
+ * tooltip near the top of the viewport, far from the cursor.
+ *
+ * Walking up clipping ancestors and intersecting the rect gives the
+ * effective on-screen geometry the tooltip should anchor to. If the
+ * intersection collapses to zero area (trigger fully scrolled out),
+ * caller bails to hidden.
+ */
+function getVisibleTriggerRect(element: Element): DOMRect {
+  let { top, left, bottom, right } = element.getBoundingClientRect();
+  let parent: Element | null = element.parentElement;
+  while (parent && parent !== document.body && parent !== document.documentElement) {
+    const style = window.getComputedStyle(parent);
+    const overflow = `${style.overflow} ${style.overflowX} ${style.overflowY}`;
+    if (/auto|scroll|hidden|clip/.test(overflow)) {
+      const parentRect = parent.getBoundingClientRect();
+      top = Math.max(top, parentRect.top);
+      left = Math.max(left, parentRect.left);
+      bottom = Math.min(bottom, parentRect.bottom);
+      right = Math.min(right, parentRect.right);
+    }
+    parent = parent.parentElement;
+  }
+  // Always clamp to the viewport itself so off-screen triggers also
+  // collapse to zero — keeps the bail-to-hidden path reachable.
+  top = Math.max(top, 0);
+  left = Math.max(left, 0);
+  bottom = Math.min(bottom, window.innerHeight);
+  right = Math.min(right, window.innerWidth);
+  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+}
+
 function computePosition(
   triggerRect: DOMRect,
   tooltipRect: DOMRect,
@@ -204,16 +245,43 @@ export function NeonTooltip({
     const trigger = triggerWrapRef.current;
     const tooltip = tooltipRef.current;
     if (!trigger || !tooltip) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const visibleRect = getVisibleTriggerRect(trigger);
+    // Only bail to closed when the trigger has REAL geometry but its
+    // visible portion has collapsed to zero (scrolled fully out of a
+    // clipping ancestor). jsdom returns all-zero rects for every
+    // element, so this guard preserves test compatibility — tests
+    // exercise the open/close lifecycle without geometry math.
+    const triggerHasGeometry =
+      triggerRect.width > 0 || triggerRect.height > 0;
+    if (
+      triggerHasGeometry &&
+      (visibleRect.width === 0 || visibleRect.height === 0)
+    ) {
+      setOpen(false);
+      return;
+    }
     updatePosition(
       computePosition(
-        trigger.getBoundingClientRect(),
+        triggerHasGeometry ? visibleRect : triggerRect,
         tooltip.getBoundingClientRect(),
         placement,
       ),
     );
   }, [open, placement, text, updatePosition]);
 
-  // Recompute on viewport changes while open.
+  // Recompute on viewport changes while open. We watch:
+  // - `scroll` (capture phase) to catch nested scroll containers
+  //   (e.g. the InfoPopup's NeonScrollbar).
+  // - `resize` for window-size changes.
+  // - rAF polling while open to catch position changes that DON'T
+  //   fire either event — most importantly drei's `<Html>` overlay
+  //   inside the 3D scene, whose screen position is driven by CSS
+  //   transforms tied to the camera. Camera pan/zoom moves the
+  //   trigger without a scroll/resize event, so the tooltip would
+  //   otherwise drift away. The rAF callback short-circuits to a
+  //   no-op when the rect hasn't changed (via `updatePosition`'s
+  //   equality guard), so the steady-state cost is negligible.
   useEffect(() => {
     if (!open) return;
     const recompute = () => {
@@ -229,9 +297,22 @@ export function NeonTooltip({
         setOpen(false);
         return;
       }
+      const triggerRect = trigger.getBoundingClientRect();
+      const visibleRect = getVisibleTriggerRect(trigger);
+      const triggerHasGeometry =
+        triggerRect.width > 0 || triggerRect.height > 0;
+      if (
+        triggerHasGeometry &&
+        (visibleRect.width === 0 || visibleRect.height === 0)
+      ) {
+        // Scrolled out of the visible window of a clipping ancestor —
+        // suppress until the user scrolls it back into view.
+        setOpen(false);
+        return;
+      }
       updatePosition(
         computePosition(
-          trigger.getBoundingClientRect(),
+          triggerHasGeometry ? visibleRect : triggerRect,
           tooltip.getBoundingClientRect(),
           placement,
         ),
@@ -239,9 +320,21 @@ export function NeonTooltip({
     };
     window.addEventListener('scroll', recompute, true);
     window.addEventListener('resize', recompute);
+
+    // rAF polling for transform-driven movement (drei `<Html>`
+    // tracking the 3D camera). The loop reschedules itself; cleanup
+    // cancels the most recently queued frame.
+    let rafId = 0;
+    const tick = () => {
+      recompute();
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
     return () => {
       window.removeEventListener('scroll', recompute, true);
       window.removeEventListener('resize', recompute);
+      cancelAnimationFrame(rafId);
     };
   }, [open, placement, updatePosition]);
 

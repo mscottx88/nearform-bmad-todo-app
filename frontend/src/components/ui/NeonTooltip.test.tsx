@@ -106,4 +106,52 @@ describe('NeonTooltip', () => {
       'neon-tooltip--left',
     );
   });
+
+  // 2026-04-26 fix: when the trigger sits inside an `overflow: auto`
+  // ancestor (e.g. NeonScrollbar) and the user scrolls the trigger
+  // out of the visible window, the tooltip's positioning math used
+  // the trigger's full bounding rect — including the scrolled-away
+  // portion — which placed the tooltip far from the cursor. The
+  // visible-rect intersection now collapses to zero in that case
+  // and the tooltip closes itself rather than floating in the wrong
+  // place.
+  it('closes itself when the trigger has been scrolled out of a clipping ancestor', () => {
+    const { container } = render(
+      <div
+        data-testid="scroll-parent"
+        style={{ overflow: 'auto', height: 100 }}
+      >
+        <NeonTooltip text="hello">
+          <button type="button">trigger</button>
+        </NeonTooltip>
+      </div>,
+    );
+
+    // The tooltip uses the wrapping `<span class="neon-tooltip-wrap">`
+    // for positioning, NOT the inner button — clone overrides for
+    // both so the visible-rect intersection has consistent inputs.
+    const wrap = container.querySelector('.neon-tooltip-wrap')!;
+    const scrollParent = container.querySelector(
+      '[data-testid="scroll-parent"]',
+    )!;
+    // Trigger wrap geometry: positioned at y=-200..-170 — i.e. fully
+    // above the scroll-parent's visible 0..100 window. Real geometry
+    // (width/height > 0) so the bail-on-zero-area branch fires for
+    // the right reason.
+    vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(50, -200, 100, 30),
+    );
+    vi.spyOn(scrollParent, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 200, 100),
+    );
+
+    const trigger = screen.getByRole('button');
+    fireEvent.pointerEnter(trigger);
+    // Tooltip should NOT be in the open state — the visible portion
+    // of the trigger collapses to zero (trigger bottom -170 < parent
+    // top 0), so we suppress.
+    expect(
+      screen.getByRole('tooltip', { hidden: true }).className,
+    ).not.toContain('neon-tooltip--open');
+  });
 });
