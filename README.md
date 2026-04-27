@@ -1,5 +1,7 @@
 # Pond Todo
 
+![Pond Todo](docs/sample.jpg)
+
 A neon 3D Todo application built as a Nearform demo and BMad-method
 learning project. Each todo is a luminescent lily pad floating on a
 dark pond surface; an oracle frog and an LLM-backed agent panel sit
