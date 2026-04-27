@@ -223,4 +223,115 @@ That's the plan.`;
       ]);
     });
   });
+
+  describe('GFM tables', () => {
+    it('parses a minimal 2-column 1-row table', () => {
+      const md = '| col1 | col2 |\n|------|------|\n| a    | b    |';
+      const result = parseAgentMessage(md);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        kind: 'table',
+        alignments: [null, null],
+      });
+      const table = result[0] as Extract<
+        (typeof result)[number],
+        { kind: 'table' }
+      >;
+      expect(table.headers.map((cell) => (cell[0] as { text: string }).text)).toEqual(['col1', 'col2']);
+      expect(table.rows).toHaveLength(1);
+      expect(table.rows[0].map((cell) => (cell[0] as { text: string }).text)).toEqual(['a', 'b']);
+    });
+
+    it('parses left/center/right alignment markers from the separator row', () => {
+      const md = '| L | C | R |\n|:--|:-:|--:|\n| a | b | c |';
+      const result = parseAgentMessage(md);
+      const table = result[0] as Extract<
+        (typeof result)[number],
+        { kind: 'table' }
+      >;
+      expect(table.alignments).toEqual(['left', 'center', 'right']);
+    });
+
+    it('inline-tokenizes cells (todo-links + emphasis still work inside cells)', () => {
+      const md =
+        `| Task | Note |\n|------|------|\n| [Park hangout](todo://${UUID_A}) | **important** |`;
+      const result = parseAgentMessage(md);
+      const table = result[0] as Extract<
+        (typeof result)[number],
+        { kind: 'table' }
+      >;
+      // First body cell carries the todo-link.
+      expect(table.rows[0][0][0]).toEqual({
+        kind: 'todo-link',
+        label: 'Park hangout',
+        todoId: UUID_A,
+      });
+      // Second body cell carries the bold inline.
+      expect(table.rows[0][1][0]).toEqual({
+        kind: 'bold',
+        text: 'important',
+      });
+    });
+
+    it('does NOT render as table when the second line is not a separator', () => {
+      // Header + two body rows but no separator → not a table; the
+      // pipe-shaped lines stay as plain prose.
+      const md = '| a | b |\n| c | d |\n| e | f |';
+      const result = parseAgentMessage(md);
+      // No table segment; falls back to plain text.
+      expect(result.some((s) => s.kind === 'table')).toBe(false);
+    });
+
+    it('does NOT render an incomplete table (header + separator only) as a table', () => {
+      // Streaming partial: header + separator, no body rows yet —
+      // falls back to prose so the rendering doesn't flash an
+      // empty table.
+      const md = '| a | b |\n|---|---|';
+      const result = parseAgentMessage(md);
+      expect(result.some((s) => s.kind === 'table')).toBe(false);
+    });
+
+    it('promotes incomplete-then-complete to a table on the next chunk re-parse', () => {
+      // Streaming: round 1 sees header+separator only. Round 2
+      // sees header+separator+body — it MUST render as a table
+      // (the parser is purely a function of input, but this test
+      // documents the streaming-friendly contract).
+      const partial = '| a | b |\n|---|---|';
+      const complete = '| a | b |\n|---|---|\n| 1 | 2 |';
+      expect(parseAgentMessage(partial).some((s) => s.kind === 'table')).toBe(false);
+      expect(parseAgentMessage(complete).some((s) => s.kind === 'table')).toBe(true);
+    });
+
+    it('detects a table when followed by prose (block terminator on non-table line)', () => {
+      const md = '| a | b |\n|---|---|\n| 1 | 2 |\n\nFollowing prose.';
+      const result = parseAgentMessage(md);
+      expect(result[0].kind).toBe('table');
+      // Prose after the table renders as a separate text segment.
+      expect(
+        result.some((s) => s.kind === 'text' && s.text.includes('Following prose.')),
+      ).toBe(true);
+    });
+
+    it('handles two tables separated by prose', () => {
+      const md =
+        '| a | b |\n|---|---|\n| 1 | 2 |\n\nin between\n\n| x | y |\n|---|---|\n| 9 | 8 |';
+      const result = parseAgentMessage(md);
+      const tables = result.filter((s) => s.kind === 'table');
+      expect(tables).toHaveLength(2);
+    });
+
+    it('does not treat a single pipe-bracketed line as a table', () => {
+      const md = '| solo line |';
+      const result = parseAgentMessage(md);
+      expect(result.some((s) => s.kind === 'table')).toBe(false);
+    });
+
+    it('falls back to prose for malformed separator (mixed content)', () => {
+      // Second line LOOKS table-shaped but isn't a valid separator
+      // (cells aren't pure dash/colon). Should fall back to prose.
+      const md = '| a | b |\n| not | sep |\n| 1 | 2 |';
+      const result = parseAgentMessage(md);
+      expect(result.some((s) => s.kind === 'table')).toBe(false);
+    });
+  });
 });

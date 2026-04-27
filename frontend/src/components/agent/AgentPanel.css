@@ -276,6 +276,48 @@
     0 0 10px currentColor;
 }
 
+/* GFM table rendering. Variant tint via currentColor so the table
+   chrome stays consistent with the rest of the bubble (assistant,
+   user, failed, cancelled). border-collapse keeps the cell borders
+   single-stroke; subtle internal padding gives the cells breathing
+   room. The wrapping `display: block` + `overflow-x: auto` lets a
+   wide table scroll horizontally inside a narrow chat panel
+   instead of forcing the bubble to grow past its column. */
+.agent-message__table {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  /* Horizontal scroll for tables wider than the bubble — mostly for
+     dense GFM tables in narrow panels. */
+  overflow-x: auto;
+}
+
+.agent-message__table th,
+.agent-message__table td {
+  padding: 4px 8px;
+  /* Per-cell border in currentColor at low opacity reads as a faint
+     grid; the surrounding bubble outline carries the bright neon
+     glow so the table doesn't compete visually. */
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  /* Allow long cells to wrap inside the bubble rather than forcing
+     horizontal scroll until truly necessary. */
+  word-break: break-word;
+  vertical-align: top;
+  text-align: left;
+}
+
+.agent-message__table th {
+  /* Header row gets a tinted background + slightly stronger border
+     so the visual hierarchy matches a "real" table without bumping
+     the contrast too high. */
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-weight: 600;
+  border-bottom-width: 2px;
+}
+
 /* Variant chrome — fill, stroke, glow are all expressed via SVG
    styling on the unified outline path. Drop-shadow on the SVG (not
    the wrapper) keeps the halo on the outline only; the text content

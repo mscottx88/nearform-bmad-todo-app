@@ -38,7 +38,10 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../types/agent';
-import { parseAgentMessage } from '../../utils/parseAgentMessage';
+import {
+  parseAgentMessage,
+  type AgentMessageSegment,
+} from '../../utils/parseAgentMessage';
 import { RephraseProposal } from './RephraseProposal';
 import { TodoLink } from './TodoLink';
 
@@ -60,49 +63,96 @@ const TAIL_HEIGHT = 12;
  * as plain text — only the LLM's assistant turns carry markdown and
  * link references.
  */
+/**
+ * Render a single inline / block segment. Pulled out so the table
+ * cell renderer can recurse into pre-tokenized cell content without
+ * duplicating the switch.
+ */
+function renderSegment(
+  segment: AgentMessageSegment,
+  idx: number,
+): React.ReactNode {
+  switch (segment.kind) {
+    case 'text':
+      return <Fragment key={idx}>{segment.text}</Fragment>;
+    case 'bold':
+      return <strong key={idx}>{segment.text}</strong>;
+    case 'italic':
+      return <em key={idx}>{segment.text}</em>;
+    case 'code':
+      return (
+        <code key={idx} className="agent-message__inline-code">
+          {segment.text}
+        </code>
+      );
+    case 'heading':
+      if (segment.level === 1) {
+        return <h1 key={idx} className="agent-message__h1">{segment.text}</h1>;
+      }
+      if (segment.level === 2) {
+        return <h2 key={idx} className="agent-message__h2">{segment.text}</h2>;
+      }
+      return <h3 key={idx} className="agent-message__h3">{segment.text}</h3>;
+    case 'hr':
+      return <hr key={idx} className="agent-message__hr" />;
+    case 'todo-link':
+      return (
+        <TodoLink
+          key={idx}
+          label={segment.label}
+          todoId={segment.todoId}
+        />
+      );
+    case 'table':
+      return (
+        <table key={idx} className="agent-message__table">
+          <thead>
+            <tr>
+              {segment.headers.map((cell, ci) => (
+                <th
+                  key={ci}
+                  // Per-column alignment from the separator row's `:`
+                  // markers. `null` keeps the CSS default (left).
+                  style={
+                    segment.alignments[ci]
+                      ? { textAlign: segment.alignments[ci] ?? undefined }
+                      : undefined
+                  }
+                >
+                  {cell.map((s, si) => renderSegment(s, si))}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {segment.rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td
+                    key={ci}
+                    style={
+                      segment.alignments[ci]
+                        ? { textAlign: segment.alignments[ci] ?? undefined }
+                        : undefined
+                    }
+                  >
+                    {cell.map((s, si) => renderSegment(s, si))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+  }
+}
+
 function MessageBody({ message }: { message: ChatMessage }) {
   if (message.role !== 'assistant') {
     return <>{message.content}</>;
   }
   const segments = parseAgentMessage(message.content);
-  return (
-    <>
-      {segments.map((segment, idx) => {
-        switch (segment.kind) {
-          case 'text':
-            return <Fragment key={idx}>{segment.text}</Fragment>;
-          case 'bold':
-            return <strong key={idx}>{segment.text}</strong>;
-          case 'italic':
-            return <em key={idx}>{segment.text}</em>;
-          case 'code':
-            return (
-              <code key={idx} className="agent-message__inline-code">
-                {segment.text}
-              </code>
-            );
-          case 'heading':
-            if (segment.level === 1) {
-              return <h1 key={idx} className="agent-message__h1">{segment.text}</h1>;
-            }
-            if (segment.level === 2) {
-              return <h2 key={idx} className="agent-message__h2">{segment.text}</h2>;
-            }
-            return <h3 key={idx} className="agent-message__h3">{segment.text}</h3>;
-          case 'hr':
-            return <hr key={idx} className="agent-message__hr" />;
-          case 'todo-link':
-            return (
-              <TodoLink
-                key={idx}
-                label={segment.label}
-                todoId={segment.todoId}
-              />
-            );
-        }
-      })}
-    </>
-  );
+  return <>{segments.map((segment, idx) => renderSegment(segment, idx))}</>;
 }
 
 /**
