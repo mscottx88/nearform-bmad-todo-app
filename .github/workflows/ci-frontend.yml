@@ -34,8 +34,11 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
-      - name: Test
-        run: npx vitest run
+      - name: Test (with coverage gate)
+        # Coverage thresholds (70% lines/statements/functions, 60%
+        # branches) are enforced via vite.config.ts (test.coverage.thresholds).
+        # Vitest fails the run when any threshold is missed.
+        run: npx vitest run --coverage
 
       - name: Build
         run: npm run build

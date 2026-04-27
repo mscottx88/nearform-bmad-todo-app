@@ -1,4 +1,4 @@
-.PHONY: dev dev-db dev-backend dev-frontend test test-db-setup lint migrate migrate-generate
+.PHONY: dev dev-db dev-backend dev-frontend test test-coverage test-db-setup lint migrate migrate-generate
 
 # Tests MUST run against a database whose name contains "test" — the
 # `_clean_db` fixture in conftest.py wipes todos/creatures on every
@@ -22,6 +22,13 @@ dev: dev-db
 test: test-db-setup
 	cd backend && DATABASE_URL='$(TEST_DATABASE_URL)' uv run pytest
 	cd frontend && npx vitest run
+
+# Run both suites with coverage measurement and the 70% threshold gate.
+# Backend coverage config lives in backend/pyproject.toml ([tool.coverage.*]).
+# Frontend coverage config lives in frontend/vite.config.ts (test.coverage).
+test-coverage: test-db-setup
+	cd backend && DATABASE_URL='$(TEST_DATABASE_URL)' uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=70
+	cd frontend && npx vitest run --coverage
 
 # One-shot: create `todo_pond_test`, install pgvector, apply
 # migrations. Idempotent — safe to re-run. Uses the backend's own

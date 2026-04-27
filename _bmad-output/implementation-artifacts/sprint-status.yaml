@@ -56,6 +56,7 @@ development_status:
   1-2-3d-pond-scene-with-water-surface: done
   1-3-custom-neon-snake-cursor: done
   1-4-empty-pond-state-and-design-system: done
+  1-5-deployment-and-e2e-readiness: ready-for-dev  # NEW 2026-04-27 — closes the remaining open success-criteria gates: Docker deployment (backend + frontend Dockerfiles + extended docker-compose), ≥5 Playwright E2E golden-path tests, @axe-core/playwright a11y gate (zero critical WCAG), CI wiring. Independent of Epic 6; can ship anytime.
   epic-1-retrospective: pending
 
   # Epic 2: Todo Life on the Pond

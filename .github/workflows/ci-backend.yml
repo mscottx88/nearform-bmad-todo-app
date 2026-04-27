@@ -72,5 +72,9 @@ jobs:
         # 'todos' does not exist".
         run: uv run python -m alembic upgrade head
 
-      - name: Test
-        run: uv run pytest
+      - name: Test (with coverage gate)
+        # Coverage threshold (70%) is enforced via fail_under in
+        # backend/pyproject.toml ([tool.coverage.report]). The CLI flag
+        # below activates pytest-cov; the threshold itself comes from
+        # config so a future bump only needs one edit.
+        run: uv run pytest --cov=src --cov-report=term-missing

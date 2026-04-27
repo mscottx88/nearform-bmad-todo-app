@@ -29,6 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
   "mypy>=1.0.0",
   "ruff>=0.8.0",
   "pre-commit>=4.0.0"
@@ -116,7 +117,28 @@ addopts = [
 dev = [
     "httpx>=0.28.1",
     "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
     "mypy>=1.0.0",
     "ruff>=0.8.0",
     "pre-commit>=4.0.0",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "src/**/__init__.py",
+    "src/main.py",
+]
+
+[tool.coverage.report]
+# Story-level success-criterion gate: ≥70% meaningful coverage.
+fail_under = 70
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]
